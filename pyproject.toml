@@ -1,0 +1,69 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openbro"
+version = "0.1.0"
+description = "Tera Apna AI Bro - Open-Source Personal AI Agent"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Brijesh Chaudhary", email = "chaudharyji8482@gmail.com"},
+]
+keywords = ["ai", "agent", "llm", "assistant", "cli", "open-source"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "rich>=13.0",
+    "prompt-toolkit>=3.0",
+    "httpx>=0.27",
+    "pyyaml>=6.0",
+    "click>=8.0",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+ollama = ["ollama>=0.4"]
+anthropic = ["anthropic>=0.40"]
+openai = ["openai>=1.50"]
+all = ["ollama>=0.4", "anthropic>=0.40", "openai>=1.50"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+    "coverage>=7.0",
+]
+
+[project.scripts]
+openbro = "openbro.cli.main:main"
+
+[project.urls]
+Homepage = "https://github.com/brijeshch8482/openbro"
+Repository = "https://github.com/brijeshch8482/openbro"
+Issues = "https://github.com/brijeshch8482/openbro/issues"
+
+[tool.setuptools.packages.find]
+include = ["openbro*"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
