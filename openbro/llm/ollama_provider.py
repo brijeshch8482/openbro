@@ -1,5 +1,8 @@
 """Ollama LLM provider - offline/local models."""
 
+import json
+from collections.abc import Iterator
+
 import httpx
 
 from openbro.llm.base import LLMProvider, LLMResponse, Message
@@ -33,6 +36,35 @@ class OllamaProvider(LLMProvider):
             tool_calls=msg.get("tool_calls", []),
             model=self.model,
         )
+
+    def stream(self, messages: list[Message], tools: list[dict] | None = None) -> Iterator[str]:
+        payload = {
+            "model": self.model,
+            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "stream": True,
+        }
+
+        with httpx.stream(
+            "POST",
+            f"{self.base_url}/api/chat",
+            json=payload,
+            timeout=120,
+        ) as resp:
+            resp.raise_for_status()
+            for line in resp.iter_lines():
+                if line:
+                    data = json.loads(line)
+                    content = data.get("message", {}).get("content", "")
+                    if content:
+                        yield content
+
+    def is_available(self) -> bool:
+        """Check if Ollama is running."""
+        try:
+            resp = httpx.get(f"{self.base_url}/api/tags", timeout=3)
+            return resp.status_code == 200
+        except Exception:
+            return False
 
     def supports_tools(self) -> bool:
         return True

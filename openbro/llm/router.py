@@ -46,5 +46,17 @@ def create_provider(provider_name: str | None = None) -> LLMProvider:
             model=openai_cfg.get("model", "gpt-4o"),
         )
 
+    elif provider_name == "groq":
+        from openbro.llm.groq_provider import GroqProvider
+
+        groq_cfg = providers_config.get("groq", {})
+        api_key = groq_cfg.get("api_key")
+        if not api_key:
+            raise ValueError("Groq API key not set. Run: openbro config set providers.groq.api_key YOUR_KEY")
+        return GroqProvider(
+            api_key=api_key,
+            model=groq_cfg.get("model", "llama-3.3-70b-versatile"),
+        )
+
     else:
-        raise ValueError(f"Unknown provider: {provider_name}. Available: ollama, anthropic, openai")
+        raise ValueError(f"Unknown provider: {provider_name}. Available: ollama, anthropic, openai, groq")

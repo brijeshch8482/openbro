@@ -1,6 +1,7 @@
 """Base LLM provider interface."""
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 
@@ -26,6 +27,11 @@ class LLMProvider(ABC):
     @abstractmethod
     def chat(self, messages: list[Message], tools: list[dict] | None = None) -> LLMResponse:
         ...
+
+    def stream(self, messages: list[Message], tools: list[dict] | None = None) -> Iterator[str]:
+        """Stream response tokens. Default falls back to non-streaming."""
+        response = self.chat(messages, tools)
+        yield response.content
 
     @abstractmethod
     def supports_tools(self) -> bool:

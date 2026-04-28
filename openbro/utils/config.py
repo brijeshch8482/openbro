@@ -48,6 +48,10 @@ def default_config() -> dict:
                 "api_key": None,
                 "model": "gpt-4o",
             },
+            "groq": {
+                "api_key": None,
+                "model": "llama-3.3-70b-versatile",
+            },
         },
         "agent": {
             "system_prompt": "Tu OpenBro hai - ek helpful AI bro. Friendly aur casual reh, Hindi-English mix me baat kar. User ki help kar.",
