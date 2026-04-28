@@ -88,19 +88,37 @@ class Agent:
         self.history.append(Message(role="assistant", content=full_response))
 
     def _handle_tool_calls(self, response: LLMResponse) -> str:
+        from rich.prompt import Confirm
+
+        config = load_config()
+        confirm_dangerous = config.get("safety", {}).get("confirm_dangerous", True)
+
         results = []
         for tool_call in response.tool_calls:
             func = tool_call.get("function", {})
             name = func.get("name", "")
             args = func.get("arguments", {})
 
-            # Safety confirmation for dangerous tools
-            if name == "shell":
-                cmd = args.get("command", "")
-                console.print(f"[yellow]Tool: shell -> {cmd}[/yellow]")
+            risk = self.tool_registry.get_risk(name)
+            confirmed = True
 
-            console.print(f"[dim]Running tool: {name}...[/dim]")
-            result = self.tool_registry.execute(name, args)
+            if risk == "dangerous" and confirm_dangerous:
+                console.print(f"\n[bold red]Dangerous tool requested:[/bold red] {name}")
+                console.print(f"[yellow]Args:[/yellow] {args}")
+                if not Confirm.ask("Allow this action?", default=False):
+                    results.append(f"[{name}]: DENIED by user")
+                    self.tool_registry.execute(
+                        name + "_denied",
+                        args,
+                        confirmed=False,
+                    )
+                    continue
+            elif risk == "moderate":
+                console.print(f"[yellow]Tool: {name} ({risk})[/yellow] [dim]args: {args}[/dim]")
+            else:
+                console.print(f"[dim]Tool: {name} ({risk})[/dim]")
+
+            result = self.tool_registry.execute(name, args, confirmed=confirmed)
             results.append(f"[{name}]: {result}")
 
         # Send tool results back to LLM for final response

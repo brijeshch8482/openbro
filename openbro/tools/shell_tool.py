@@ -2,7 +2,7 @@
 
 import subprocess
 
-from openbro.tools.base import BaseTool
+from openbro.tools.base import BaseTool, RiskLevel
 
 BLOCKED_PATTERNS = [
     "rm -rf /",
@@ -17,6 +17,7 @@ BLOCKED_PATTERNS = [
 class ShellTool(BaseTool):
     name = "shell"
     description = "Execute shell commands on the system"
+    risk = RiskLevel.DANGEROUS
 
     def run(self, command: str) -> str:
         # Safety check

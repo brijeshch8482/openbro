@@ -2,12 +2,13 @@
 
 from pathlib import Path
 
-from openbro.tools.base import BaseTool
+from openbro.tools.base import BaseTool, RiskLevel
 
 
 class FileTool(BaseTool):
     name = "file_ops"
     description = "Read, write, list, and search files on the system"
+    risk = RiskLevel.MODERATE
 
     def run(self, action: str, path: str = ".", content: str = "", pattern: str = "") -> str:
         path = Path(path).expanduser()

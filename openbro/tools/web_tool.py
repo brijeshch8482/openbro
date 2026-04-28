@@ -2,12 +2,13 @@
 
 import httpx
 
-from openbro.tools.base import BaseTool
+from openbro.tools.base import BaseTool, RiskLevel
 
 
 class WebTool(BaseTool):
     name = "web"
     description = "Search the web or fetch content from a URL"
+    risk = RiskLevel.SAFE
 
     def run(self, action: str, url: str = "", query: str = "") -> str:
         if action == "fetch":

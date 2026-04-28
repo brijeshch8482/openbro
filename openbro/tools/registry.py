@@ -1,32 +1,88 @@
-"""Tool registry - manages all available tools."""
+"""Tool registry - manages all available tools with risk-based execution."""
 
+from openbro.tools.app_tool import AppTool
+from openbro.tools.base import BaseTool, RiskLevel
+from openbro.tools.browser_tool import BrowserTool
+from openbro.tools.clipboard_tool import ClipboardTool
+from openbro.tools.datetime_tool import DateTimeTool
+from openbro.tools.download_tool import DownloadTool
 from openbro.tools.file_tool import FileTool
+from openbro.tools.network_tool import NetworkTool
+from openbro.tools.notification_tool import NotificationTool
+from openbro.tools.process_tool import ProcessTool
+from openbro.tools.screenshot_tool import ScreenshotTool
 from openbro.tools.shell_tool import ShellTool
+from openbro.tools.system_control_tool import SystemControlTool
 from openbro.tools.system_tool import SystemTool
 from openbro.tools.web_tool import WebTool
+from openbro.utils.audit import log_tool_execution
+
+BUILTIN_TOOLS = [
+    AppTool,
+    BrowserTool,
+    ClipboardTool,
+    DateTimeTool,
+    DownloadTool,
+    FileTool,
+    NetworkTool,
+    NotificationTool,
+    ProcessTool,
+    ScreenshotTool,
+    ShellTool,
+    SystemControlTool,
+    SystemTool,
+    WebTool,
+]
 
 
 class ToolRegistry:
     def __init__(self):
-        self._tools: dict = {}
+        self._tools: dict[str, BaseTool] = {}
         self._register_builtins()
 
     def _register_builtins(self):
-        for tool_cls in [FileTool, ShellTool, SystemTool, WebTool]:
+        for tool_cls in BUILTIN_TOOLS:
             tool = tool_cls()
             self._tools[tool.name] = tool
 
     def get_tools_schema(self) -> list[dict]:
         return [tool.schema() for tool in self._tools.values()]
 
-    def execute(self, name: str, args: dict) -> str:
+    def get_tool(self, name: str) -> BaseTool | None:
+        return self._tools.get(name)
+
+    def get_risk(self, name: str) -> str:
         tool = self._tools.get(name)
         if not tool:
+            return RiskLevel.SAFE.value
+        return tool.risk.value if isinstance(tool.risk, RiskLevel) else str(tool.risk)
+
+    def execute(self, name: str, args: dict, confirmed: bool = False) -> str:
+        tool = self._tools.get(name)
+        if not tool:
+            log_tool_execution(name, args, "Unknown tool", risk="unknown")
             return f"Unknown tool: {name}"
         try:
-            return tool.run(**args)
+            result = tool.run(**args)
         except Exception as e:
-            return f"Tool error ({name}): {e}"
+            result = f"Tool error ({name}): {e}"
+
+        log_tool_execution(
+            name,
+            args,
+            result,
+            risk=self.get_risk(name),
+            confirmed=confirmed,
+        )
+        return result
 
     def list_tools(self) -> list[str]:
         return list(self._tools.keys())
+
+    def list_tools_by_risk(self) -> dict[str, list[str]]:
+        result = {"safe": [], "moderate": [], "dangerous": []}
+        for name, tool in self._tools.items():
+            risk = tool.risk.value if isinstance(tool.risk, RiskLevel) else str(tool.risk)
+            if risk in result:
+                result[risk].append(name)
+        return result

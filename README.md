@@ -10,13 +10,40 @@
 
 OpenBro is a free, open-source personal AI agent that runs on your machine with a single terminal command. No cloud subscription, no vendor lock-in. Your laptop, your control, your AI bro.
 
+## What Can OpenBro Do?
+
+OpenBro is a **full personal assistant** - not just a chatbot. Give it commands and it actually does the work:
+
+```
+You > Chrome open kar aur YouTube search kar 'arijit singh songs'
+Bro: Opening Chrome and searching YouTube...
+
+You > screenshot le aur D:/Screenshots me save kar
+Bro: Saved to D:/Screenshots/screenshot_20260428_140532.png
+
+You > spotify open kar de
+Bro: Opening Spotify...
+
+You > ye file https://example.com/file.pdf D:/Downloads me download kar
+Bro: Downloaded file.pdf (2.3 MB) to D:/Downloads
+
+You > volume 30 kar de
+Bro: Volume set to 30%
+
+You > screen lock kar
+Bro: [confirms first since dangerous] Screen locked
+```
+
 ## Features
 
+- **Personal Assistant** - Open apps, download files, control system, automate everything
 - **Multi-LLM Support** - Claude, GPT, Groq (free), Ollama (offline)
 - **Offline-First** - Works without internet using local models
 - **Auto Setup** - Ollama install, model download, everything automatic
+- **14 Built-in Tools** - Apps, browser, files, downloads, system control, and more
+- **Risk Classification** - Safe/Moderate/Dangerous tiers with confirmation prompts
+- **Audit Logging** - Every tool execution logged for transparency
 - **Terminal CLI** - Rich interactive REPL with Hinglish support
-- **Tool Calling** - File ops, shell commands, web search, system info
 - **Provider Agnostic** - Switch LLM with one config line
 - **Custom Storage** - Choose your drive/folder for data and models
 - **Cloud Backup** - Optional Google Drive/OneDrive/Dropbox sync
@@ -86,9 +113,10 @@ Step 2: Choose storage location
 | `models` | List downloaded offline models |
 | `pull` | Download a new offline model |
 | `pull <model>` | Download specific model |
-| `tools` | List available tools |
+| `tools` | List available tools (with risk levels) |
 | `storage` | View storage usage and paths |
 | `storage move` | Move data to another drive |
+| `audit` | Show recent tool execution log |
 | `clear` | Clear screen |
 | `reset` | Clear chat history |
 | `exit` | Exit OpenBro |
@@ -128,14 +156,35 @@ You > storage move
   Data moved to: E:\MyAI
 ```
 
-## Built-in Tools
+## Built-in Tools (14 total)
 
+OpenBro is a full personal assistant - tools are categorized by risk level:
+
+### Safe Tools (read-only, no confirmation needed)
+| Tool | What it does |
+|------|-------------|
+| `system_info` | OS, disk, and environment info |
+| `web` | Web search (DuckDuckGo) and URL fetching |
+| `network` | Ping, public/local IP, DNS lookup, connectivity |
+| `datetime` | Current time, date math, timezones |
+| `clipboard` | Read from / write to clipboard |
+| `screenshot` | Capture screen to file |
+| `notification` | Show desktop notifications |
+
+### Moderate Tools (modify files / open apps)
 | Tool | What it does |
 |------|-------------|
 | `file_ops` | Read, write, list, and search files |
-| `shell` | Execute shell commands (with safety blocks) |
-| `system_info` | OS, disk, and environment info |
-| `web` | Web search (DuckDuckGo) and URL fetching |
+| `app` | Open/close any installed application |
+| `browser` | Open URLs, search Google/YouTube/GitHub/etc. |
+| `download` | Download files from URLs to chosen folders |
+| `process` | List, find, kill processes |
+
+### Dangerous Tools (system-level - asks confirmation)
+| Tool | What it does |
+|------|-------------|
+| `shell` | Execute shell commands |
+| `system_control` | Lock/sleep/shutdown/restart, volume, mute |
 
 ## LLM Providers
 

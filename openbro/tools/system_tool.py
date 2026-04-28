@@ -3,12 +3,13 @@
 import os
 import platform
 
-from openbro.tools.base import BaseTool
+from openbro.tools.base import BaseTool, RiskLevel
 
 
 class SystemTool(BaseTool):
     name = "system_info"
     description = "Get system information like OS, CPU, memory, disk usage"
+    risk = RiskLevel.SAFE
 
     def run(self, info_type: str = "all") -> str:
         if info_type == "os":

@@ -25,6 +25,7 @@ COMMANDS = [
     "pull",
     "tools",
     "storage",
+    "audit",
     "clear",
     "reset",
 ]
@@ -138,6 +139,10 @@ def _handle_command(cmd: str, agent: Agent) -> bool:
         _show_models()
         return True
 
+    if cmd_lower == "audit":
+        _show_audit()
+        return True
+
     if cmd_lower == "clear":
         console.clear()
         print_banner()
@@ -167,6 +172,7 @@ def _show_help():
     table.add_row("pull <model>", "Download specific model (e.g. pull llama3.2:3b)")
     table.add_row("storage", "Show storage usage and paths")
     table.add_row("storage move", "Move data to a different drive/folder")
+    table.add_row("audit", "Show recent tool execution log")
     table.add_row("clear", "Clear screen")
     table.add_row("reset", "Clear chat history")
     table.add_row("exit / quit", "Exit OpenBro")
@@ -244,13 +250,23 @@ def _switch_model(model_name: str, agent: Agent):
 def _show_tools(agent: Agent):
     table = Table(title="Available Tools", border_style="cyan")
     table.add_column("Tool", style="bold")
+    table.add_column("Risk", justify="center")
     table.add_column("Description")
 
+    risk_styles = {"safe": "green", "moderate": "yellow", "dangerous": "red"}
+
     for schema in agent.tool_registry.get_tools_schema():
-        table.add_row(schema["name"], schema.get("description", ""))
+        name = schema["name"]
+        risk = agent.tool_registry.get_risk(name)
+        style = risk_styles.get(risk, "white")
+        table.add_row(name, f"[{style}]{risk}[/{style}]", schema.get("description", ""))
 
     console.print(table)
-    console.print()
+    console.print(
+        "\n[dim]Risk: safe = read-only, "
+        "moderate = modifies files/opens apps, "
+        "dangerous = system-level changes[/dim]\n"
+    )
 
 
 def _show_storage():
@@ -384,3 +400,37 @@ def _show_models():
 
     console.print(table)
     console.print(f"\n[dim]Total: {len(models)} model(s). Use 'pull' to download more.[/dim]\n")
+
+
+def _show_audit():
+    from openbro.utils.audit import get_recent_logs
+
+    logs = get_recent_logs(limit=20)
+    if not logs:
+        console.print("[dim]No audit log entries yet.[/dim]\n")
+        return
+
+    risk_styles = {"safe": "green", "moderate": "yellow", "dangerous": "red"}
+
+    table = Table(title="Recent Tool Executions (last 20)", border_style="cyan")
+    table.add_column("Time", style="dim", width=19)
+    table.add_column("Tool", style="bold")
+    table.add_column("Risk", justify="center")
+    table.add_column("Confirmed", justify="center")
+    table.add_column("Result", overflow="fold")
+
+    for entry in logs:
+        ts = entry.get("timestamp", "")[:19].replace("T", " ")
+        risk = entry.get("risk", "safe")
+        style = risk_styles.get(risk, "white")
+        confirmed = "yes" if entry.get("confirmed") else "auto"
+        table.add_row(
+            ts,
+            entry.get("tool", "?"),
+            f"[{style}]{risk}[/{style}]",
+            confirmed,
+            entry.get("result_preview", "")[:80],
+        )
+
+    console.print(table)
+    console.print()
