@@ -1,10 +1,18 @@
 """First-run wizard - interactive setup on first launch."""
 
+from pathlib import Path
+
 from rich.console import Console
 from rich.panel import Panel
-from rich.prompt import Prompt, Confirm
+from rich.prompt import Confirm, Prompt
+from rich.table import Table
 
-from openbro.utils.config import get_config_path, save_config, default_config
+from openbro.utils.config import get_config_dir, get_config_path, save_config, default_config
+from openbro.utils.storage import (
+    detect_cloud_folders,
+    get_available_drives,
+    set_storage_path,
+)
 
 console = Console()
 
@@ -30,6 +38,29 @@ def run_wizard():
     config = default_config()
 
     # Step 1: Choose LLM provider
+    _step_provider(config)
+
+    # Step 2: Storage location
+    _step_storage(config)
+
+    # Step 3: Safety settings
+    _step_safety(config)
+
+    # Step 4: Personality
+    _step_personality(config)
+
+    # Save config
+    save_config(config)
+
+    console.print("\n[bold green]Setup complete![/bold green]")
+    console.print(f"[dim]Config saved to: {get_config_path()}[/dim]")
+
+    storage_base = config.get("storage", {}).get("base_dir", str(get_config_dir()))
+    console.print(f"[dim]Data stored at: {storage_base}[/dim]")
+    console.print("\n[bold cyan]Type anything to start chatting with your AI Bro![/bold cyan]\n")
+
+
+def _step_provider(config: dict):
     console.print("[bold yellow]Step 1:[/bold yellow] Choose your LLM provider\n")
     console.print("  [cyan]1.[/cyan] Ollama (offline, free, local) [green]<-- recommended[/green]")
     console.print("  [cyan]2.[/cyan] Groq (cloud, free tier, ultra-fast)")
@@ -41,12 +72,9 @@ def run_wizard():
 
     if choice == "1":
         config["llm"]["provider"] = "ollama"
-        model = Prompt.ask(
-            "Ollama model",
-            default="qwen2.5-coder:7b",
-        )
+        model = Prompt.ask("Ollama model", default="qwen2.5-coder:7b")
         config["llm"]["model"] = model
-        console.print(f"[green]Ollama selected with model: {model}[/green]")
+        console.print(f"[green]Ollama selected: {model}[/green]")
         console.print("[dim]Make sure Ollama is running: ollama serve[/dim]\n")
 
     elif choice == "2":
@@ -56,7 +84,7 @@ def run_wizard():
         model = Prompt.ask("Model", default="llama-3.3-70b-versatile")
         config["providers"]["groq"]["model"] = model
         config["llm"]["model"] = model
-        console.print(f"[green]Groq selected with model: {model}[/green]\n")
+        console.print(f"[green]Groq selected: {model}[/green]\n")
 
     elif choice == "3":
         config["llm"]["provider"] = "anthropic"
@@ -65,7 +93,7 @@ def run_wizard():
         model = Prompt.ask("Model", default="claude-sonnet-4-20250514")
         config["providers"]["anthropic"]["model"] = model
         config["llm"]["model"] = model
-        console.print(f"[green]Anthropic selected with model: {model}[/green]\n")
+        console.print(f"[green]Anthropic selected: {model}[/green]\n")
 
     elif choice == "4":
         config["llm"]["provider"] = "openai"
@@ -74,18 +102,125 @@ def run_wizard():
         model = Prompt.ask("Model", default="gpt-4o")
         config["providers"]["openai"]["model"] = model
         config["llm"]["model"] = model
-        console.print(f"[green]OpenAI selected with model: {model}[/green]\n")
+        console.print(f"[green]OpenAI selected: {model}[/green]\n")
 
-    # Step 2: Safety settings
-    console.print("[bold yellow]Step 2:[/bold yellow] Safety settings\n")
+
+def _step_storage(config: dict):
+    console.print("[bold yellow]Step 2:[/bold yellow] Choose storage location\n")
+    console.print("[dim]OpenBro stores memory, chat history, cache, and logs locally.[/dim]")
+    console.print("[dim]Offline models (Ollama) are stored separately.[/dim]\n")
+
+    # Show available drives
+    drives = get_available_drives()
+    if drives:
+        table = Table(title="Available Drives", border_style="dim")
+        table.add_column("#", style="cyan", width=3)
+        table.add_column("Drive", style="bold")
+        table.add_column("Free Space", justify="right")
+        table.add_column("Total", justify="right")
+        table.add_column("Used %", justify="right")
+
+        for i, drive in enumerate(drives, 1):
+            used_style = "green" if drive["used_percent"] < 80 else "yellow" if drive["used_percent"] < 95 else "red"
+            table.add_row(
+                str(i),
+                drive["name"],
+                f"{drive['free_gb']} GB",
+                f"{drive['total_gb']} GB",
+                f"[{used_style}]{drive['used_percent']}%[/{used_style}]",
+            )
+        console.print(table)
+
+    # Check for cloud folders
+    cloud_folders = detect_cloud_folders()
+    if cloud_folders:
+        console.print("\n[dim]Cloud sync folders detected:[/dim]")
+        for cf in cloud_folders:
+            console.print(f"  [cyan]*[/cyan] {cf['name']}: {cf['path']} ({cf['free_gb']} GB free)")
+        console.print("[dim yellow]Note: Cloud folders have sync risks - use only for backup, not primary storage.[/dim yellow]")
+
+    console.print()
+
+    # Storage options
+    default_dir = str(get_config_dir())
+    console.print(f"  [cyan]1.[/cyan] Default ({default_dir}) [green]<-- recommended[/green]")
+    console.print("  [cyan]2.[/cyan] Custom path (choose your own drive/folder)")
+    if cloud_folders:
+        console.print("  [cyan]3.[/cyan] Cloud folder (Google Drive / OneDrive / Dropbox)")
+    console.print()
+
+    max_choice = "3" if cloud_folders else "2"
+    storage_choice = Prompt.ask(
+        "Select storage location",
+        choices=[str(i) for i in range(1, int(max_choice) + 1)],
+        default="1",
+    )
+
+    if storage_choice == "1":
+        config["storage"] = {"base_dir": default_dir, "models_dir": default_dir + "/models"}
+        console.print(f"[green]Data will be stored at: {default_dir}[/green]\n")
+
+    elif storage_choice == "2":
+        custom_path = Prompt.ask("Enter full path for OpenBro data", default="D:\\OpenBro-Data")
+        custom_path = str(Path(custom_path).resolve())
+        config["storage"] = {"base_dir": custom_path, "models_dir": custom_path + "/models"}
+
+        # Ask if models should go to different location
+        if Confirm.ask("Store offline models at a different location?", default=False):
+            models_path = Prompt.ask("Enter path for models", default=custom_path + "/models")
+            config["storage"]["models_dir"] = str(Path(models_path).resolve())
+
+        set_storage_path(
+            config["storage"]["base_dir"],
+            config["storage"]["models_dir"],
+        )
+        console.print(f"[green]Data: {config['storage']['base_dir']}[/green]")
+        console.print(f"[green]Models: {config['storage']['models_dir']}[/green]\n")
+
+    elif storage_choice == "3" and cloud_folders:
+        console.print("\n[yellow]Cloud storage warning:[/yellow]")
+        console.print("  - Data will sync to cloud (privacy consideration)")
+        console.print("  - Sync conflicts possible if used on multiple machines")
+        console.print("  - Offline mode won't work if cloud is syncing")
+        console.print("  - Best for: backup only, not primary storage\n")
+
+        if not Confirm.ask("Continue with cloud storage?", default=False):
+            # Fall back to default
+            config["storage"] = {"base_dir": default_dir, "models_dir": default_dir + "/models"}
+            console.print(f"[green]Using default: {default_dir}[/green]\n")
+        else:
+            for i, cf in enumerate(cloud_folders, 1):
+                console.print(f"  [cyan]{i}.[/cyan] {cf['name']}: {cf['path']}")
+
+            cf_choice = Prompt.ask(
+                "Select cloud folder",
+                choices=[str(i) for i in range(1, len(cloud_folders) + 1)],
+                default="1",
+            )
+            selected = cloud_folders[int(cf_choice) - 1]
+            cloud_base = str(Path(selected["path"]) / "OpenBro")
+            config["storage"] = {
+                "base_dir": cloud_base,
+                "models_dir": default_dir + "/models",  # Models stay local (too large for cloud)
+                "cloud_sync": True,
+                "cloud_provider": selected["name"],
+            }
+            set_storage_path(cloud_base, default_dir + "/models")
+            console.print(f"[green]Data: {cloud_base} (synced to {selected['name']})[/green]")
+            console.print(f"[green]Models: {default_dir}/models (local only - too large for cloud)[/green]\n")
+
+
+def _step_safety(config: dict):
+    console.print("[bold yellow]Step 3:[/bold yellow] Safety settings\n")
     confirm_dangerous = Confirm.ask(
         "Confirm before running dangerous commands?",
         default=True,
     )
     config["safety"]["confirm_dangerous"] = confirm_dangerous
 
-    # Step 3: Personality
-    console.print("\n[bold yellow]Step 3:[/bold yellow] Personality\n")
+
+def _step_personality(config: dict):
+    console.print("\n[bold yellow]Step 4:[/bold yellow] Personality\n")
     console.print("  [cyan]1.[/cyan] Hinglish Bro (default - Hindi+English mix)")
     console.print("  [cyan]2.[/cyan] English Professional")
     console.print("  [cyan]3.[/cyan] Hindi")
@@ -99,10 +234,3 @@ def run_wizard():
         "3": "Tu OpenBro hai - ek helpful AI assistant. Hindi me baat kar. User ki help kar. Short aur clear answers de.",
     }
     config["agent"]["system_prompt"] = prompts[personality]
-
-    # Save config
-    save_config(config)
-
-    console.print("\n[bold green]Setup complete![/bold green]")
-    console.print(f"[dim]Config saved to: {get_config_path()}[/dim]")
-    console.print("\n[bold cyan]Type anything to start chatting with your AI Bro![/bold cyan]\n")

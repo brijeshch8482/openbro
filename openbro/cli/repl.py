@@ -16,7 +16,7 @@ from openbro.utils.config import get_config_dir, load_config, save_config
 
 console = Console()
 
-COMMANDS = ["help", "exit", "quit", "config", "model", "tools", "history", "clear", "reset"]
+COMMANDS = ["help", "exit", "quit", "config", "model", "tools", "storage", "clear", "reset"]
 completer = WordCompleter(COMMANDS, ignore_case=True)
 
 
@@ -107,6 +107,14 @@ def _handle_command(cmd: str, agent: Agent) -> bool:
         _show_tools(agent)
         return True
 
+    if cmd_lower == "storage":
+        _show_storage()
+        return True
+
+    if cmd_lower == "storage move":
+        _move_storage()
+        return True
+
     if cmd_lower == "clear":
         console.clear()
         print_banner()
@@ -131,6 +139,8 @@ def _show_help():
     table.add_row("model", "Show current LLM model")
     table.add_row("model <name>", "Switch model (e.g. model gpt-4o)")
     table.add_row("tools", "List available tools")
+    table.add_row("storage", "Show storage usage and paths")
+    table.add_row("storage move", "Move data to a different drive/folder")
     table.add_row("clear", "Clear screen")
     table.add_row("reset", "Clear chat history")
     table.add_row("exit / quit", "Exit OpenBro")
@@ -211,3 +221,67 @@ def _show_tools(agent: Agent):
 
     console.print(table)
     console.print()
+
+
+def _show_storage():
+    from openbro.utils.storage import (
+        format_size,
+        get_available_drives,
+        get_storage_paths,
+        get_storage_size,
+    )
+
+    paths = get_storage_paths()
+    sizes = get_storage_size()
+
+    table = Table(title="Storage Info", border_style="cyan")
+    table.add_column("Item", style="bold")
+    table.add_column("Path")
+    table.add_column("Size", justify="right")
+
+    for key, path in paths.items():
+        size = format_size(sizes.get(key, 0))
+        table.add_row(key, str(path), size)
+
+    console.print(table)
+
+    # Show drive info
+    drives = get_available_drives()
+    if drives:
+        console.print()
+        dtable = Table(title="Drives", border_style="dim")
+        dtable.add_column("Drive", style="bold")
+        dtable.add_column("Free", justify="right")
+        dtable.add_column("Total", justify="right")
+        dtable.add_column("Used", justify="right")
+
+        for d in drives:
+            style = "green" if d["used_percent"] < 80 else "yellow" if d["used_percent"] < 95 else "red"
+            dtable.add_row(d["name"], f"{d['free_gb']} GB", f"{d['total_gb']} GB", f"[{style}]{d['used_percent']}%[/{style}]")
+
+        console.print(dtable)
+    console.print()
+
+
+def _move_storage():
+    from rich.prompt import Prompt
+
+    from openbro.utils.storage import get_storage_paths, migrate_storage, set_storage_path
+
+    current = get_storage_paths()
+    console.print(f"[dim]Current data location: {current['base']}[/dim]")
+
+    new_path = Prompt.ask("Enter new path for OpenBro data")
+    if not new_path:
+        return
+
+    from rich.prompt import Confirm
+    if Confirm.ask(f"Move all data from {current['base']} to {new_path}?", default=False):
+        try:
+            migrate_storage(str(current["base"]), new_path)
+            set_storage_path(new_path)
+            console.print(f"[green]Data moved to: {new_path}[/green]\n")
+        except Exception as e:
+            console.print(f"[red]Move failed: {e}[/red]\n")
+    else:
+        console.print("[dim]Cancelled.[/dim]\n")

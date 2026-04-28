@@ -57,6 +57,12 @@ def default_config() -> dict:
             "system_prompt": "Tu OpenBro hai - ek helpful AI bro. Friendly aur casual reh, Hindi-English mix me baat kar. User ki help kar.",
             "max_history": 50,
         },
+        "storage": {
+            "base_dir": str(Path.home() / ".openbro"),
+            "models_dir": str(Path.home() / ".openbro" / "models"),
+            "cloud_sync": False,
+            "cloud_provider": None,
+        },
         "safety": {
             "confirm_dangerous": True,
             "blocked_commands": ["rm -rf /", "format", "del /s /q"],
