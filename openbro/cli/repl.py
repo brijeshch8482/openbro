@@ -16,7 +16,7 @@ from openbro.utils.config import get_config_dir, load_config, save_config
 
 console = Console()
 
-COMMANDS = ["help", "exit", "quit", "config", "model", "tools", "storage", "clear", "reset"]
+COMMANDS = ["help", "exit", "quit", "config", "model", "models", "pull", "tools", "storage", "clear", "reset"]
 completer = WordCompleter(COMMANDS, ignore_case=True)
 
 
@@ -115,6 +115,18 @@ def _handle_command(cmd: str, agent: Agent) -> bool:
         _move_storage()
         return True
 
+    if cmd_lower == "pull":
+        _pull_model()
+        return True
+
+    if cmd_lower.startswith("pull "):
+        _pull_model(cmd[5:].strip())
+        return True
+
+    if cmd_lower == "models":
+        _show_models()
+        return True
+
     if cmd_lower == "clear":
         console.clear()
         print_banner()
@@ -139,6 +151,9 @@ def _show_help():
     table.add_row("model", "Show current LLM model")
     table.add_row("model <name>", "Switch model (e.g. model gpt-4o)")
     table.add_row("tools", "List available tools")
+    table.add_row("models", "List downloaded offline models")
+    table.add_row("pull", "Download a new offline model (interactive)")
+    table.add_row("pull <model>", "Download specific model (e.g. pull llama3.2:3b)")
     table.add_row("storage", "Show storage usage and paths")
     table.add_row("storage move", "Move data to a different drive/folder")
     table.add_row("clear", "Clear screen")
@@ -285,3 +300,61 @@ def _move_storage():
             console.print(f"[red]Move failed: {e}[/red]\n")
     else:
         console.print("[dim]Cancelled.[/dim]\n")
+
+
+def _pull_model(model_name: str | None = None):
+    from openbro.utils.ollama_setup import (
+        is_ollama_installed,
+        is_ollama_running,
+        pull_model,
+        show_model_picker,
+        start_ollama_server,
+    )
+
+    if not is_ollama_installed():
+        console.print("[red]Ollama not installed. Install from https://ollama.ai[/red]\n")
+        return
+
+    if not is_ollama_running():
+        console.print("[dim]Starting Ollama server...[/dim]")
+        if not start_ollama_server():
+            console.print("[red]Could not start Ollama. Run 'ollama serve' manually.[/red]\n")
+            return
+
+    if model_name:
+        pull_model(model_name)
+    else:
+        model = show_model_picker()
+        if model:
+            pull_model(model)
+    console.print()
+
+
+def _show_models():
+    from openbro.utils.ollama_setup import (
+        get_installed_models,
+        is_ollama_installed,
+        is_ollama_running,
+    )
+
+    if not is_ollama_installed():
+        console.print("[yellow]Ollama not installed. No offline models available.[/yellow]\n")
+        return
+
+    if not is_ollama_running():
+        console.print("[yellow]Ollama not running. Start with: ollama serve[/yellow]\n")
+        return
+
+    models = get_installed_models()
+    if not models:
+        console.print("[yellow]No models downloaded. Use 'pull' to download one.[/yellow]\n")
+        return
+
+    table = Table(title="Downloaded Models", border_style="cyan")
+    table.add_column("Model", style="bold")
+
+    for m in models:
+        table.add_row(m)
+
+    console.print(table)
+    console.print(f"\n[dim]Total: {len(models)} model(s). Use 'pull' to download more.[/dim]\n")

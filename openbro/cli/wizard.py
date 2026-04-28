@@ -72,10 +72,20 @@ def _step_provider(config: dict):
 
     if choice == "1":
         config["llm"]["provider"] = "ollama"
-        model = Prompt.ask("Ollama model", default="qwen2.5-coder:7b")
-        config["llm"]["model"] = model
-        console.print(f"[green]Ollama selected: {model}[/green]")
-        console.print("[dim]Make sure Ollama is running: ollama serve[/dim]\n")
+
+        # Auto-setup: install Ollama, pick model, download it
+        from openbro.utils.ollama_setup import full_ollama_setup
+
+        model = full_ollama_setup()
+        if model:
+            config["llm"]["model"] = model
+            console.print(f"\n[green]Ollama ready with model: {model}[/green]\n")
+        else:
+            # Fallback - user skipped, set default
+            model = "qwen2.5-coder:7b"
+            config["llm"]["model"] = model
+            console.print(f"[yellow]Ollama setup skipped. Default model set: {model}[/yellow]")
+            console.print("[dim]Download later: ollama pull qwen2.5-coder:7b[/dim]\n")
 
     elif choice == "2":
         config["llm"]["provider"] = "groq"
