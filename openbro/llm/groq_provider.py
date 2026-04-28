@@ -34,13 +34,15 @@ class GroqProvider(LLMProvider):
         tool_calls = []
         if choice.get("tool_calls"):
             for tc in choice["tool_calls"]:
-                tool_calls.append({
-                    "id": tc["id"],
-                    "function": {
-                        "name": tc["function"]["name"],
-                        "arguments": json.loads(tc["function"]["arguments"]),
-                    },
-                })
+                tool_calls.append(
+                    {
+                        "id": tc["id"],
+                        "function": {
+                            "name": tc["function"]["name"],
+                            "arguments": json.loads(tc["function"]["arguments"]),
+                        },
+                    }
+                )
 
         return LLMResponse(
             content=choice.get("content", "") or "",

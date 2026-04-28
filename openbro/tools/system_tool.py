@@ -36,6 +36,7 @@ class SystemTool(BaseTool):
     def _disk_info(self) -> str:
         try:
             import shutil
+
             total, used, free = shutil.disk_usage("/")
             return (
                 f"Disk Usage:\n"

@@ -120,4 +120,4 @@ class Agent:
     def _trim_history(self):
         if len(self.history) > self.max_history + 1:
             system = self.history[0]
-            self.history = [system] + self.history[-(self.max_history):]
+            self.history = [system] + self.history[-(self.max_history) :]

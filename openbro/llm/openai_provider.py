@@ -19,9 +19,7 @@ class OpenAIProvider(LLMProvider):
 
         kwargs = {"model": self.model, "messages": chat_msgs}
         if tools:
-            kwargs["tools"] = [
-                {"type": "function", "function": t} for t in tools
-            ]
+            kwargs["tools"] = [{"type": "function", "function": t} for t in tools]
 
         resp = self.client.chat.completions.create(**kwargs)
         choice = resp.choices[0].message
@@ -29,13 +27,15 @@ class OpenAIProvider(LLMProvider):
         tool_calls = []
         if choice.tool_calls:
             for tc in choice.tool_calls:
-                tool_calls.append({
-                    "id": tc.id,
-                    "function": {
-                        "name": tc.function.name,
-                        "arguments": json.loads(tc.function.arguments),
-                    },
-                })
+                tool_calls.append(
+                    {
+                        "id": tc.id,
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": json.loads(tc.function.arguments),
+                        },
+                    }
+                )
 
         return LLMResponse(
             content=choice.content or "",

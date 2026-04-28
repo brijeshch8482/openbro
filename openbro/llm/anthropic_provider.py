@@ -39,10 +39,12 @@ class AnthropicProvider(LLMProvider):
             if block.type == "text":
                 content += block.text
             elif block.type == "tool_use":
-                tool_calls.append({
-                    "id": block.id,
-                    "function": {"name": block.name, "arguments": block.input},
-                })
+                tool_calls.append(
+                    {
+                        "id": block.id,
+                        "function": {"name": block.name, "arguments": block.input},
+                    }
+                )
 
         return LLMResponse(
             content=content,

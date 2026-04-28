@@ -25,8 +25,7 @@ class LLMProvider(ABC):
     """Base class for all LLM providers."""
 
     @abstractmethod
-    def chat(self, messages: list[Message], tools: list[dict] | None = None) -> LLMResponse:
-        ...
+    def chat(self, messages: list[Message], tools: list[dict] | None = None) -> LLMResponse: ...
 
     def stream(self, messages: list[Message], tools: list[dict] | None = None) -> Iterator[str]:
         """Stream response tokens. Default falls back to non-streaming."""
@@ -34,9 +33,7 @@ class LLMProvider(ABC):
         yield response.content
 
     @abstractmethod
-    def supports_tools(self) -> bool:
-        ...
+    def supports_tools(self) -> bool: ...
 
     @abstractmethod
-    def name(self) -> str:
-        ...
+    def name(self) -> str: ...

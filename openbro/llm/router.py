@@ -44,8 +44,7 @@ def create_provider(provider_name: str | None = None) -> LLMProvider:
         api_key = openai_cfg.get("api_key")
         if not api_key:
             raise ValueError(
-                "OpenAI API key not set. Run: openbro"
-                " config set providers.openai.api_key YOUR_KEY"
+                "OpenAI API key not set. Run: openbro config set providers.openai.api_key YOUR_KEY"
             )
         return OpenAIProvider(
             api_key=api_key,
@@ -59,8 +58,7 @@ def create_provider(provider_name: str | None = None) -> LLMProvider:
         api_key = groq_cfg.get("api_key")
         if not api_key:
             raise ValueError(
-                "Groq API key not set. Run: openbro"
-                " config set providers.groq.api_key YOUR_KEY"
+                "Groq API key not set. Run: openbro config set providers.groq.api_key YOUR_KEY"
             )
         return GroqProvider(
             api_key=api_key,
@@ -69,6 +67,5 @@ def create_provider(provider_name: str | None = None) -> LLMProvider:
 
     else:
         raise ValueError(
-            f"Unknown provider: {provider_name}."
-            " Available: ollama, anthropic, openai, groq"
+            f"Unknown provider: {provider_name}. Available: ollama, anthropic, openai, groq"
         )

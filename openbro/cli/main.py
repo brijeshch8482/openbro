@@ -8,7 +8,8 @@ from openbro import __version__
 @click.command()
 @click.version_option(version=__version__, prog_name="OpenBro")
 @click.option(
-    "--provider", "-p",
+    "--provider",
+    "-p",
     type=click.Choice(["ollama", "anthropic", "openai"]),
     help="LLM provider to use",
 )
@@ -22,12 +23,14 @@ def main(provider, model, offline, setup):
     """
     if setup:
         from openbro.cli.wizard import run_wizard
+
         run_wizard()
         return
 
     # Apply CLI overrides to config
     if provider or model or offline:
         from openbro.utils.config import load_config, save_config
+
         config = load_config()
         if provider:
             config["llm"]["provider"] = provider
@@ -38,6 +41,7 @@ def main(provider, model, offline, setup):
         save_config(config)
 
     from openbro.cli.repl import start_repl
+
     start_repl()
 
 

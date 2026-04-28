@@ -47,10 +47,7 @@ class WebTool(BaseTool):
                 if isinstance(topic, dict) and topic.get("Text"):
                     results.append(f"- {topic['Text'][:200]}")
             if not results:
-                return (
-                    f"No instant results for '{query}'."
-                    " Try a more specific query."
-                )
+                return f"No instant results for '{query}'. Try a more specific query."
             return "\n".join(results)
         except Exception as e:
             return f"Search error: {e}"

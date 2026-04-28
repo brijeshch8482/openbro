@@ -16,8 +16,17 @@ from openbro.utils.config import get_config_dir, load_config, save_config
 console = Console()
 
 COMMANDS = [
-    "help", "exit", "quit", "config", "model", "models",
-    "pull", "tools", "storage", "clear", "reset",
+    "help",
+    "exit",
+    "quit",
+    "config",
+    "model",
+    "models",
+    "pull",
+    "tools",
+    "storage",
+    "clear",
+    "reset",
 ]
 completer = WordCompleter(COMMANDS, ignore_case=True)
 
@@ -169,6 +178,7 @@ def _show_help():
 def _show_config():
     config = load_config()
     import yaml
+
     config_str = yaml.dump(config, default_flow_style=False)
     console.print(Syntax(config_str, "yaml", theme="monokai"))
 
@@ -219,14 +229,14 @@ def _switch_model(model_name: str, agent: Agent):
             "openbro.llm.router", fromlist=["create_provider"]
         ).create_provider(model_name)
         console.print(
-            f"[green]Switched to provider:"
-            f" {model_name} ({agent.provider.name()})[/green]\n"
+            f"[green]Switched to provider: {model_name} ({agent.provider.name()})[/green]\n"
         )
     else:
         # Just change the model name
         config["llm"]["model"] = model_name
         save_config(config)
         from openbro.llm.router import create_provider
+
         agent.provider = create_provider()
         console.print(f"[green]Switched model to: {agent.provider.name()}[/green]\n")
 
@@ -306,6 +316,7 @@ def _move_storage():
         return
 
     from rich.prompt import Confirm
+
     if Confirm.ask(f"Move all data from {current['base']} to {new_path}?", default=False):
         try:
             migrate_storage(str(current["base"]), new_path)

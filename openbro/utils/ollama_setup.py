@@ -213,8 +213,7 @@ def install_ollama() -> bool:
         console.print("\n[cyan]Installing Ollama for Linux...[/cyan]")
         if not Confirm.ask("Run the official Ollama install script?", default=True):
             console.print(
-                "[dim]Install manually: curl -fsSL"
-                " https://ollama.ai/install.sh | sh[/dim]"
+                "[dim]Install manually: curl -fsSL https://ollama.ai/install.sh | sh[/dim]"
             )
             return False
 
@@ -297,8 +296,7 @@ def show_model_picker() -> str | None:
 
             if total_ram < 8:
                 console.print(
-                    "[yellow]Low RAM detected - pick a"
-                    " smaller model (1.5b or 3b)[/yellow]"
+                    "[yellow]Low RAM detected - pick a smaller model (1.5b or 3b)[/yellow]"
                 )
             console.print()
     except Exception:
@@ -316,8 +314,7 @@ def full_ollama_setup() -> str | None:
     """
     console.print("\n[bold yellow]Offline Model Setup[/bold yellow]")
     console.print(
-        "[dim]Ollama lets you run AI models locally"
-        " - no internet needed, fully private.[/dim]\n"
+        "[dim]Ollama lets you run AI models locally - no internet needed, fully private.[/dim]\n"
     )
 
     # Step 1: Check/Install Ollama
@@ -325,8 +322,7 @@ def full_ollama_setup() -> str | None:
         console.print("[yellow]Ollama is not installed.[/yellow]")
         if not Confirm.ask("Install Ollama now? (needed for offline mode)", default=True):
             console.print(
-                "[dim]Skipped. You can install later and"
-                " use cloud providers for now.[/dim]"
+                "[dim]Skipped. You can install later and use cloud providers for now.[/dim]"
             )
             return None
         if not install_ollama():
@@ -354,8 +350,7 @@ def full_ollama_setup() -> str | None:
         pull_model(model)
     else:
         console.print(
-            f"[yellow]Ollama not running. Download model"
-            f" later: ollama pull {model}[/yellow]"
+            f"[yellow]Ollama not running. Download model later: ollama pull {model}[/yellow]"
         )
 
     return model

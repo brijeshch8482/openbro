@@ -43,13 +43,15 @@ def get_available_drives() -> list[dict]:
             if os.path.exists(drive_path):
                 try:
                     total, used, free = shutil.disk_usage(drive_path)
-                    drives.append({
-                        "path": drive_path,
-                        "name": f"{letter}:",
-                        "total_gb": round(total / (1024**3), 1),
-                        "free_gb": round(free / (1024**3), 1),
-                        "used_percent": round((used / total) * 100, 1),
-                    })
+                    drives.append(
+                        {
+                            "path": drive_path,
+                            "name": f"{letter}:",
+                            "total_gb": round(total / (1024**3), 1),
+                            "free_gb": round(free / (1024**3), 1),
+                            "used_percent": round((used / total) * 100, 1),
+                        }
+                    )
                 except (PermissionError, OSError):
                     pass
     else:
@@ -58,13 +60,15 @@ def get_available_drives() -> list[dict]:
             if os.path.exists(mount):
                 try:
                     total, used, free = shutil.disk_usage(mount)
-                    drives.append({
-                        "path": mount,
-                        "name": mount,
-                        "total_gb": round(total / (1024**3), 1),
-                        "free_gb": round(free / (1024**3), 1),
-                        "used_percent": round((used / total) * 100, 1),
-                    })
+                    drives.append(
+                        {
+                            "path": mount,
+                            "name": mount,
+                            "total_gb": round(total / (1024**3), 1),
+                            "free_gb": round(free / (1024**3), 1),
+                            "used_percent": round((used / total) * 100, 1),
+                        }
+                    )
                 except (PermissionError, OSError):
                     pass
 
@@ -96,17 +100,21 @@ def detect_cloud_folders() -> list[dict]:
         if path.exists() and path.is_dir():
             try:
                 total, used, free = shutil.disk_usage(str(path))
-                cloud_folders.append({
-                    "name": name,
-                    "path": str(path),
-                    "free_gb": round(free / (1024**3), 1),
-                })
+                cloud_folders.append(
+                    {
+                        "name": name,
+                        "path": str(path),
+                        "free_gb": round(free / (1024**3), 1),
+                    }
+                )
             except (PermissionError, OSError):
-                cloud_folders.append({
-                    "name": name,
-                    "path": str(path),
-                    "free_gb": 0,
-                })
+                cloud_folders.append(
+                    {
+                        "name": name,
+                        "path": str(path),
+                        "free_gb": 0,
+                    }
+                )
 
     return cloud_folders
 

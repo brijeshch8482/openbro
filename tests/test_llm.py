@@ -30,5 +30,6 @@ def test_llm_response():
 
 def test_router_unknown_provider():
     from openbro.llm.router import create_provider
+
     with pytest.raises(ValueError, match="Unknown provider"):
         create_provider("nonexistent_provider")

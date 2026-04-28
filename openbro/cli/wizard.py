@@ -31,11 +31,13 @@ def needs_setup() -> bool:
 
 
 def run_wizard():
-    console.print(Panel(
-        BANNER,
-        title="[bold cyan]Welcome to OpenBro![/bold cyan]",
-        border_style="cyan",
-    ))
+    console.print(
+        Panel(
+            BANNER,
+            title="[bold cyan]Welcome to OpenBro![/bold cyan]",
+            border_style="cyan",
+        )
+    )
     console.print("[bold]Tera Apna AI Bro - Open-Source Personal AI Agent[/bold]")
     console.print("[dim]Let's set you up in under 2 minutes.\n[/dim]")
 
@@ -231,8 +233,7 @@ def _step_storage(config: dict):
             set_storage_path(cloud_base, default_dir + "/models")
             console.print(f"[green]Data: {cloud_base} (synced to {selected['name']})[/green]")
             console.print(
-                f"[green]Models: {default_dir}/models"
-                f" (local only - too large for cloud)[/green]\n"
+                f"[green]Models: {default_dir}/models (local only - too large for cloud)[/green]\n"
             )
 
 
