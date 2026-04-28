@@ -1,10 +1,10 @@
 """Tests for built-in tools."""
 
 from openbro.tools.file_tool import FileTool
+from openbro.tools.registry import ToolRegistry
 from openbro.tools.shell_tool import ShellTool
 from openbro.tools.system_tool import SystemTool
 from openbro.tools.web_tool import WebTool
-from openbro.tools.registry import ToolRegistry
 
 
 def test_file_tool_list():

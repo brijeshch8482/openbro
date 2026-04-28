@@ -4,7 +4,6 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.history import FileHistory
 from rich.console import Console
-from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
@@ -16,7 +15,10 @@ from openbro.utils.config import get_config_dir, load_config, save_config
 
 console = Console()
 
-COMMANDS = ["help", "exit", "quit", "config", "model", "models", "pull", "tools", "storage", "clear", "reset"]
+COMMANDS = [
+    "help", "exit", "quit", "config", "model", "models",
+    "pull", "tools", "storage", "clear", "reset",
+]
 completer = WordCompleter(COMMANDS, ignore_case=True)
 
 
@@ -59,7 +61,7 @@ def start_repl():
                 continue
 
             # Chat with agent - use streaming for real-time output
-            console.print(f"\n[bold green]Bro:[/bold green] ", end="")
+            console.print("\n[bold green]Bro:[/bold green] ", end="")
             response = ""
             try:
                 for token in agent.stream_chat(user_input):
@@ -216,7 +218,10 @@ def _switch_model(model_name: str, agent: Agent):
         agent.provider = __import__(
             "openbro.llm.router", fromlist=["create_provider"]
         ).create_provider(model_name)
-        console.print(f"[green]Switched to provider: {model_name} ({agent.provider.name()})[/green]\n")
+        console.print(
+            f"[green]Switched to provider:"
+            f" {model_name} ({agent.provider.name()})[/green]\n"
+        )
     else:
         # Just change the model name
         config["llm"]["model"] = model_name
@@ -271,8 +276,18 @@ def _show_storage():
         dtable.add_column("Used", justify="right")
 
         for d in drives:
-            style = "green" if d["used_percent"] < 80 else "yellow" if d["used_percent"] < 95 else "red"
-            dtable.add_row(d["name"], f"{d['free_gb']} GB", f"{d['total_gb']} GB", f"[{style}]{d['used_percent']}%[/{style}]")
+            if d["used_percent"] < 80:
+                style = "green"
+            elif d["used_percent"] < 95:
+                style = "yellow"
+            else:
+                style = "red"
+            dtable.add_row(
+                d["name"],
+                f"{d['free_gb']} GB",
+                f"{d['total_gb']} GB",
+                f"[{style}]{d['used_percent']}%[/{style}]",
+            )
 
         console.print(dtable)
     console.print()

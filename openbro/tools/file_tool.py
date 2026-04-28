@@ -55,8 +55,14 @@ class FileTool(BaseTool):
                         "description": "Action to perform",
                     },
                     "path": {"type": "string", "description": "File or directory path"},
-                    "content": {"type": "string", "description": "Content to write (for write action)"},
-                    "pattern": {"type": "string", "description": "Glob pattern (for search action)"},
+                    "content": {
+                        "type": "string",
+                        "description": "Content to write (for write action)",
+                    },
+                    "pattern": {
+                        "type": "string",
+                        "description": "Glob pattern (for search action)",
+                    },
                 },
                 "required": ["action"],
             },

@@ -51,7 +51,11 @@ class Agent:
         try:
             response = self.provider.chat(self.history, tools=tools)
         except ConnectionError:
-            return "Bro, LLM se connect nahi ho pa raha. Check kar Ollama chal raha hai ya nahi (ollama serve)."
+            return (
+                "Bro, LLM se connect nahi ho pa raha."
+                " Check kar Ollama chal raha hai ya"
+                " nahi (ollama serve)."
+            )
         except Exception as e:
             error_msg = str(e)
             if "401" in error_msg or "Unauthorized" in error_msg:

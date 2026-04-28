@@ -7,7 +7,7 @@ from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
-from openbro.utils.config import get_config_dir, get_config_path, save_config, default_config
+from openbro.utils.config import default_config, get_config_dir, get_config_path, save_config
 from openbro.utils.storage import (
     detect_cloud_folders,
     get_available_drives,
@@ -31,7 +31,11 @@ def needs_setup() -> bool:
 
 
 def run_wizard():
-    console.print(Panel(BANNER, title="[bold cyan]Welcome to OpenBro![/bold cyan]", border_style="cyan"))
+    console.print(Panel(
+        BANNER,
+        title="[bold cyan]Welcome to OpenBro![/bold cyan]",
+        border_style="cyan",
+    ))
     console.print("[bold]Tera Apna AI Bro - Open-Source Personal AI Agent[/bold]")
     console.print("[dim]Let's set you up in under 2 minutes.\n[/dim]")
 
@@ -131,7 +135,12 @@ def _step_storage(config: dict):
         table.add_column("Used %", justify="right")
 
         for i, drive in enumerate(drives, 1):
-            used_style = "green" if drive["used_percent"] < 80 else "yellow" if drive["used_percent"] < 95 else "red"
+            if drive["used_percent"] < 80:
+                used_style = "green"
+            elif drive["used_percent"] < 95:
+                used_style = "yellow"
+            else:
+                used_style = "red"
             table.add_row(
                 str(i),
                 drive["name"],
@@ -147,7 +156,11 @@ def _step_storage(config: dict):
         console.print("\n[dim]Cloud sync folders detected:[/dim]")
         for cf in cloud_folders:
             console.print(f"  [cyan]*[/cyan] {cf['name']}: {cf['path']} ({cf['free_gb']} GB free)")
-        console.print("[dim yellow]Note: Cloud folders have sync risks - use only for backup, not primary storage.[/dim yellow]")
+        console.print(
+            "[dim yellow]Note: Cloud folders have sync risks"
+            " - use only for backup, not primary storage."
+            "[/dim yellow]"
+        )
 
     console.print()
 
@@ -217,7 +230,10 @@ def _step_storage(config: dict):
             }
             set_storage_path(cloud_base, default_dir + "/models")
             console.print(f"[green]Data: {cloud_base} (synced to {selected['name']})[/green]")
-            console.print(f"[green]Models: {default_dir}/models (local only - too large for cloud)[/green]\n")
+            console.print(
+                f"[green]Models: {default_dir}/models"
+                f" (local only - too large for cloud)[/green]\n"
+            )
 
 
 def _step_safety(config: dict):
@@ -239,8 +255,20 @@ def _step_personality(config: dict):
     personality = Prompt.ask("Select personality", choices=["1", "2", "3"], default="1")
 
     prompts = {
-        "1": "Tu OpenBro hai - ek helpful AI bro. Friendly aur casual reh, Hindi-English mix me baat kar. User ki help kar. Short aur to-the-point answers de.",
-        "2": "You are OpenBro, a helpful AI assistant. Be professional, clear, and concise. Help the user with their tasks efficiently.",
-        "3": "Tu OpenBro hai - ek helpful AI assistant. Hindi me baat kar. User ki help kar. Short aur clear answers de.",
+        "1": (
+            "Tu OpenBro hai - ek helpful AI bro. Friendly aur"
+            " casual reh, Hindi-English mix me baat kar. User"
+            " ki help kar. Short aur to-the-point answers de."
+        ),
+        "2": (
+            "You are OpenBro, a helpful AI assistant. Be"
+            " professional, clear, and concise. Help the"
+            " user with their tasks efficiently."
+        ),
+        "3": (
+            "Tu OpenBro hai - ek helpful AI assistant."
+            " Hindi me baat kar. User ki help kar."
+            " Short aur clear answers de."
+        ),
     }
     config["agent"]["system_prompt"] = prompts[personality]

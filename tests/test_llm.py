@@ -2,7 +2,7 @@
 
 import pytest
 
-from openbro.llm.base import Message, LLMResponse
+from openbro.llm.base import LLMResponse, Message
 
 
 def test_message_creation():
@@ -13,7 +13,11 @@ def test_message_creation():
 
 
 def test_message_with_tool_calls():
-    msg = Message(role="assistant", content="", tool_calls=[{"id": "1", "function": {"name": "test"}}])
+    msg = Message(
+        role="assistant",
+        content="",
+        tool_calls=[{"id": "1", "function": {"name": "test"}}],
+    )
     assert len(msg.tool_calls) == 1
 
 

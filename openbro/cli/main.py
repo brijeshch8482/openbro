@@ -7,7 +7,11 @@ from openbro import __version__
 
 @click.command()
 @click.version_option(version=__version__, prog_name="OpenBro")
-@click.option("--provider", "-p", type=click.Choice(["ollama", "anthropic", "openai"]), help="LLM provider to use")
+@click.option(
+    "--provider", "-p",
+    type=click.Choice(["ollama", "anthropic", "openai"]),
+    help="LLM provider to use",
+)
 @click.option("--model", "-m", help="Model name to use")
 @click.option("--offline", is_flag=True, help="Force offline mode (Ollama only)")
 @click.option("--setup", is_flag=True, help="Re-run first-time setup wizard")

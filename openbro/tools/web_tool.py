@@ -46,7 +46,12 @@ class WebTool(BaseTool):
             for topic in data.get("RelatedTopics", [])[:5]:
                 if isinstance(topic, dict) and topic.get("Text"):
                     results.append(f"- {topic['Text'][:200]}")
-            return "\n".join(results) if results else f"No instant results for '{query}'. Try a more specific query."
+            if not results:
+                return (
+                    f"No instant results for '{query}'."
+                    " Try a more specific query."
+                )
+            return "\n".join(results)
         except Exception as e:
             return f"Search error: {e}"
 

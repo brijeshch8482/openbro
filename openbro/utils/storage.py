@@ -4,7 +4,7 @@ import os
 import shutil
 from pathlib import Path
 
-from openbro.utils.config import load_config, save_config, get_config_dir
+from openbro.utils.config import get_config_dir, load_config, save_config
 
 
 def get_storage_paths() -> dict:

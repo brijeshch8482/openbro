@@ -4,12 +4,11 @@ import os
 import platform
 import shutil
 import subprocess
-import sys
 import time
 
 import httpx
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, DownloadColumn
+from rich.progress import BarColumn, DownloadColumn, Progress, SpinnerColumn, TextColumn
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
@@ -213,7 +212,10 @@ def install_ollama() -> bool:
     elif system == "Linux":
         console.print("\n[cyan]Installing Ollama for Linux...[/cyan]")
         if not Confirm.ask("Run the official Ollama install script?", default=True):
-            console.print("[dim]Install manually: curl -fsSL https://ollama.ai/install.sh | sh[/dim]")
+            console.print(
+                "[dim]Install manually: curl -fsSL"
+                " https://ollama.ai/install.sh | sh[/dim]"
+            )
             return False
 
         try:
@@ -294,7 +296,10 @@ def show_model_picker() -> str | None:
             console.print(f"[dim]Your system RAM: {total_ram:.1f} GB[/dim]")
 
             if total_ram < 8:
-                console.print("[yellow]Low RAM detected - pick a smaller model (1.5b or 3b)[/yellow]")
+                console.print(
+                    "[yellow]Low RAM detected - pick a"
+                    " smaller model (1.5b or 3b)[/yellow]"
+                )
             console.print()
     except Exception:
         pass
@@ -310,13 +315,19 @@ def full_ollama_setup() -> str | None:
     Returns the selected model name or None if setup was skipped.
     """
     console.print("\n[bold yellow]Offline Model Setup[/bold yellow]")
-    console.print("[dim]Ollama lets you run AI models locally - no internet needed, fully private.[/dim]\n")
+    console.print(
+        "[dim]Ollama lets you run AI models locally"
+        " - no internet needed, fully private.[/dim]\n"
+    )
 
     # Step 1: Check/Install Ollama
     if not is_ollama_installed():
         console.print("[yellow]Ollama is not installed.[/yellow]")
         if not Confirm.ask("Install Ollama now? (needed for offline mode)", default=True):
-            console.print("[dim]Skipped. You can install later and use cloud providers for now.[/dim]")
+            console.print(
+                "[dim]Skipped. You can install later and"
+                " use cloud providers for now.[/dim]"
+            )
             return None
         if not install_ollama():
             return None
@@ -342,6 +353,9 @@ def full_ollama_setup() -> str | None:
     if is_ollama_running():
         pull_model(model)
     else:
-        console.print(f"[yellow]Ollama not running. Download model later: ollama pull {model}[/yellow]")
+        console.print(
+            f"[yellow]Ollama not running. Download model"
+            f" later: ollama pull {model}[/yellow]"
+        )
 
     return model

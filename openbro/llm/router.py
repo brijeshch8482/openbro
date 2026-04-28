@@ -28,7 +28,10 @@ def create_provider(provider_name: str | None = None) -> LLMProvider:
         anthropic_cfg = providers_config.get("anthropic", {})
         api_key = anthropic_cfg.get("api_key")
         if not api_key:
-            raise ValueError("Anthropic API key not set. Run: openbro config set providers.anthropic.api_key YOUR_KEY")
+            raise ValueError(
+                "Anthropic API key not set. Run: openbro"
+                " config set providers.anthropic.api_key YOUR_KEY"
+            )
         return AnthropicProvider(
             api_key=api_key,
             model=anthropic_cfg.get("model", "claude-sonnet-4-20250514"),
@@ -40,7 +43,10 @@ def create_provider(provider_name: str | None = None) -> LLMProvider:
         openai_cfg = providers_config.get("openai", {})
         api_key = openai_cfg.get("api_key")
         if not api_key:
-            raise ValueError("OpenAI API key not set. Run: openbro config set providers.openai.api_key YOUR_KEY")
+            raise ValueError(
+                "OpenAI API key not set. Run: openbro"
+                " config set providers.openai.api_key YOUR_KEY"
+            )
         return OpenAIProvider(
             api_key=api_key,
             model=openai_cfg.get("model", "gpt-4o"),
@@ -52,11 +58,17 @@ def create_provider(provider_name: str | None = None) -> LLMProvider:
         groq_cfg = providers_config.get("groq", {})
         api_key = groq_cfg.get("api_key")
         if not api_key:
-            raise ValueError("Groq API key not set. Run: openbro config set providers.groq.api_key YOUR_KEY")
+            raise ValueError(
+                "Groq API key not set. Run: openbro"
+                " config set providers.groq.api_key YOUR_KEY"
+            )
         return GroqProvider(
             api_key=api_key,
             model=groq_cfg.get("model", "llama-3.3-70b-versatile"),
         )
 
     else:
-        raise ValueError(f"Unknown provider: {provider_name}. Available: ollama, anthropic, openai, groq")
+        raise ValueError(
+            f"Unknown provider: {provider_name}."
+            " Available: ollama, anthropic, openai, groq"
+        )

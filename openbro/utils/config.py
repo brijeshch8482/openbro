@@ -54,7 +54,11 @@ def default_config() -> dict:
             },
         },
         "agent": {
-            "system_prompt": "Tu OpenBro hai - ek helpful AI bro. Friendly aur casual reh, Hindi-English mix me baat kar. User ki help kar.",
+            "system_prompt": (
+                "Tu OpenBro hai - ek helpful AI bro."
+                " Friendly aur casual reh, Hindi-English"
+                " mix me baat kar. User ki help kar."
+            ),
             "max_history": 50,
         },
         "storage": {
