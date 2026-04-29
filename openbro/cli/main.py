@@ -10,13 +10,14 @@ from openbro import __version__
 @click.option(
     "--provider",
     "-p",
-    type=click.Choice(["ollama", "anthropic", "openai"]),
+    type=click.Choice(["ollama", "anthropic", "openai", "groq"]),
     help="LLM provider to use",
 )
 @click.option("--model", "-m", help="Model name to use")
 @click.option("--offline", is_flag=True, help="Force offline mode (Ollama only)")
 @click.option("--setup", is_flag=True, help="Re-run first-time setup wizard")
-def main(provider, model, offline, setup):
+@click.option("--telegram", is_flag=True, help="Run as Telegram bot instead of CLI")
+def main(provider, model, offline, setup, telegram):
     """OpenBro - Tera Apna AI Bro
 
     Open-source personal AI agent. Just run 'openbro' and start chatting!
@@ -39,6 +40,12 @@ def main(provider, model, offline, setup):
         if offline:
             config["llm"]["provider"] = "ollama"
         save_config(config)
+
+    if telegram:
+        from openbro.channels.telegram_bot import run_telegram_from_config
+
+        run_telegram_from_config()
+        return
 
     from openbro.cli.repl import start_repl
 

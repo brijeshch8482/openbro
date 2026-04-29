@@ -55,6 +55,9 @@ def run_wizard():
     # Step 4: Personality
     _step_personality(config)
 
+    # Step 5: Telegram (optional)
+    _step_telegram(config)
+
     # Save config
     save_config(config)
 
@@ -273,3 +276,56 @@ def _step_personality(config: dict):
         ),
     }
     config["agent"]["system_prompt"] = prompts[personality]
+
+
+def _step_telegram(config: dict):
+    console.print("\n[bold yellow]Step 5:[/bold yellow] Telegram bot (optional)\n")
+    console.print("[dim]Control OpenBro from your phone via Telegram.[/dim]")
+    console.print("[dim]You'll need a bot token from @BotFather on Telegram.[/dim]\n")
+
+    if not Confirm.ask("Set up Telegram bot now?", default=False):
+        console.print("[dim]Skipped. You can set it up later via 'config set'.[/dim]\n")
+        return
+
+    console.print("\n[cyan]How to get a Telegram bot token:[/cyan]")
+    console.print("  1. Open Telegram, message @BotFather")
+    console.print("  2. Send /newbot and follow prompts")
+    console.print("  3. Copy the token (looks like: 1234567890:ABC...)")
+    console.print()
+
+    token = Prompt.ask("Telegram bot token (leave empty to skip)", default="")
+    if not token:
+        console.print("[dim]Skipped Telegram setup.[/dim]\n")
+        return
+
+    config["channels"]["telegram"]["enabled"] = True
+    config["channels"]["telegram"]["token"] = token
+
+    console.print("\n[cyan]Authorized users:[/cyan]")
+    console.print(
+        "[dim]Only specific Telegram user IDs can use the bot. "
+        "Leave empty to allow anyone (NOT recommended).[/dim]\n"
+    )
+    console.print("[dim]To find your Telegram user ID, message @userinfobot on Telegram.[/dim]\n")
+
+    ids_input = Prompt.ask(
+        "Enter authorized user IDs (comma-separated, e.g. 12345,67890)",
+        default="",
+    )
+    allowed = []
+    for part in ids_input.split(","):
+        part = part.strip()
+        if part.isdigit():
+            allowed.append(int(part))
+
+    config["channels"]["telegram"]["allowed_users"] = allowed
+
+    if allowed:
+        console.print(f"[green]Authorized users: {allowed}[/green]")
+    else:
+        console.print(
+            "[yellow]Warning: bot is open to anyone. "
+            "Add IDs later via: config set channels.telegram.allowed_users[/yellow]"
+        )
+
+    console.print("\n[dim]Run the Telegram bot with: openbro --telegram[/dim]\n")

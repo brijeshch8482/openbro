@@ -26,6 +26,10 @@ COMMANDS = [
     "tools",
     "storage",
     "audit",
+    "memory",
+    "remember",
+    "forget",
+    "sessions",
     "clear",
     "reset",
 ]
@@ -143,6 +147,22 @@ def _handle_command(cmd: str, agent: Agent) -> bool:
         _show_audit()
         return True
 
+    if cmd_lower == "memory":
+        _show_memory(agent)
+        return True
+
+    if cmd_lower.startswith("remember "):
+        _remember(cmd[9:].strip(), agent)
+        return True
+
+    if cmd_lower.startswith("forget "):
+        _forget(cmd[7:].strip(), agent)
+        return True
+
+    if cmd_lower == "sessions":
+        _show_sessions(agent)
+        return True
+
     if cmd_lower == "clear":
         console.clear()
         print_banner()
@@ -173,6 +193,10 @@ def _show_help():
     table.add_row("storage", "Show storage usage and paths")
     table.add_row("storage move", "Move data to a different drive/folder")
     table.add_row("audit", "Show recent tool execution log")
+    table.add_row("memory", "Show stored facts and memory stats")
+    table.add_row("remember <key> <val>", "Save a fact (e.g. remember name Brijesh)")
+    table.add_row("forget <key>", "Delete a fact")
+    table.add_row("sessions", "List past conversation sessions")
     table.add_row("clear", "Clear screen")
     table.add_row("reset", "Clear chat history")
     table.add_row("exit / quit", "Exit OpenBro")
@@ -430,6 +454,85 @@ def _show_audit():
             f"[{style}]{risk}[/{style}]",
             confirmed,
             entry.get("result_preview", "")[:80],
+        )
+
+    console.print(table)
+    console.print()
+
+
+def _show_memory(agent: Agent):
+    facts = agent.memory.all_facts()
+    stats = agent.memory.stats()
+
+    console.print(
+        f"[cyan]Memory stats:[/cyan] "
+        f"{stats['facts']} facts, "
+        f"{stats['messages']} messages, "
+        f"{stats['sessions']} sessions"
+    )
+    console.print(f"[dim]Current session: {agent.memory.session_id}[/dim]\n")
+
+    if not facts:
+        console.print("[dim]No facts stored yet. Use 'remember <key> <value>'.[/dim]\n")
+        return
+
+    table = Table(title="Stored Facts", border_style="cyan")
+    table.add_column("Key", style="bold")
+    table.add_column("Value")
+    table.add_column("Category", style="dim")
+    table.add_column("Updated", style="dim", overflow="fold")
+
+    for f in facts[:30]:
+        table.add_row(
+            f["key"],
+            f["value"][:80],
+            f.get("category", "general"),
+            f.get("updated_at", "")[:19].replace("T", " "),
+        )
+
+    console.print(table)
+    console.print()
+
+
+def _remember(args: str, agent: Agent):
+    parts = args.split(maxsplit=1)
+    if len(parts) != 2:
+        console.print("[red]Usage: remember <key> <value>[/red]")
+        console.print("[dim]Example: remember name Brijesh[/dim]\n")
+        return
+    key, value = parts
+    agent.memory.remember(key, value)
+    console.print(f"[green]Remembered:[/green] {key} = {value}\n")
+
+
+def _forget(key: str, agent: Agent):
+    if not key:
+        console.print("[red]Usage: forget <key>[/red]\n")
+        return
+    if agent.memory.forget(key):
+        console.print(f"[green]Forgot:[/green] {key}\n")
+    else:
+        console.print(f"[yellow]Nothing to forget for: {key}[/yellow]\n")
+
+
+def _show_sessions(agent: Agent):
+    sessions = agent.memory.list_sessions()
+    if not sessions:
+        console.print("[dim]No past sessions found.[/dim]\n")
+        return
+
+    table = Table(title="Recent Sessions", border_style="cyan")
+    table.add_column("Session ID", style="bold")
+    table.add_column("Channel")
+    table.add_column("Started")
+    table.add_column("Last Activity")
+
+    for s in sessions[:20]:
+        table.add_row(
+            s["session_id"],
+            s.get("channel", "cli"),
+            s.get("started_at", "")[:19].replace("T", " "),
+            s.get("last_activity", "")[:19].replace("T", " "),
         )
 
     console.print(table)

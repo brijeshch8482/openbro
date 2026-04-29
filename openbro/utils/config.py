@@ -71,4 +71,11 @@ def default_config() -> dict:
             "confirm_dangerous": True,
             "blocked_commands": ["rm -rf /", "format", "del /s /q"],
         },
+        "channels": {
+            "telegram": {
+                "enabled": False,
+                "token": None,
+                "allowed_users": [],
+            },
+        },
     }

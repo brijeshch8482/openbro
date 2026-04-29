@@ -6,6 +6,8 @@ from rich.console import Console
 
 from openbro.llm.base import LLMResponse, Message
 from openbro.llm.router import create_provider
+from openbro.memory import MemoryManager
+from openbro.tools.memory_tool import MemoryTool
 from openbro.tools.registry import ToolRegistry
 from openbro.utils.config import load_config
 
@@ -13,7 +15,7 @@ console = Console()
 
 
 class Agent:
-    def __init__(self):
+    def __init__(self, memory: MemoryManager | None = None, interactive: bool = True):
         config = load_config()
         try:
             self.provider = create_provider()
@@ -22,7 +24,15 @@ class Agent:
             console.print("[yellow]Run 'openbro --setup' to reconfigure.[/yellow]")
             raise SystemExit(1)
 
+        self.memory = memory or MemoryManager()
+        self.interactive = interactive
+
         self.tool_registry = ToolRegistry()
+        # Inject memory into the memory tool so it uses this agent's user/session
+        mem_tool = self.tool_registry.get_tool("memory")
+        if isinstance(mem_tool, MemoryTool):
+            mem_tool._manager = self.memory
+
         self.history: list[Message] = []
 
         system_prompt = config.get("agent", {}).get(
@@ -30,13 +40,18 @@ class Agent:
             "Tu OpenBro hai - ek helpful AI bro. Friendly reh, user ki help kar.",
         )
 
-        # Add available tools info to system prompt
+        # Add available tools info + long-term memory context to system prompt
         tool_names = ", ".join(self.tool_registry.list_tools())
-        full_prompt = (
-            f"{system_prompt}\n\n"
-            f"Tere paas ye tools available hai: {tool_names}. "
-            "Zaroorat padne pe inhe use kar."
-        )
+        memory_context = self.memory.context_prompt()
+
+        prompt_parts = [
+            system_prompt,
+            f"\nTere paas ye tools available hai: {tool_names}. Zaroorat padne pe inhe use kar.",
+        ]
+        if memory_context:
+            prompt_parts.append("\n" + memory_context)
+
+        full_prompt = "\n".join(prompt_parts)
         self.history.append(Message(role="system", content=full_prompt))
         self.max_history = config.get("agent", {}).get("max_history", 50)
 
@@ -44,6 +59,7 @@ class Agent:
 
     def chat(self, user_input: str) -> str:
         self.history.append(Message(role="user", content=user_input))
+        self.memory.add("user", user_input)
         self._trim_history()
 
         tools = self.tool_registry.get_tools_schema() if self.provider.supports_tools() else None
@@ -69,11 +85,13 @@ class Agent:
             return self._handle_tool_calls(response)
 
         self.history.append(Message(role="assistant", content=response.content))
+        self.memory.add("assistant", response.content)
         return response.content
 
     def stream_chat(self, user_input: str) -> Iterator[str]:
         """Stream response tokens for real-time output."""
         self.history.append(Message(role="user", content=user_input))
+        self.memory.add("user", user_input)
         self._trim_history()
 
         full_response = ""
@@ -86,10 +104,9 @@ class Agent:
             return
 
         self.history.append(Message(role="assistant", content=full_response))
+        self.memory.add("assistant", full_response)
 
     def _handle_tool_calls(self, response: LLMResponse) -> str:
-        from rich.prompt import Confirm
-
         config = load_config()
         confirm_dangerous = config.get("safety", {}).get("confirm_dangerous", True)
 
@@ -103,14 +120,18 @@ class Agent:
             confirmed = True
 
             if risk == "dangerous" and confirm_dangerous:
-                console.print(f"\n[bold red]Dangerous tool requested:[/bold red] {name}")
-                console.print(f"[yellow]Args:[/yellow] {args}")
-                if not Confirm.ask("Allow this action?", default=False):
-                    results.append(f"[{name}]: DENIED by user")
-                    self.tool_registry.execute(
-                        name + "_denied",
-                        args,
-                        confirmed=False,
+                if self.interactive:
+                    from rich.prompt import Confirm
+
+                    console.print(f"\n[bold red]Dangerous tool requested:[/bold red] {name}")
+                    console.print(f"[yellow]Args:[/yellow] {args}")
+                    if not Confirm.ask("Allow this action?", default=False):
+                        results.append(f"[{name}]: DENIED by user")
+                        continue
+                else:
+                    # Non-interactive (e.g. Telegram) - block by default
+                    results.append(
+                        f"[{name}]: BLOCKED (dangerous tool, not allowed in this channel)"
                     )
                     continue
             elif risk == "moderate":
@@ -131,6 +152,7 @@ class Agent:
         try:
             final = self.provider.chat(self.history)
             self.history.append(Message(role="assistant", content=final.content))
+            self.memory.add("assistant", final.content)
             return final.content
         except Exception as e:
             return f"Tools ran but error in final response: {e}\nRaw:\n{tool_output}"

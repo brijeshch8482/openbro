@@ -7,6 +7,7 @@ from openbro.tools.clipboard_tool import ClipboardTool
 from openbro.tools.datetime_tool import DateTimeTool
 from openbro.tools.download_tool import DownloadTool
 from openbro.tools.file_tool import FileTool
+from openbro.tools.memory_tool import MemoryTool
 from openbro.tools.network_tool import NetworkTool
 from openbro.tools.notification_tool import NotificationTool
 from openbro.tools.process_tool import ProcessTool
@@ -24,6 +25,7 @@ BUILTIN_TOOLS = [
     DateTimeTool,
     DownloadTool,
     FileTool,
+    MemoryTool,
     NetworkTool,
     NotificationTool,
     ProcessTool,

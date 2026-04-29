@@ -38,7 +38,13 @@ dependencies = [
 ollama = ["ollama>=0.4"]
 anthropic = ["anthropic>=0.40"]
 openai = ["openai>=1.50"]
-all = ["ollama>=0.4", "anthropic>=0.40", "openai>=1.50"]
+telegram = ["python-telegram-bot>=21.0"]
+all = [
+    "ollama>=0.4",
+    "anthropic>=0.40",
+    "openai>=1.50",
+    "python-telegram-bot>=21.0",
+]
 # Note: Groq uses httpx directly (already a core dependency), no extra package needed
 dev = [
     "pytest>=8.0",
