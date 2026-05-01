@@ -3,6 +3,7 @@
 from openbro.tools.app_tool import AppTool
 from openbro.tools.base import BaseTool, RiskLevel
 from openbro.tools.browser_tool import BrowserTool
+from openbro.tools.claude_code_tool import ClaudeCodeTool
 from openbro.tools.clipboard_tool import ClipboardTool
 from openbro.tools.datetime_tool import DateTimeTool
 from openbro.tools.download_tool import DownloadTool
@@ -21,6 +22,7 @@ from openbro.utils.audit import log_tool_execution
 BUILTIN_TOOLS = [
     AppTool,
     BrowserTool,
+    ClaudeCodeTool,
     ClipboardTool,
     DateTimeTool,
     DownloadTool,

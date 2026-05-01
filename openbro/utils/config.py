@@ -71,6 +71,11 @@ def default_config() -> dict:
             "confirm_dangerous": True,
             "blocked_commands": ["rm -rf /", "format", "del /s /q"],
             "permission_mode": "normal",  # normal | boss | auto
+            "claude_code": {
+                "max_cost_per_call_usd": 1.00,
+                "daily_budget_usd": 10.00,
+                "timeout_seconds": 600,
+            },
         },
         "language": {
             "auto_detect": True,

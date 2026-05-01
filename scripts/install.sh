@@ -1,95 +1,145 @@
 #!/usr/bin/env bash
 # OpenBro Installer for Linux/macOS
-# Run: curl -fsSL https://raw.githubusercontent.com/brijeshch8482/openbro/main/scripts/install.sh | bash
+# Zero-friction one-line install:
+#   curl -fsSL https://github.com/brijeshch8482/openbro/raw/main/scripts/install.sh | bash
 
 set -e
 
-CYAN='\033[0;36m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-DIM='\033[2m'
-NC='\033[0m'
+REPO="brijeshch8482/openbro"
+EXTRAS="${OPENBRO_EXTRAS:-all,voice}"
+BRANCH="${OPENBRO_BRANCH:-main}"
+NO_OLLAMA="${OPENBRO_NO_OLLAMA:-0}"
+NO_LAUNCH="${OPENBRO_NO_LAUNCH:-0}"
+
+# Colors
+C='\033[0;36m'   # Cyan
+G='\033[0;32m'   # Green
+Y='\033[1;33m'   # Yellow
+R='\033[0;31m'   # Red
+D='\033[2m'      # Dim
+B='\033[1m'      # Bold
+N='\033[0m'      # Reset
+
+step()  { echo -e "\n${C}[$1/$2] $3${N}"; }
+ok()    { echo -e "  ${G}✓${N} $1"; }
+info()  { echo -e "  ${D}$1${N}"; }
+warn()  { echo -e "  ${Y}!${N} $1"; }
+err()   { echo -e "  ${R}✗${N} $1"; }
 
 echo ""
-echo -e "${CYAN}   ____                   ____${NC}"
-echo -e "${CYAN}  / __ \\____  ___  ____  / __ )_________${NC}"
-echo -e "${CYAN} / / / / __ \\/ _ \\/ __ \\/ __  / ___/ __ \\${NC}"
-echo -e "${CYAN}/ /_/ / /_/ /  __/ / / / /_/ / /  / /_/ /${NC}"
-echo -e "${CYAN}\\____/ .___/\\___/_/ /_/_____/_/   \\____/${NC}"
-echo -e "${CYAN}    /_/${NC}"
-echo ""
-echo -e "${YELLOW}OpenBro Installer - Tera Apna AI Bro${NC}"
-echo -e "${YELLOW}======================================${NC}"
-echo ""
+echo -e "${C}  ╔═══════════════════════════════════════════╗${N}"
+echo -e "${C}  ║          OpenBro Installer v1.0          ║${N}"
+echo -e "${C}  ║      Tera Apna AI Bro - Open Source      ║${N}"
+echo -e "${C}  ╚═══════════════════════════════════════════╝${N}"
 
-# Check Python
-echo -e "${GREEN}[1/4] Checking Python...${NC}"
+# ─── Step 1/5: Python ─────────────────────────────────────────
+step 1 5 "Checking Python..."
 PYTHON=""
 for cmd in python3 python; do
     if command -v "$cmd" &> /dev/null; then
-        version=$("$cmd" --version 2>&1 | grep -oP '3\.\d+')
-        minor=$(echo "$version" | cut -d. -f2)
-        if [ "$minor" -ge 10 ] 2>/dev/null; then
+        version=$("$cmd" --version 2>&1)
+        minor=$(echo "$version" | grep -oE '3\.[0-9]+' | head -1 | cut -d. -f2)
+        if [ -n "$minor" ] && [ "$minor" -ge 10 ] 2>/dev/null; then
             PYTHON="$cmd"
-            echo -e "${DIM}  Found: $("$cmd" --version)${NC}"
+            ok "Found $version"
             break
         fi
     fi
 done
 
 if [ -z "$PYTHON" ]; then
-    echo -e "${RED}  Python 3.10+ not found!${NC}"
-    echo -e "${YELLOW}  Install Python:${NC}"
+    err "Python 3.10+ not found"
+    echo ""
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        echo "    brew install python@3.12"
+        echo -e "  Install: ${B}brew install python@3.12${N}"
+    elif [ -f /etc/debian_version ]; then
+        echo -e "  Install: ${B}sudo apt install python3 python3-pip python3-venv${N}"
+    elif [ -f /etc/redhat-release ]; then
+        echo -e "  Install: ${B}sudo dnf install python3 python3-pip${N}"
     else
-        echo "    sudo apt install python3 python3-pip  (Ubuntu/Debian)"
-        echo "    sudo dnf install python3 python3-pip  (Fedora)"
+        echo -e "  Install Python 3.10+: ${B}https://python.org/downloads/${N}"
     fi
     exit 1
 fi
 
-# Install OpenBro
-echo -e "${GREEN}[2/4] Installing OpenBro...${NC}"
-"$PYTHON" -m pip install --upgrade pip 2>/dev/null || true
-"$PYTHON" -m pip install openbro 2>&1 || {
-    echo -e "${YELLOW}  pip install failed. Trying from GitHub...${NC}"
-    "$PYTHON" -m pip install git+https://github.com/brijeshch8482/openbro.git 2>&1
-}
+# ─── Step 2/5: pip + OpenBro ─────────────────────────────────
+step 2 5 "Installing OpenBro [$EXTRAS] (this may take 1-2 minutes)..."
+"$PYTHON" -m pip install --upgrade pip --quiet 2>/dev/null || true
 
-echo -e "${GREEN}  OpenBro installed successfully!${NC}"
-
-# Check Ollama (optional)
-echo -e "${GREEN}[3/4] Checking Ollama (optional, for offline mode)...${NC}"
-OLLAMA_INSTALLED=false
-if command -v ollama &> /dev/null; then
-    echo -e "${DIM}  Found: $(ollama --version)${NC}"
-    OLLAMA_INSTALLED=true
+PKG_SPEC="openbro[$EXTRAS]"
+if "$PYTHON" -m pip install --upgrade "$PKG_SPEC" --quiet 2>/dev/null; then
+    :
 else
-    echo -e "${DIM}  Ollama not found (optional - needed only for offline mode)${NC}"
-    echo -e "${DIM}  Install later: curl -fsSL https://ollama.ai/install.sh | sh${NC}"
+    info "PyPI install failed, installing from GitHub ($BRANCH)..."
+    "$PYTHON" -m pip install --upgrade \
+        "git+https://github.com/$REPO.git@$BRANCH#egg=openbro[$EXTRAS]"
+fi
+ok "OpenBro installed"
+
+# ─── Step 3/5: Verify ────────────────────────────────────────
+step 3 5 "Verifying installation..."
+if VER=$("$PYTHON" -c "import openbro; print(openbro.__version__)" 2>&1); then
+    ok "OpenBro v$VER ready"
+else
+    err "Verification failed: $VER"
+    exit 1
 fi
 
-# Verify
-echo -e "${GREEN}[4/4] Verifying installation...${NC}"
-"$PYTHON" -c "import openbro; print(f'  OpenBro v{openbro.__version__} ready!')" 2>/dev/null || {
-    echo -e "${YELLOW}  Warning: Could not verify installation${NC}"
-}
+# ─── Step 4/5: Ollama (optional) ─────────────────────────────
+step 4 5 "Checking Ollama (offline mode)..."
+OLLAMA_INSTALLED=false
+if command -v ollama &> /dev/null; then
+    ok "Ollama found: $(ollama --version 2>&1 | head -1)"
+    OLLAMA_INSTALLED=true
+elif [ "$NO_OLLAMA" = "1" ]; then
+    info "Skipped (OPENBRO_NO_OLLAMA=1)"
+else
+    warn "Ollama not installed (needed for free offline LLM)"
+    if [ -t 0 ]; then
+        read -p "  Install Ollama now? [Y/n] " -n 1 -r resp
+        echo ""
+        if [[ -z "$resp" || "$resp" =~ ^[Yy]$ ]]; then
+            info "Running Ollama installer..."
+            curl -fsSL https://ollama.com/install.sh | sh && ok "Ollama installed" || \
+                warn "Ollama install failed. Try manually: https://ollama.com"
+        else
+            info "Skipped. Install later: curl -fsSL https://ollama.com/install.sh | sh"
+        fi
+    else
+        info "Non-interactive shell - skipped. Install: https://ollama.com"
+    fi
+fi
+
+# ─── Step 5/5: PATH check ────────────────────────────────────
+step 5 5 "Checking openbro on PATH..."
+if command -v openbro &> /dev/null; then
+    ok "'openbro' command available"
+else
+    warn "'openbro' not on PATH yet — start a new shell or use:"
+    echo -e "    ${B}$PYTHON -m openbro${N}"
+fi
 
 echo ""
-echo -e "${GREEN}============================================${NC}"
-echo -e "${GREEN}  Installation complete!${NC}"
-echo -e "${GREEN}============================================${NC}"
+echo -e "${G}  ╔═══════════════════════════════════════════╗${N}"
+echo -e "${G}  ║       ✓ Installation complete!           ║${N}"
+echo -e "${G}  ╚═══════════════════════════════════════════╝${N}"
 echo ""
-echo -e "${CYAN}  Start OpenBro:  openbro${NC}"
-echo -e "${CYAN}  Re-run setup:   openbro --setup${NC}"
-echo -e "${CYAN}  Get help:       openbro --help${NC}"
+echo -e "  ${B}Quick commands:${N}"
+echo -e "    ${C}openbro${N}              ${D}Start chatting (first run launches setup)${N}"
+echo -e "    ${C}openbro --voice${N}      ${D}Voice mode (mic + TTS)${N}"
+echo -e "    ${C}openbro --telegram${N}   ${D}Run as Telegram bot${N}"
+echo -e "    ${C}openbro --setup${N}      ${D}Re-run wizard${N}"
+echo -e "    ${C}openbro --help${N}       ${D}All flags${N}"
 echo ""
 
-if [ "$OLLAMA_INSTALLED" = false ]; then
-    echo -e "${YELLOW}  For offline mode, install Ollama:${NC}"
-    echo -e "${YELLOW}    curl -fsSL https://ollama.ai/install.sh | sh${NC}"
-    echo -e "${YELLOW}    ollama pull qwen2.5-coder:7b${NC}"
+if [ "$NO_LAUNCH" != "1" ] && [ -t 0 ]; then
+    read -p "  Launch OpenBro now? [Y/n] " -n 1 -r launch
     echo ""
+    if [[ -z "$launch" || "$launch" =~ ^[Yy]$ ]]; then
+        echo ""
+        openbro
+    else
+        info "Run 'openbro' anytime to start."
+        echo ""
+    fi
 fi
