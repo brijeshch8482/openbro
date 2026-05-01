@@ -4,18 +4,26 @@ from collections.abc import Iterator
 
 from rich.console import Console
 
+from openbro.core.activity import get_bus
+from openbro.core.permissions import PermissionGate, PermissionRequest
 from openbro.llm.base import LLMResponse, Message
 from openbro.llm.router import create_provider
 from openbro.memory import MemoryManager
 from openbro.tools.memory_tool import MemoryTool
 from openbro.tools.registry import ToolRegistry
 from openbro.utils.config import load_config
+from openbro.utils.language import detect_language, language_instruction
 
 console = Console()
 
 
 class Agent:
-    def __init__(self, memory: MemoryManager | None = None, interactive: bool = True):
+    def __init__(
+        self,
+        memory: MemoryManager | None = None,
+        interactive: bool = True,
+        permission_gate: PermissionGate | None = None,
+    ):
         config = load_config()
         try:
             self.provider = create_provider()
@@ -26,6 +34,7 @@ class Agent:
 
         self.memory = memory or MemoryManager()
         self.interactive = interactive
+        self.bus = get_bus()
 
         self.tool_registry = ToolRegistry(config=config)
         # Inject memory into the memory tool so it uses this agent's user/session
@@ -33,36 +42,58 @@ class Agent:
         if isinstance(mem_tool, MemoryTool):
             mem_tool._manager = self.memory
 
+        # Permission gate
+        if permission_gate is not None:
+            self.permissions = permission_gate
+        else:
+            mode = config.get("safety", {}).get("permission_mode", "normal")
+            channel = "cli" if interactive else "silent"
+            self.permissions = PermissionGate(mode=mode, channel=channel)
+
         self.history: list[Message] = []
 
-        system_prompt = config.get("agent", {}).get(
+        self.base_system_prompt = config.get("agent", {}).get(
             "system_prompt",
             "Tu OpenBro hai - ek helpful AI bro. Friendly reh, user ki help kar.",
         )
-
-        # Add available tools info + long-term memory context to system prompt
-        tool_names = ", ".join(self.tool_registry.list_tools())
-        memory_context = self.memory.context_prompt()
-
-        prompt_parts = [
-            system_prompt,
-            f"\nTere paas ye tools available hai: {tool_names}. Zaroorat padne pe inhe use kar.",
-        ]
-        if memory_context:
-            prompt_parts.append("\n" + memory_context)
-
-        full_prompt = "\n".join(prompt_parts)
-        self.history.append(Message(role="system", content=full_prompt))
+        self.tool_names = ", ".join(self.tool_registry.list_tools())
+        self.history.append(Message(role="system", content=self._build_system_prompt(None)))
         self.max_history = config.get("agent", {}).get("max_history", 50)
 
+        self.last_language = "hinglish"
+
         console.print(f"[dim]LLM: {self.provider.name()}[/dim]")
+        self.bus.emit("system", f"agent ready: {self.provider.name()}")
+
+    def _build_system_prompt(self, lang: str | None) -> str:
+        memory_context = self.memory.context_prompt()
+        parts = [
+            self.base_system_prompt,
+            (
+                f"\nTere paas ye tools available hai: {self.tool_names}. "
+                "Zaroorat padne pe inhe use kar."
+            ),
+        ]
+        if memory_context:
+            parts.append("\n" + memory_context)
+        if lang:
+            parts.append("\n" + language_instruction(lang))
+        return "\n".join(parts)
+
+    def _refresh_system_prompt(self, lang: str) -> None:
+        self.history[0] = Message(role="system", content=self._build_system_prompt(lang))
 
     def chat(self, user_input: str) -> str:
+        self.last_language = detect_language(user_input)
+        self._refresh_system_prompt(self.last_language)
+
+        self.bus.emit("user", user_input, lang=self.last_language)
         self.history.append(Message(role="user", content=user_input))
         self.memory.add("user", user_input)
         self._trim_history()
 
         tools = self.tool_registry.get_tools_schema() if self.provider.supports_tools() else None
+        self.bus.emit("thinking", "agent thinking…")
 
         try:
             response = self.provider.chat(self.history, tools=tools)
@@ -86,10 +117,15 @@ class Agent:
 
         self.history.append(Message(role="assistant", content=response.content))
         self.memory.add("assistant", response.content)
+        self.bus.emit("assistant", response.content)
         return response.content
 
     def stream_chat(self, user_input: str) -> Iterator[str]:
         """Stream response tokens for real-time output."""
+        self.last_language = detect_language(user_input)
+        self._refresh_system_prompt(self.last_language)
+        self.bus.emit("user", user_input, lang=self.last_language)
+
         self.history.append(Message(role="user", content=user_input))
         self.memory.add("user", user_input)
         self._trim_history()
@@ -105,11 +141,9 @@ class Agent:
 
         self.history.append(Message(role="assistant", content=full_response))
         self.memory.add("assistant", full_response)
+        self.bus.emit("assistant", full_response)
 
     def _handle_tool_calls(self, response: LLMResponse) -> str:
-        config = load_config()
-        confirm_dangerous = config.get("safety", {}).get("confirm_dangerous", True)
-
         results = []
         for tool_call in response.tool_calls:
             func = tool_call.get("function", {})
@@ -117,30 +151,32 @@ class Agent:
             args = func.get("arguments", {})
 
             risk = self.tool_registry.get_risk(name)
-            confirmed = True
+            self.bus.emit(
+                "tool_start",
+                f"{name} ({risk})",
+                tool=name,
+                args=args,
+                risk=risk,
+            )
 
-            if risk == "dangerous" and confirm_dangerous:
-                if self.interactive:
-                    from rich.prompt import Confirm
+            req = PermissionRequest(tool=name, args=args, risk=risk)
+            allowed = self.permissions.request(req)
+            confirmed = allowed
 
-                    console.print(f"\n[bold red]Dangerous tool requested:[/bold red] {name}")
-                    console.print(f"[yellow]Args:[/yellow] {args}")
-                    if not Confirm.ask("Allow this action?", default=False):
-                        results.append(f"[{name}]: DENIED by user")
-                        continue
-                else:
-                    # Non-interactive (e.g. Telegram) - block by default
-                    results.append(
-                        f"[{name}]: BLOCKED (dangerous tool, not allowed in this channel)"
-                    )
-                    continue
-            elif risk == "moderate":
+            if not allowed:
+                msg = f"[{name}]: DENIED by user"
+                results.append(msg)
+                self.bus.emit("tool_end", msg, tool=name, ok=False)
+                continue
+
+            if risk == "moderate":
                 console.print(f"[yellow]Tool: {name} ({risk})[/yellow] [dim]args: {args}[/dim]")
-            else:
+            elif risk == "safe":
                 console.print(f"[dim]Tool: {name} ({risk})[/dim]")
 
             result = self.tool_registry.execute(name, args, confirmed=confirmed)
             results.append(f"[{name}]: {result}")
+            self.bus.emit("tool_end", f"{name} done", tool=name, ok=True, preview=result[:200])
 
         # Send tool results back to LLM for final response
         tool_output = "\n".join(results)
@@ -153,6 +189,7 @@ class Agent:
             final = self.provider.chat(self.history)
             self.history.append(Message(role="assistant", content=final.content))
             self.memory.add("assistant", final.content)
+            self.bus.emit("assistant", final.content)
             return final.content
         except Exception as e:
             return f"Tools ran but error in final response: {e}\nRaw:\n{tool_output}"

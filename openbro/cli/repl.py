@@ -31,6 +31,10 @@ COMMANDS = [
     "forget",
     "sessions",
     "skills",
+    "show",
+    "hide",
+    "boss",
+    "activity",
     "clear",
     "reset",
 ]
@@ -49,6 +53,12 @@ def start_repl():
         run_wizard()
 
     print_banner()
+
+    # Background activity log so 'activity.log' is always populated
+    from openbro.cli.activity_panel import start_background_log
+
+    log_path = start_background_log()
+    console.print(f"[dim]Activity log: {log_path}[/dim]\n")
 
     config_dir = get_config_dir()
     history_file = config_dir / "history.txt"
@@ -168,6 +178,63 @@ def _handle_command(cmd: str, agent: Agent) -> bool:
         _show_skills(agent)
         return True
 
+    if cmd_lower == "show":
+        _start_panel()
+        return True
+
+    if cmd_lower == "hide":
+        _stop_panel()
+        return True
+
+    if cmd_lower == "activity":
+        from openbro.cli.activity_panel import print_recent
+
+        print_recent(30)
+        return True
+
+    if cmd_lower in ("boss", "boss on"):
+        agent.permissions.mode = "boss"
+        console.print(
+            "[bold yellow]Boss mode ON.[/bold yellow] "
+            "Har tool call ke liye permission maangi jayegi."
+        )
+        return True
+
+    if cmd_lower == "boss off":
+        agent.permissions.mode = "normal"
+        console.print("[green]Boss mode OFF. Sirf dangerous tools confirm honge.[/green]")
+        return True
+
+    if cmd_lower.startswith("model add "):
+        from openbro.cli.model_manager import add_model
+
+        add_model(cmd[10:].strip())
+        return True
+
+    if cmd_lower.startswith("model remove ") or cmd_lower.startswith("model rm "):
+        from openbro.cli.model_manager import remove_model
+
+        target = cmd.split(maxsplit=2)[2].strip()
+        remove_model(target)
+        return True
+
+    if cmd_lower.startswith("model switch "):
+        from openbro.cli.model_manager import switch_model
+
+        target = cmd[13:].strip()
+        if switch_model(target):
+            from openbro.llm.router import create_provider
+
+            agent.provider = create_provider()
+            console.print(f"[green]Active provider: {agent.provider.name()}[/green]")
+        return True
+
+    if cmd_lower == "model list" or cmd_lower == "model ls":
+        from openbro.cli.model_manager import list_available
+
+        list_available()
+        return True
+
     if cmd_lower == "clear":
         console.clear()
         print_banner()
@@ -203,6 +270,14 @@ def _show_help():
     table.add_row("forget <key>", "Delete a fact")
     table.add_row("sessions", "List past conversation sessions")
     table.add_row("skills", "List installed skills (github, gmail, calendar, notion, youtube)")
+    table.add_row("show", "Open the live activity panel (agent's environment)")
+    table.add_row("hide", "Close the live activity panel (agent runs in background)")
+    table.add_row("activity", "Print last 30 activity events (one-shot)")
+    table.add_row("boss / boss off", "Toggle Boss mode — agent asks permission for every tool")
+    table.add_row("model list", "List all available models with status")
+    table.add_row("model add <name>", "Add a model (downloads Ollama OR stores API key)")
+    table.add_row("model switch <name>", "Switch active model (offers to remove old offline)")
+    table.add_row("model remove <name>", "Uninstall offline model OR clear cloud key")
     table.add_row("clear", "Clear screen")
     table.add_row("reset", "Clear chat history")
     table.add_row("exit / quit", "Exit OpenBro")
@@ -547,6 +622,31 @@ def _show_skills(agent: Agent):
         "\n[dim]Configure skills via 'config set skills.<name>.<key> <value>'. "
         "Drop custom skills in ~/.openbro/skills/.[/dim]\n"
     )
+
+
+_active_panel = None
+
+
+def _start_panel():
+    global _active_panel
+    if _active_panel is not None:
+        console.print("[dim]Activity panel already running.[/dim]")
+        return
+    from openbro.cli.activity_panel import ActivityPanel
+
+    _active_panel = ActivityPanel()
+    _active_panel.start()
+    console.print("[green]🤖 Activity panel started.[/green] [dim]Type 'hide' to close it.[/dim]")
+
+
+def _stop_panel():
+    global _active_panel
+    if _active_panel is None:
+        console.print("[dim]No active panel to hide.[/dim]")
+        return
+    _active_panel.stop()
+    _active_panel = None
+    console.print("[yellow]Panel hidden. Agent still running in background.[/yellow]")
 
 
 def _show_sessions(agent: Agent):

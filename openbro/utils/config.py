@@ -70,6 +70,11 @@ def default_config() -> dict:
         "safety": {
             "confirm_dangerous": True,
             "blocked_commands": ["rm -rf /", "format", "del /s /q"],
+            "permission_mode": "normal",  # normal | boss | auto
+        },
+        "language": {
+            "auto_detect": True,
+            "default": "hinglish",
         },
         "channels": {
             "telegram": {
