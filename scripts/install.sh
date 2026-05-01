@@ -8,7 +8,7 @@ set -e
 REPO="brijeshch8482/openbro"
 EXTRAS="${OPENBRO_EXTRAS:-all,voice}"
 BRANCH="${OPENBRO_BRANCH:-main}"
-NO_OLLAMA="${OPENBRO_NO_OLLAMA:-0}"
+OPENBRO_NO_SETUP="${OPENBRO_NO_SETUP:-0}"
 NO_LAUNCH="${OPENBRO_NO_LAUNCH:-0}"
 
 # Colors
@@ -127,59 +127,56 @@ else
     exit 1
 fi
 
-# ─── Step 4/5: Ollama (optional) ─────────────────────────────
-step 4 5 "Checking Ollama (offline mode)..."
-OLLAMA_INSTALLED=false
-if command -v ollama &> /dev/null; then
-    ok "Ollama found: $(ollama --version 2>&1 | head -1)"
-    OLLAMA_INSTALLED=true
-elif [ "$NO_OLLAMA" = "1" ]; then
-    info "Skipped (OPENBRO_NO_OLLAMA=1)"
-else
-    warn "Ollama not installed (needed for free offline LLM)"
-    if [ -t 0 ]; then
-        read -p "  Install Ollama now? [Y/n] " -n 1 -r resp
-        echo ""
-        if [[ -z "$resp" || "$resp" =~ ^[Yy]$ ]]; then
-            info "Running Ollama installer..."
-            curl -fsSL https://ollama.com/install.sh | sh && ok "Ollama installed" || \
-                warn "Ollama install failed. Try manually: https://ollama.com"
-        else
-            info "Skipped. Install later: curl -fsSL https://ollama.com/install.sh | sh"
-        fi
-    else
-        info "Non-interactive shell - skipped. Install: https://ollama.com"
-    fi
-fi
-
-# ─── Step 5/5: PATH check ────────────────────────────────────
-step 5 5 "Checking openbro on PATH..."
+# ─── Step 4/5: PATH check ────────────────────────────────────
+step 4 5 "Checking openbro command..."
 if command -v openbro &> /dev/null; then
     ok "'openbro' command available"
+    OPENBRO_CMD="openbro"
 else
-    warn "'openbro' not on PATH yet — start a new shell or use:"
-    echo -e "    ${B}$PYTHON -m openbro${N}"
+    warn "'openbro' not on PATH yet — using fallback"
+    OPENBRO_CMD="$PYTHON -m openbro"
+fi
+
+# ─── Step 5/5: Configure LLM (auto-runs wizard) ──────────────
+step 5 5 "Setting up your LLM..."
+echo -e "  ${D}Pick offline (free, Ollama) or online (Claude / GPT / Groq).${N}"
+echo -e "  ${D}Offline: model auto-downloads. Online: just paste your API key.${N}"
+echo ""
+
+if [ "$OPENBRO_NO_SETUP" != "1" ] && [ -t 0 ]; then
+    read -p "  Configure now? [Y/n] " -n 1 -r resp
+    echo ""
+    if [[ -z "$resp" || "$resp" =~ ^[Yy]$ ]]; then
+        echo ""
+        # --setup runs the wizard which handles: provider pick, Ollama install +
+        # model download, cloud API keys, storage, personality, optional Telegram.
+        $OPENBRO_CMD --setup
+    else
+        info "Skipped. Run 'openbro --setup' anytime to configure."
+    fi
+elif [ "$OPENBRO_NO_SETUP" = "1" ]; then
+    info "Skipped (OPENBRO_NO_SETUP=1)"
 fi
 
 echo ""
 echo -e "${G}  ╔═══════════════════════════════════════════╗${N}"
-echo -e "${G}  ║       ✓ Installation complete!           ║${N}"
+echo -e "${G}  ║       ✓ OpenBro is ready!                ║${N}"
 echo -e "${G}  ╚═══════════════════════════════════════════╝${N}"
 echo ""
 echo -e "  ${B}Quick commands:${N}"
-echo -e "    ${C}openbro${N}              ${D}Start chatting (first run launches setup)${N}"
+echo -e "    ${C}openbro${N}              ${D}Start chatting${N}"
 echo -e "    ${C}openbro --voice${N}      ${D}Voice mode (mic + TTS)${N}"
 echo -e "    ${C}openbro --telegram${N}   ${D}Run as Telegram bot${N}"
-echo -e "    ${C}openbro --setup${N}      ${D}Re-run wizard${N}"
+echo -e "    ${C}openbro --setup${N}      ${D}Re-run setup wizard${N}"
 echo -e "    ${C}openbro --help${N}       ${D}All flags${N}"
 echo ""
 
 if [ "$NO_LAUNCH" != "1" ] && [ -t 0 ]; then
-    read -p "  Launch OpenBro now? [Y/n] " -n 1 -r launch
+    read -p "  Start chatting now? [Y/n] " -n 1 -r launch
     echo ""
     if [[ -z "$launch" || "$launch" =~ ^[Yy]$ ]]; then
         echo ""
-        openbro
+        $OPENBRO_CMD
     else
         info "Run 'openbro' anytime to start."
         echo ""

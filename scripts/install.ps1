@@ -6,7 +6,7 @@
 param(
     [string]$Extras = "all,voice",
     [string]$Branch = "main",
-    [switch]$NoOllama,
+    [switch]$NoSetup,
     [switch]$NoLaunch
 )
 
@@ -141,68 +141,60 @@ if ($LASTEXITCODE -eq 0) {
     exit 1
 }
 
-# ─── Step 4/5: Ollama (optional) ─────────────────────────────
-Write-Step 4 5 "Checking Ollama (offline mode)..."
-$ollamaInstalled = $false
-try {
-    $null = Get-Command ollama -ErrorAction Stop
-    $ollamaVersion = (& ollama --version 2>&1) -join " "
-    Write-OK "Ollama found: $ollamaVersion"
-    $ollamaInstalled = $true
-} catch {
-    if ($NoOllama) {
-        Write-Info "Skipped (--NoOllama)"
-    } else {
-        Write-Warn "Ollama not installed (needed for free offline LLM)"
-        $resp = Read-Host "  Install Ollama now? [Y/n]"
-        if ($resp -eq "" -or $resp -match "^[yY]") {
-            try {
-                Write-Info "Downloading Ollama installer..."
-                $tmp = "$env:TEMP\OllamaSetup.exe"
-                Invoke-WebRequest "https://ollama.com/download/OllamaSetup.exe" -OutFile $tmp -UseBasicParsing
-                Write-Info "Running Ollama installer (silent)..."
-                Start-Process -FilePath $tmp -ArgumentList "/S" -Wait
-                Remove-Item $tmp -Force -ErrorAction SilentlyContinue
-                Write-OK "Ollama installed"
-            } catch {
-                Write-Warn "Auto-install failed. Install manually: https://ollama.com"
-            }
-        } else {
-            Write-Info "Skipped. Install later: https://ollama.com"
-        }
-    }
-}
-
-# ─── Step 5/5: PATH check + first run ────────────────────────
-Write-Step 5 5 "Checking openbro on PATH..."
+# ─── Step 4/5: PATH check ────────────────────────────────────
+Write-Step 4 5 "Checking openbro command..."
 try {
     $null = Get-Command openbro -ErrorAction Stop
     Write-OK "'openbro' command available"
 } catch {
-    Write-Warn "'openbro' not on PATH yet — open a new PowerShell window or use:"
-    Write-Host "    $python -m openbro" -ForegroundColor Yellow
+    Write-Warn "'openbro' not on PATH yet — using 'python -m openbro' fallback"
+}
+
+# ─── Step 5/5: Configure LLM (auto-runs wizard) ──────────────
+Write-Step 5 5 "Setting up your LLM..."
+Write-Host "  Pick offline (free, Ollama) or online (Claude / GPT / Groq)." -ForegroundColor DarkGray
+Write-Host "  Offline: model auto-downloads. Online: just paste your API key." -ForegroundColor DarkGray
+Write-Host ""
+
+if (-not $NoSetup) {
+    $resp = Read-Host "  Configure now? [Y/n]"
+    if ($resp -eq "" -or $resp -match "^[yY]") {
+        Write-Host ""
+        # --setup runs the wizard which handles: provider pick, Ollama install + model
+        # download, cloud API keys, storage drive, personality, optional Telegram setup.
+        # Then exits without launching the chat REPL.
+        try {
+            & openbro --setup
+        } catch {
+            & $python -m openbro --setup
+        }
+    } else {
+        Write-Info "Skipped. Run 'openbro --setup' anytime to configure."
+    }
+} else {
+    Write-Info "Skipped (--NoSetup)"
 }
 
 Write-Host ""
 Write-Host "  ╔═══════════════════════════════════════════╗" -ForegroundColor Green
-Write-Host "  ║       ✓ Installation complete!           ║" -ForegroundColor Green
+Write-Host "  ║       ✓ OpenBro is ready!                ║" -ForegroundColor Green
 Write-Host "  ╚═══════════════════════════════════════════╝" -ForegroundColor Green
 Write-Host ""
 Write-Host "  Quick commands:" -ForegroundColor White
 Write-Host "    openbro              " -NoNewline -ForegroundColor Cyan
-Write-Host "Start chatting (first run launches setup)" -ForegroundColor DarkGray
+Write-Host "Start chatting" -ForegroundColor DarkGray
 Write-Host "    openbro --voice      " -NoNewline -ForegroundColor Cyan
 Write-Host "Voice mode (mic + TTS)" -ForegroundColor DarkGray
 Write-Host "    openbro --telegram   " -NoNewline -ForegroundColor Cyan
 Write-Host "Run as Telegram bot" -ForegroundColor DarkGray
 Write-Host "    openbro --setup      " -NoNewline -ForegroundColor Cyan
-Write-Host "Re-run wizard" -ForegroundColor DarkGray
+Write-Host "Re-run setup wizard" -ForegroundColor DarkGray
 Write-Host "    openbro --help       " -NoNewline -ForegroundColor Cyan
 Write-Host "All flags" -ForegroundColor DarkGray
 Write-Host ""
 
 if (-not $NoLaunch) {
-    $launch = Read-Host "  Launch OpenBro now? [Y/n]"
+    $launch = Read-Host "  Start chatting now? [Y/n]"
     if ($launch -eq "" -or $launch -match "^[yY]") {
         Write-Host ""
         & openbro
