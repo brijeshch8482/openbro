@@ -27,7 +27,7 @@ class Agent:
         self.memory = memory or MemoryManager()
         self.interactive = interactive
 
-        self.tool_registry = ToolRegistry()
+        self.tool_registry = ToolRegistry(config=config)
         # Inject memory into the memory tool so it uses this agent's user/session
         mem_tool = self.tool_registry.get_tool("memory")
         if isinstance(mem_tool, MemoryTool):

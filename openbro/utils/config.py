@@ -78,4 +78,10 @@ def default_config() -> dict:
                 "allowed_users": [],
             },
         },
+        "skills": {
+            "github": {"token": None},
+            "gmail": {"email": None, "app_password": None},
+            "gcal": {"ical_url": None},
+            "notion": {"token": None},
+        },
     }

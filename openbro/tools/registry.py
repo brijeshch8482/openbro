@@ -38,14 +38,29 @@ BUILTIN_TOOLS = [
 
 
 class ToolRegistry:
-    def __init__(self):
+    def __init__(self, config: dict | None = None):
         self._tools: dict[str, BaseTool] = {}
+        self._skill_registry = None
         self._register_builtins()
+        if config is not None:
+            self._register_skills(config)
 
     def _register_builtins(self):
         for tool_cls in BUILTIN_TOOLS:
             tool = tool_cls()
             self._tools[tool.name] = tool
+
+    def _register_skills(self, config: dict):
+        from openbro.skills.registry import SkillRegistry
+
+        self._skill_registry = SkillRegistry(config=config)
+        for tool in self._skill_registry.all_tools(only_configured=True):
+            self._tools[tool.name] = tool
+
+    def skills_info(self) -> list[dict]:
+        if not self._skill_registry:
+            return []
+        return self._skill_registry.info()
 
     def get_tools_schema(self) -> list[dict]:
         return [tool.schema() for tool in self._tools.values()]

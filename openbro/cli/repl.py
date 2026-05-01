@@ -30,6 +30,7 @@ COMMANDS = [
     "remember",
     "forget",
     "sessions",
+    "skills",
     "clear",
     "reset",
 ]
@@ -163,6 +164,10 @@ def _handle_command(cmd: str, agent: Agent) -> bool:
         _show_sessions(agent)
         return True
 
+    if cmd_lower == "skills":
+        _show_skills(agent)
+        return True
+
     if cmd_lower == "clear":
         console.clear()
         print_banner()
@@ -197,6 +202,7 @@ def _show_help():
     table.add_row("remember <key> <val>", "Save a fact (e.g. remember name Brijesh)")
     table.add_row("forget <key>", "Delete a fact")
     table.add_row("sessions", "List past conversation sessions")
+    table.add_row("skills", "List installed skills (github, gmail, calendar, notion, youtube)")
     table.add_row("clear", "Clear screen")
     table.add_row("reset", "Clear chat history")
     table.add_row("exit / quit", "Exit OpenBro")
@@ -513,6 +519,34 @@ def _forget(key: str, agent: Agent):
         console.print(f"[green]Forgot:[/green] {key}\n")
     else:
         console.print(f"[yellow]Nothing to forget for: {key}[/yellow]\n")
+
+
+def _show_skills(agent: Agent):
+    info = agent.tool_registry.skills_info()
+    if not info:
+        console.print("[dim]No skills loaded.[/dim]\n")
+        return
+
+    table = Table(title="Installed Skills", border_style="cyan")
+    table.add_column("Skill", style="bold")
+    table.add_column("Configured", justify="center")
+    table.add_column("Tools")
+    table.add_column("Description")
+
+    for s in info:
+        configured = "[green]✓[/green]" if s["configured"] else "[yellow]✗[/yellow]"
+        table.add_row(
+            f"{s['name']} v{s['version']}",
+            configured,
+            ", ".join(s["tools"]),
+            s["description"],
+        )
+
+    console.print(table)
+    console.print(
+        "\n[dim]Configure skills via 'config set skills.<name>.<key> <value>'. "
+        "Drop custom skills in ~/.openbro/skills/.[/dim]\n"
+    )
 
 
 def _show_sessions(agent: Agent):
