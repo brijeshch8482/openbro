@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openbro"
-version = "0.5.0"
+version = "1.0.0b1"
 description = "Tera Apna AI Bro - Open-Source Personal AI Agent"
 readme = "README.md"
 license = {text = "MIT"}

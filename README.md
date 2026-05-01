@@ -1,8 +1,20 @@
+<div align="center">
+
 # OpenBro
 
-**Tera Apna AI Bro** - Open-Source Personal AI Agent
+### **Tera Apna AI Bro** — Open-Source Personal AI Agent
 
-> Terminal pe ek command, aur tera personal AI bhai ready hai.
+*Terminal pe ek command. Voice se bolo. Phone se chalao. Sab kuch on your laptop.*
+
+[![CI](https://github.com/brijeshch8482/openbro/actions/workflows/ci.yml/badge.svg)](https://github.com/brijeshch8482/openbro/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-1.0.0--beta-orange)](CHANGELOG.md)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
+[**Quick Start**](#quick-start) · [**Voice Mode**](#voice-mode) · [**Skills**](#skills-plugin-system) · [**Roadmap**](#roadmap) · [**Contributing**](CONTRIBUTING.md)
+
+</div>
 
 ---
 
@@ -36,43 +48,69 @@ Bro: [confirms first since dangerous] Screen locked
 
 ## Features
 
-- **Personal Assistant** - Open apps, download files, control system, automate everything
-- **Multi-LLM Support** - Claude, GPT, Groq (free), Ollama (offline)
-- **Offline-First** - Works without internet using local models
-- **Auto Setup** - Ollama install, model download, everything automatic
-- **15 Built-in Tools** - Apps, browser, files, downloads, system control, memory, and more
-- **Risk Classification** - Safe/Moderate/Dangerous tiers with confirmation prompts
-- **Audit Logging** - Every tool execution logged for transparency
-- **3-Tier Memory** - Working (in-RAM) + Session (SQLite) + Long-term (facts)
-- **Telegram Bot** - Chat with your bro from your phone, per-user isolation
-- **Skills/Plugins** - GitHub, Gmail, Calendar, Notion, YouTube + bring your own
-- **Voice Mode** - Whisper STT + Edge-TTS + wake words ("Hey bro")
-- **Terminal CLI** - Rich interactive REPL with Hinglish support
-- **Provider Agnostic** - Switch LLM with one config line
-- **Custom Storage** - Choose your drive/folder for data and models
-- **Cloud Backup** - Optional Google Drive/OneDrive/Dropbox sync
-- **Streaming** - Real-time response output
-- **Privacy by Default** - Everything runs locally, no data collection
-- **Cross-Platform** - Windows, Linux, macOS
+|   | Feature | What it gives you |
+|---|---------|-------------------|
+| 🧠 | **Multi-LLM** | Ollama (offline), Claude, GPT, Groq — switch with one command |
+| 🛠️ | **16 Built-in Tools** | Apps, browser, files, downloads, system control, screenshots, memory & more |
+| 🔌 | **Skills / Plugins** | GitHub · Gmail · Google Calendar · Notion · YouTube — drop your own in `~/.openbro/skills/` |
+| 🤖 | **Claude Code Orchestration** | Tu bole *"Claude se bolo X kar"* → OpenBro spawns `claude` CLI with cost limits, live progress |
+| 🎙️ | **Voice Mode** | Whisper STT + Edge-TTS + wake words. Boss-mode permissions over voice |
+| 🌐 | **Language Auto-Match** | Hindi ↔ English ↔ Hinglish — replies in the language you used |
+| 📱 | **Telegram Bot** | Per-user memory isolation, allow-list, dangerous tools auto-blocked |
+| 🧩 | **3-Tier Memory** | Working (RAM) + Session (SQLite) + Long-term (facts) |
+| 🛡️ | **Boss Mode + Risk Tiers** | Safe / Moderate / Dangerous. Voice or chat permission for every tool |
+| 🪟 | **Live Activity Panel** | Watch the agent think, call tools, get permissions in real time |
+| 🔐 | **Privacy First** | Everything local. Audit log of every action. No telemetry |
+| 💾 | **Custom Storage** | Pick any drive / folder for data + models. Single-click migrate |
+| 🔄 | **Single-Click Models** | `model add claude`, `model switch qwen` — old offline model auto-cleanup |
+| 🖥️ | **Cross-Platform** | Windows, Linux, macOS — same commands everywhere |
 
 ## Quick Start
 
-### One-Line Install
+### Recommended — install via pip
 
-**Windows (PowerShell):**
+```bash
+pip install openbro                # core
+pip install "openbro[all,voice]"   # everything (telegram, voice, all providers)
+openbro                            # first-run wizard auto-launches
+```
+
+### One-Line Install (auto-installer)
+
+The installer creates a virtualenv, installs OpenBro, sets up the `openbro` command, and runs the first-time wizard.
+
+<details>
+<summary><strong>Windows</strong> (PowerShell, run as admin)</summary>
+
 ```powershell
-irm https://raw.githubusercontent.com/brijeshch8482/openbro/main/scripts/install.ps1 | iex
+iwr -useb https://openbro.sh/install.ps1 | iex
 ```
 
-**Linux / macOS:**
+If `openbro.sh` is not yet pointing at the repo, fall back to:
+```powershell
+iwr -useb https://github.com/brijeshch8482/openbro/raw/main/scripts/install.ps1 | iex
+```
+</details>
+
+<details>
+<summary><strong>Linux / macOS</strong> (bash)</summary>
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/brijeshch8482/openbro/main/scripts/install.sh | bash
+curl -fsSL https://openbro.sh/install.sh | bash
 ```
 
-### Or via pip
+Fallback:
+```bash
+curl -fsSL https://github.com/brijeshch8482/openbro/raw/main/scripts/install.sh | bash
+```
+</details>
+
+### From source (for contributors)
 
 ```bash
-pip install openbro
+git clone https://github.com/brijeshch8482/openbro.git
+cd openbro
+pip install -e ".[dev,all,voice]"
 openbro
 ```
 
@@ -110,25 +148,30 @@ Step 2: Choose storage location
 | Command | Description |
 |---------|-------------|
 | `help` | Show all commands |
-| `config` | View current configuration |
-| `config set <key> <val>` | Update config |
-| `model` | Show current LLM model |
-| `model <name>` | Switch model or provider |
-| `models` | List downloaded offline models |
-| `pull` | Download a new offline model |
-| `pull <model>` | Download specific model |
+| `config` / `config set <k> <v>` | View / update configuration |
 | `tools` | List available tools (with risk levels) |
-| `storage` | View storage usage and paths |
-| `storage move` | Move data to another drive |
+| `storage` / `storage move` | View / migrate data + model storage |
 | `audit` | Show recent tool execution log |
+| **Memory** | |
 | `memory` | Show stored facts and memory stats |
 | `remember <key> <val>` | Save a fact (e.g. `remember name Brijesh`) |
 | `forget <key>` | Delete a fact |
 | `sessions` | List past conversation sessions |
+| **Skills** | |
 | `skills` | List installed skills with config status |
-| `clear` | Clear screen |
-| `reset` | Clear chat history |
-| `exit` | Exit OpenBro |
+| **Models (single-click)** | |
+| `model list` | List all models (offline + cloud) with status |
+| `model add <name>` | Download Ollama model OR store API key |
+| `model switch <name>` | Switch active model — offers to remove old offline |
+| `model remove <name>` | Uninstall offline OR clear cloud API key |
+| **Activity environment** | |
+| `show` | Open live activity panel (agent's environment) |
+| `hide` | Close panel — agent keeps running in background |
+| `activity` | Print last 30 events one-shot |
+| **Permissions** | |
+| `boss` / `boss off` | Toggle Boss mode — ask before EVERY tool |
+| **Other** | |
+| `clear` / `reset` / `exit` | Clear screen / clear history / quit |
 
 ## CLI Flags
 
@@ -257,6 +300,97 @@ Or manually: `pip uninstall openbro`
 - Python 3.10+
 - (Optional) Ollama - auto-installed during setup
 - (Optional) API keys for cloud providers
+
+## CLI Agent Orchestration 🤝
+
+OpenBro can delegate complex coding tasks to other AI CLIs and stream their progress live. You stay in command — OpenBro is your boss; the CLI is your worker.
+
+```
+You > Hey bro, Claude se bolo openbro me ek weather tool add kar
+Bro: Theek hai, Claude ko delegate karta hu...
+     [permission: cli_agent (moderate) → allow]
+
+╭─ 🤖 Claude Code · D:/OpenBro · cap $1.00 ──────╮
+│ ✓ Read pyproject.toml                            │
+│ ✓ Read openbro/tools/base.py                     │
+│ ✓ Wrote weather_tool.py (54 lines)               │
+│ ✓ Edited registry.py                             │
+│ ✓ Wrote test_weather_tool.py                     │
+│   ⏱ 47s · 💰 $0.11                              │
+╰──────────────────────────────────────────────────╯
+
+Bro: Bhai, weather tool ban gaya. 3 files changed, $0.11 cost.
+```
+
+**Supported CLIs** (auto-detected — install whichever you use):
+
+| CLI | Best for | Install |
+|-----|----------|---------|
+| **Claude Code** (`claude`) | Multi-file refactors, careful work | `npm i -g @anthropic-ai/claude-code` |
+| **Codex** (`codex`) | Fast single-file edits | `npm i -g @openai/codex` |
+| **Aider** (`aider`) | Want every change as a git commit | `pip install aider-chat` |
+| **Gemini** (`gemini`) | Big-context tasks, summaries | `npm i -g @google/gemini-cli` |
+
+**Cost guard** — every call has a per-call USD cap and a daily budget (defaults: $1/call, $10/day, configurable in `safety.cli_agent`). Spend tracked per agent in `~/.openbro/cli_agent_spend.json`.
+
+**Adding a new CLI**: drop a `CliAgent` subclass in `openbro/orchestration/`, register it in `registry.py`. ~50 lines.
+
+## Live Activity Environment 🪟
+
+Every action the agent takes — thinking, tool calls, permission asks, sub-agent invocations — is published to a live event bus.
+
+```
+You > show
+🤖 Activity panel started.
+
+╭──── 🤖 OpenBro Activity ────╮
+│ 14:22:01  user         Chrome khol de              │
+│ 14:22:01  thinking     agent thinking…             │
+│ 14:22:02  tool_start   app (moderate)              │
+│ 14:22:02  permission   asking for app (moderate)   │
+│ 14:22:04  permission   app: ALLOWED                │
+│ 14:22:04  tool_end     app done                    │
+│ 14:22:05  assistant    Chrome khol diya bhai!      │
+╰─────────────────────────────╯
+
+You > hide   # close panel; agent keeps running silently
+```
+
+A background log is **always written** to `~/.openbro/logs/activity.log` whether the panel is open or not — useful for debugging or audit later.
+
+## Boss Mode 🛡️
+
+By default OpenBro asks permission only for **dangerous** tools. Switch to Boss mode and it asks for **every** tool — you stay in control of every action.
+
+```
+You > boss
+Boss mode ON.
+
+You > Chrome khol de
+[Permission required]
+  Tool: app
+  Risk: moderate
+  Args: {'action': 'open', 'app_name': 'chrome'}
+  > [y]es / [n]o / [a]lways allow / [d]eny always
+```
+
+**Voice mode auto-enables Boss mode** and asks via TTS:
+
+> 🔊 *"Bhai, app tool chalana hai. Risk moderate hai. Permission du? Haan ya nahi?"*
+
+Reply with *"haan"* / *"yes"* / *"kar de"* (allow) or *"nahi"* / *"no"* / *"mat kar"* (deny). Hindi + English + Hinglish all parsed. Negation always wins for safety.
+
+## Language Auto-Match 🌐
+
+OpenBro replies in whatever language you used:
+
+| You write/speak | Reply | Voice (in `--voice`) |
+|-----------------|-------|----------------------|
+| `क्रोम खोल दे` | Pure Hindi (Devanagari) | `hi-IN-SwaraNeural` |
+| `chrome khol de bro` | Casual Hinglish | `en-IN-NeerjaNeural` |
+| `open chrome please` | Pure English | `en-IN-NeerjaNeural` |
+
+Detection runs every message — switch languages mid-conversation, OpenBro follows.
 
 ## Memory System (3-tier)
 
