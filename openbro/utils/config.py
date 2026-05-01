@@ -84,4 +84,11 @@ def default_config() -> dict:
             "gcal": {"ical_url": None},
             "notion": {"token": None},
         },
+        "voice": {
+            "enabled": True,
+            "stt_model": "base",
+            "wake_words": ["hey bro", "hi bro", "ok bro", "bro suno"],
+            "tts_voice": "en-IN-NeerjaNeural",
+            "speak_replies": True,
+        },
     }

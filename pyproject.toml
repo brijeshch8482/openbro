@@ -39,11 +39,23 @@ ollama = ["ollama>=0.4"]
 anthropic = ["anthropic>=0.40"]
 openai = ["openai>=1.50"]
 telegram = ["python-telegram-bot>=21.0"]
+voice = [
+    "faster-whisper>=1.0",
+    "edge-tts>=6.1",
+    "sounddevice>=0.4",
+    "numpy>=1.24",
+    "pyttsx3>=2.90",
+]
 all = [
     "ollama>=0.4",
     "anthropic>=0.40",
     "openai>=1.50",
     "python-telegram-bot>=21.0",
+    "faster-whisper>=1.0",
+    "edge-tts>=6.1",
+    "sounddevice>=0.4",
+    "numpy>=1.24",
+    "pyttsx3>=2.90",
 ]
 # Note: Groq uses httpx directly (already a core dependency), no extra package needed
 dev = [

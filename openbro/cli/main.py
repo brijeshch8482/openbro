@@ -17,7 +17,8 @@ from openbro import __version__
 @click.option("--offline", is_flag=True, help="Force offline mode (Ollama only)")
 @click.option("--setup", is_flag=True, help="Re-run first-time setup wizard")
 @click.option("--telegram", is_flag=True, help="Run as Telegram bot instead of CLI")
-def main(provider, model, offline, setup, telegram):
+@click.option("--voice", is_flag=True, help="Run in voice mode (mic + TTS)")
+def main(provider, model, offline, setup, telegram, voice):
     """OpenBro - Tera Apna AI Bro
 
     Open-source personal AI agent. Just run 'openbro' and start chatting!
@@ -45,6 +46,12 @@ def main(provider, model, offline, setup, telegram):
         from openbro.channels.telegram_bot import run_telegram_from_config
 
         run_telegram_from_config()
+        return
+
+    if voice:
+        from openbro.cli.voice_mode import run_voice_mode
+
+        run_voice_mode()
         return
 
     from openbro.cli.repl import start_repl
