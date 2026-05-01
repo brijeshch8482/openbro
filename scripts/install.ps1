@@ -30,34 +30,86 @@ Write-Host "  ║      Tera Apna AI Bro - Open Source      ║" -ForegroundColor
 Write-Host "  ╚═══════════════════════════════════════════╝" -ForegroundColor Cyan
 Write-Host ""
 
-# ─── Step 1/5: Python ────────────────────────────────────────
+# ─── Step 1/5: Python (auto-install if missing) ──────────────
 Write-Step 1 5 "Checking Python..."
-$python = $null
-foreach ($cmd in @("python", "python3", "py")) {
-    try {
-        $version = & $cmd --version 2>&1
-        if ($version -match "Python 3\.(\d+)") {
-            $minor = [int]$Matches[1]
-            if ($minor -ge 10) {
-                $python = $cmd
-                Write-OK "Found $version"
-                break
-            } else {
-                Write-Info "$version (too old, need 3.10+)"
+
+function Find-Python {
+    foreach ($cmd in @("python", "python3", "py")) {
+        try {
+            $version = & $cmd --version 2>&1
+            if ($version -match "Python 3\.(\d+)") {
+                $minor = [int]$Matches[1]
+                if ($minor -ge 10) {
+                    return @{ cmd = $cmd; version = $version }
+                }
             }
-        }
-    } catch {}
+        } catch {}
+    }
+    return $null
 }
 
-if (-not $python) {
-    Write-Err "Python 3.10+ not found"
-    Write-Host ""
-    Write-Host "  Install Python from: https://python.org/downloads/" -ForegroundColor Yellow
-    Write-Host "  IMPORTANT: Tick 'Add Python to PATH' during install!" -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "  Or via winget:" -ForegroundColor DarkGray
-    Write-Host "    winget install Python.Python.3.12" -ForegroundColor Gray
-    exit 1
+$pyInfo = Find-Python
+if ($pyInfo) {
+    $python = $pyInfo.cmd
+    Write-OK "Found $($pyInfo.version)"
+} else {
+    Write-Warn "Python 3.10+ not found — auto-installing Python 3.12..."
+
+    # Strategy 1: winget (Windows 10/11 default since 2021)
+    $wingetOk = $false
+    try {
+        $null = Get-Command winget -ErrorAction Stop
+        Write-Info "Using winget..."
+        & winget install --id Python.Python.3.12 --silent --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) { $wingetOk = $true }
+    } catch {
+        Write-Info "winget not available, falling back to direct download"
+    }
+
+    # Strategy 2: direct download from python.org (silent install)
+    if (-not $wingetOk) {
+        $pyUrl = "https://www.python.org/ftp/python/3.12.7/python-3.12.7-amd64.exe"
+        $pyTmp = "$env:TEMP\python-installer.exe"
+        try {
+            Write-Info "Downloading Python 3.12 installer (~25 MB)..."
+            Invoke-WebRequest $pyUrl -OutFile $pyTmp -UseBasicParsing
+            Write-Info "Running installer (silent, adds to PATH)..."
+            # Quiet install for current user, add to PATH, no UAC prompt
+            $args = @(
+                "/quiet",
+                "InstallAllUsers=0",
+                "PrependPath=1",
+                "Include_test=0",
+                "Include_doc=0",
+                "Include_launcher=1"
+            )
+            Start-Process -FilePath $pyTmp -ArgumentList $args -Wait -NoNewWindow
+            Remove-Item $pyTmp -Force -ErrorAction SilentlyContinue
+        } catch {
+            Write-Err "Python download failed: $_"
+            Write-Host ""
+            Write-Host "  Install manually: https://python.org/downloads/" -ForegroundColor Yellow
+            Write-Host "  IMPORTANT: Tick 'Add Python to PATH' during install!" -ForegroundColor Yellow
+            exit 1
+        }
+    }
+
+    # Refresh PATH for current session so newly-installed python is findable
+    $env:Path = [Environment]::GetEnvironmentVariable("Path","Machine") + ";" +
+                [Environment]::GetEnvironmentVariable("Path","User")
+
+    # Re-detect Python
+    $pyInfo = Find-Python
+    if ($pyInfo) {
+        $python = $pyInfo.cmd
+        Write-OK "Installed $($pyInfo.version)"
+    } else {
+        Write-Err "Python install completed but command not found on PATH"
+        Write-Host ""
+        Write-Host "  Open a NEW PowerShell window and re-run the installer:" -ForegroundColor Yellow
+        Write-Host "    iwr -useb https://github.com/$REPO/raw/$Branch/scripts/install.ps1 | iex" -ForegroundColor Cyan
+        exit 1
+    }
 }
 
 # ─── Step 2/5: pip + OpenBro ─────────────────────────────────
