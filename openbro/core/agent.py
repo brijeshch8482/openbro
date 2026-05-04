@@ -1,5 +1,6 @@
 """Core Agent - the brain of OpenBro."""
 
+import threading
 from collections.abc import Iterator
 
 from rich.console import Console
@@ -61,6 +62,7 @@ class Agent:
         self.max_history = config.get("agent", {}).get("max_history", 50)
 
         self.last_language = "hinglish"
+        self._lock = threading.RLock()  # serialize chat() across threads (REPL + voice)
 
         console.print(f"[dim]LLM: {self.provider.name()}[/dim]")
         self.bus.emit("system", f"agent ready: {self.provider.name()}")
@@ -84,6 +86,10 @@ class Agent:
         self.history[0] = Message(role="system", content=self._build_system_prompt(lang))
 
     def chat(self, user_input: str) -> str:
+        with self._lock:
+            return self._chat_impl(user_input)
+
+    def _chat_impl(self, user_input: str) -> str:
         self.last_language = detect_language(user_input)
         self._refresh_system_prompt(self.last_language)
 
@@ -122,6 +128,14 @@ class Agent:
 
     def stream_chat(self, user_input: str) -> Iterator[str]:
         """Stream response tokens for real-time output."""
+        # Acquire lock for the duration of the stream.
+        self._lock.acquire()
+        try:
+            yield from self._stream_chat_impl(user_input)
+        finally:
+            self._lock.release()
+
+    def _stream_chat_impl(self, user_input: str) -> Iterator[str]:
         self.last_language = detect_language(user_input)
         self._refresh_system_prompt(self.last_language)
         self.bus.emit("user", user_input, lang=self.last_language)

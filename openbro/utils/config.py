@@ -96,6 +96,7 @@ def default_config() -> dict:
         },
         "voice": {
             "enabled": True,
+            "auto_start": False,  # if true, voice listens by default in REPL
             "stt_model": "base",
             "wake_words": ["hey bro", "hi bro", "ok bro", "bro suno"],
             "tts_voice": "en-IN-NeerjaNeural",

@@ -55,7 +55,10 @@ def run_wizard():
     # Step 4: Personality
     _step_personality(config)
 
-    # Step 5: Telegram (optional)
+    # Step 5: Voice mode (optional, hands-free)
+    _step_voice(config)
+
+    # Step 6: Telegram (optional)
     _step_telegram(config)
 
     # Save config
@@ -278,8 +281,86 @@ def _step_personality(config: dict):
     config["agent"]["system_prompt"] = prompts[personality]
 
 
+def _step_voice(config: dict):
+    console.print("\n[bold yellow]Step 5:[/bold yellow] Voice mode (hands-free)\n")
+    console.print("[dim]Always-on mic + wake word ('Hey bro') + TTS reply.[/dim]")
+    console.print("[dim]You can type AND speak — both work simultaneously.[/dim]\n")
+
+    # Check voice deps
+    try:
+        import faster_whisper  # noqa: F401
+        import sounddevice  # noqa: F401
+
+        deps_ok = True
+    except Exception:
+        deps_ok = False
+
+    if not deps_ok:
+        console.print(
+            "[yellow]Voice dependencies missing.[/yellow] "
+            "[dim]Install with: pip install 'openbro[voice]'[/dim]\n"
+        )
+        if not Confirm.ask("Install voice dependencies now?", default=True):
+            config["voice"]["auto_start"] = False
+            console.print("[dim]Skipped. Use 'openbro --voice' later if you install them.[/dim]\n")
+            return
+
+        import subprocess
+        import sys
+
+        console.print("[dim]Installing voice deps (1-2 min)...[/dim]")
+        try:
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    "--quiet",
+                    "faster-whisper>=1.0",
+                    "edge-tts>=6.1",
+                    "sounddevice>=0.4",
+                    "numpy>=1.24",
+                    "pyttsx3>=2.90",
+                ],
+                check=True,
+            )
+            console.print("[green]Voice deps installed.[/green]\n")
+        except Exception as e:
+            console.print(f"[red]Install failed: {e}[/red]")
+            config["voice"]["auto_start"] = False
+            return
+
+    enable_q = "Enable voice mode by default? (mic always-on, wake word activation)"
+    if not Confirm.ask(enable_q, default=False):
+        config["voice"]["auto_start"] = False
+        console.print(
+            "[dim]Skipped. Voice still works via 'openbro --voice' or 'voice on' in REPL.[/dim]\n"
+        )
+        return
+
+    config["voice"]["auto_start"] = True
+
+    # Optional: pre-download Whisper model so first wake-word doesn't lag
+    if Confirm.ask(
+        "Pre-download Whisper STT model now? (~140 MB, avoids lag on first use)",
+        default=True,
+    ):
+        try:
+            console.print("[dim]Downloading Whisper 'base' model...[/dim]")
+            from faster_whisper import WhisperModel
+
+            WhisperModel("base", device="cpu", compute_type="int8")
+            console.print("[green]Model ready.[/green]\n")
+        except Exception as e:
+            console.print(f"[yellow]Pre-download failed: {e}[/yellow]")
+            console.print("[dim]Will download on first wake-word instead.[/dim]\n")
+
+    console.print("[green]Voice mode enabled.[/green] [dim]Say 'Hey bro' anytime in chat.[/dim]\n")
+
+
 def _step_telegram(config: dict):
-    console.print("\n[bold yellow]Step 5:[/bold yellow] Telegram bot (optional)\n")
+    console.print("\n[bold yellow]Step 6:[/bold yellow] Telegram bot (optional)\n")
     console.print("[dim]Control OpenBro from your phone via Telegram.[/dim]")
     console.print("[dim]You'll need a bot token from @BotFather on Telegram.[/dim]\n")
 

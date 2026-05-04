@@ -35,6 +35,7 @@ COMMANDS = [
     "hide",
     "boss",
     "activity",
+    "voice",
     "clear",
     "reset",
 ]
@@ -69,6 +70,11 @@ def start_repl():
     )
 
     agent = Agent()
+
+    # Auto-start voice listener if configured
+    cfg = load_config()
+    if cfg.get("voice", {}).get("auto_start"):
+        _start_voice(agent)
 
     while True:
         try:
@@ -205,6 +211,14 @@ def _handle_command(cmd: str, agent: Agent) -> bool:
         console.print("[green]Boss mode OFF. Sirf dangerous tools confirm honge.[/green]")
         return True
 
+    if cmd_lower in ("voice", "voice on"):
+        _start_voice(agent)
+        return True
+
+    if cmd_lower == "voice off":
+        _stop_voice()
+        return True
+
     if cmd_lower.startswith("model add "):
         from openbro.cli.model_manager import add_model
 
@@ -274,6 +288,7 @@ def _show_help():
     table.add_row("hide", "Close the live activity panel (agent runs in background)")
     table.add_row("activity", "Print last 30 activity events (one-shot)")
     table.add_row("boss / boss off", "Toggle Boss mode — agent asks permission for every tool")
+    table.add_row("voice / voice off", "Toggle voice listener (mic always-on inside REPL)")
     table.add_row("model list", "List all available models with status")
     table.add_row("model add <name>", "Add a model (downloads Ollama OR stores API key)")
     table.add_row("model switch <name>", "Switch active model (offers to remove old offline)")
@@ -625,6 +640,73 @@ def _show_skills(agent: Agent):
 
 
 _active_panel = None
+_voice_listener = None
+_voice_thread = None
+
+
+def _start_voice(agent: Agent):
+    """Start a background voice listener thread alongside the REPL."""
+    global _voice_listener, _voice_thread
+
+    if _voice_thread and _voice_thread.is_alive():
+        console.print("[dim]Voice already listening.[/dim]")
+        return
+
+    try:
+        from openbro.voice.listener import VoiceListener
+        from openbro.voice.tts import TextToSpeech
+    except Exception as e:
+        console.print(f"[red]Voice deps missing: {e}[/red]")
+        console.print("[dim]Install: pip install 'openbro[voice]'[/dim]")
+        return
+
+    cfg = load_config()
+    voice_cfg = cfg.get("voice", {}) or {}
+    tts = TextToSpeech(voice=voice_cfg.get("tts_voice", "en-IN-NeerjaNeural"))
+
+    try:
+        _voice_listener = VoiceListener(
+            wake_words=voice_cfg.get("wake_words"),
+            stt_model=voice_cfg.get("stt_model", "base"),
+            speak_replies=voice_cfg.get("speak_replies", True),
+        )
+    except Exception as e:
+        console.print(f"[red]Voice listener init failed: {e}[/red]")
+        return
+
+    _voice_listener.tts = tts
+
+    def _handle(text: str) -> str:
+        try:
+            from openbro.utils.language import voice_for
+
+            reply = agent.chat(text)
+            tts.voice = voice_for(agent.last_language)
+            return reply
+        except Exception as ex:
+            return f"Voice error: {ex}"
+
+    _voice_listener.on_transcript = _handle
+
+    import threading
+
+    _voice_thread = threading.Thread(target=_voice_listener.run, daemon=True)
+    _voice_thread.start()
+    console.print(
+        "[green]🎙️  Voice listening.[/green] "
+        "[dim]Wake words: hey bro, ok bro. Type 'voice off' to stop.[/dim]"
+    )
+
+
+def _stop_voice():
+    global _voice_listener, _voice_thread
+    if not _voice_listener:
+        console.print("[dim]Voice is not active.[/dim]")
+        return
+    _voice_listener.stop()
+    _voice_listener = None
+    _voice_thread = None
+    console.print("[yellow]Voice listening stopped.[/yellow]")
 
 
 def _start_panel():
