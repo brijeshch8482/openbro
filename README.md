@@ -75,35 +75,40 @@ pip install "openbro[all,voice]"   # everything (telegram, voice, all providers)
 openbro                            # first-run wizard auto-launches
 ```
 
-### One-Line Install (auto-installer)
+### One-Line Install (auto-installer) ⭐ recommended
 
-The installer creates a virtualenv, installs OpenBro, sets up the `openbro` command, and runs the first-time wizard.
+Single command, zero-friction. Auto-installs Python (if missing), pip-installs OpenBro with all extras, and launches the LLM setup wizard. End-to-end in 5–10 minutes.
 
-<details>
-<summary><strong>Windows</strong> (PowerShell, run as admin)</summary>
-
-```powershell
-iwr -useb https://openbro.sh/install.ps1 | iex
-```
-
-If `openbro.sh` is not yet pointing at the repo, fall back to:
+**Windows** (PowerShell)
 ```powershell
 iwr -useb https://github.com/brijeshch8482/openbro/raw/main/scripts/install.ps1 | iex
 ```
-</details>
 
-<details>
-<summary><strong>Linux / macOS</strong> (bash)</summary>
-
-```bash
-curl -fsSL https://openbro.sh/install.sh | bash
-```
-
-Fallback:
+**Linux / macOS** (bash)
 ```bash
 curl -fsSL https://github.com/brijeshch8482/openbro/raw/main/scripts/install.sh | bash
 ```
-</details>
+
+The installer will:
+1. Detect & auto-install Python 3.12 (winget on Windows · brew on macOS · apt/dnf on Linux)
+2. `pip install openbro[all,voice]` — Telegram + voice + every LLM provider
+3. Auto-run `openbro --setup` so you finish with a fully configured, ready-to-chat OpenBro
+
+### Uninstall
+
+Same one-liner — removes pip package, config, memory, and optionally Ollama models + Whisper cache (asks you each time).
+
+**Windows**
+```powershell
+iwr -useb https://github.com/brijeshch8482/openbro/raw/main/scripts/uninstall.ps1 | iex
+```
+
+**Linux / macOS**
+```bash
+curl -fsSL https://github.com/brijeshch8482/openbro/raw/main/scripts/uninstall.sh | bash
+```
+
+> Add `-Force` (PowerShell) or `OPENBRO_FORCE=1` (bash) for non-interactive uninstall. `-KeepData` / `OPENBRO_KEEP_DATA=1` preserves config + memory.
 
 ### From source (for contributors)
 
@@ -280,20 +285,6 @@ You > pull
 You > pull llama3.2:3b
 # Direct download
 ```
-
-## Uninstall
-
-**Windows:**
-```powershell
-.\scripts\uninstall.ps1
-```
-
-**Linux/macOS:**
-```bash
-bash scripts/uninstall.sh
-```
-
-Or manually: `pip uninstall openbro`
 
 ## Requirements
 
