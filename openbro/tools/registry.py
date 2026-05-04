@@ -17,6 +17,7 @@ from openbro.tools.shell_tool import ShellTool
 from openbro.tools.system_control_tool import SystemControlTool
 from openbro.tools.system_tool import SystemTool
 from openbro.tools.web_tool import WebTool
+from openbro.tools.word_tool import WordTool
 from openbro.utils.audit import log_tool_execution
 
 BUILTIN_TOOLS = [
@@ -36,6 +37,7 @@ BUILTIN_TOOLS = [
     SystemControlTool,
     SystemTool,
     WebTool,
+    WordTool,
 ]
 
 
