@@ -32,76 +32,172 @@ echo -e "${C}  ║          OpenBro Installer v1.0          ║${N}"
 echo -e "${C}  ║      Tera Apna AI Bro - Open Source      ║${N}"
 echo -e "${C}  ╚═══════════════════════════════════════════╝${N}"
 
-# ─── Step 1/5: Python (auto-install if missing) ──────────────
+# ─── Step 1/5: Python (robust detect + install) ──────────────
 step 1 5 "Checking Python..."
 
+# Probe a python exe; echo "cmd|version|minor" if it's real Python 3.10+, nothing otherwise.
+probe_python() {
+    local exe="$1"
+    if ! command -v "$exe" &> /dev/null; then return 1; fi
+    local resolved
+    resolved=$(command -v "$exe")
+    # Reject Microsoft Store stub (only matters in WSL but cheap to check)
+    case "$resolved" in *WindowsApps*) return 1 ;; esac
+    local raw
+    raw=$("$exe" --version 2>&1) || return 1
+    local minor
+    minor=$(echo "$raw" | grep -oE '3\.[0-9]+' | head -1 | cut -d. -f2)
+    if [ -z "$minor" ]; then return 1; fi
+    echo "$exe|$raw|$minor|$resolved"
+    return 0
+}
+
+# Find best available Python (highest minor ≥ 10). Echo "cmd|ver|minor|path" or "OLD|cmd|ver|minor|path".
 find_python() {
-    for cmd in python3 python; do
-        if command -v "$cmd" &> /dev/null; then
-            v=$("$cmd" --version 2>&1)
-            m=$(echo "$v" | grep -oE '3\.[0-9]+' | head -1 | cut -d. -f2)
-            if [ -n "$m" ] && [ "$m" -ge 10 ] 2>/dev/null; then
-                echo "$cmd"
-                return 0
+    local best_cmd="" best_minor=0 best_ver="" best_path=""
+    local old_cmd="" old_minor=0 old_ver="" old_path=""
+
+    # Iterate likely candidates
+    local candidates="python3 python python3.13 python3.12 python3.11 python3.10"
+    for c in $candidates; do
+        local r
+        r=$(probe_python "$c") || continue
+        IFS='|' read -r cmd ver minor path <<< "$r"
+        if [ "$minor" -ge 10 ]; then
+            if [ "$minor" -gt "$best_minor" ]; then
+                best_cmd="$cmd"; best_minor="$minor"; best_ver="$ver"; best_path="$path"
+            fi
+        else
+            if [ "$minor" -gt "$old_minor" ]; then
+                old_cmd="$cmd"; old_minor="$minor"; old_ver="$ver"; old_path="$path"
             fi
         fi
     done
+
+    # Also scan common install dirs (macOS Homebrew, manual installs)
+    for p in /usr/local/bin/python3.* /opt/homebrew/bin/python3.* /opt/python3*/bin/python3 ~/.pyenv/versions/3.*/bin/python3 ; do
+        [ -x "$p" ] || continue
+        local r
+        r=$(probe_python "$p") || continue
+        IFS='|' read -r cmd ver minor path <<< "$r"
+        if [ "$minor" -ge 10 ] && [ "$minor" -gt "$best_minor" ]; then
+            best_cmd="$cmd"; best_minor="$minor"; best_ver="$ver"; best_path="$path"
+        fi
+    done
+
+    if [ -n "$best_cmd" ]; then
+        echo "OK|$best_cmd|$best_ver|$best_minor|$best_path"
+        return 0
+    fi
+    if [ -n "$old_cmd" ]; then
+        echo "OLD|$old_cmd|$old_ver|$old_minor|$old_path"
+        return 0
+    fi
     return 1
 }
 
-PYTHON=$(find_python)
-if [ -n "$PYTHON" ]; then
-    ok "Found $($PYTHON --version 2>&1)"
-else
-    warn "Python 3.10+ not found — auto-installing..."
-    INSTALL_OK=0
-
+install_python() {
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        # macOS: prefer brew
         if command -v brew &> /dev/null; then
             info "Installing via Homebrew..."
-            brew install python@3.12 && INSTALL_OK=1
-        else
-            info "Installing Homebrew first (needs admin)..."
-            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" && \
-                brew install python@3.12 && INSTALL_OK=1
+            brew install python@3.12 2>&1 | tail -5
+            return $?
         fi
-    elif [ -f /etc/debian_version ]; then
-        info "Installing via apt-get (needs sudo)..."
-        sudo apt-get update -qq && \
-            sudo apt-get install -y python3 python3-pip python3-venv && INSTALL_OK=1
-    elif [ -f /etc/redhat-release ] || [ -f /etc/fedora-release ]; then
-        info "Installing via dnf (needs sudo)..."
-        sudo dnf install -y python3 python3-pip && INSTALL_OK=1
-    elif [ -f /etc/arch-release ]; then
-        info "Installing via pacman (needs sudo)..."
-        sudo pacman -S --noconfirm python python-pip && INSTALL_OK=1
-    else
-        warn "Unknown distro — cannot auto-install Python."
+        info "Installing Homebrew first..."
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        brew install python@3.12
+        return $?
     fi
 
-    if [ "$INSTALL_OK" != "1" ]; then
-        err "Auto-install failed. Install Python 3.10+ manually then re-run:"
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            echo -e "  ${B}brew install python@3.12${N}"
-        elif [ -f /etc/debian_version ]; then
-            echo -e "  ${B}sudo apt install python3 python3-pip python3-venv${N}"
-        elif [ -f /etc/redhat-release ]; then
-            echo -e "  ${B}sudo dnf install python3 python3-pip${N}"
-        else
-            echo -e "  ${B}https://python.org/downloads/${N}"
-        fi
-        exit 1
+    if [ -f /etc/debian_version ]; then
+        info "Installing via apt-get (sudo required)..."
+        sudo apt-get update -qq && sudo apt-get install -y python3 python3-pip python3-venv
+        return $?
+    fi
+    if [ -f /etc/redhat-release ] || [ -f /etc/fedora-release ]; then
+        info "Installing via dnf (sudo required)..."
+        sudo dnf install -y python3 python3-pip
+        return $?
+    fi
+    if [ -f /etc/arch-release ]; then
+        info "Installing via pacman (sudo required)..."
+        sudo pacman -S --noconfirm python python-pip
+        return $?
     fi
 
-    # Re-detect after install
-    PYTHON=$(find_python)
-    if [ -n "$PYTHON" ]; then
-        ok "Installed $($PYTHON --version 2>&1)"
-    else
-        err "Python installed but not on PATH. Open a new shell and re-run."
+    # Unknown distro: try common universal paths
+    if command -v apk &> /dev/null; then
+        sudo apk add --no-cache python3 py3-pip
+        return $?
+    fi
+    return 1
+}
+
+# ── Detect ──
+DETECT=$(find_python || true)
+PYTHON=""
+if [ -n "$DETECT" ]; then
+    STATUS=$(echo "$DETECT" | cut -d'|' -f1)
+    if [ "$STATUS" = "OK" ]; then
+        PYTHON=$(echo "$DETECT" | cut -d'|' -f2)
+        VER=$(echo "$DETECT" | cut -d'|' -f3)
+        PATH_=$(echo "$DETECT" | cut -d'|' -f5)
+        ok "Found $VER at $PATH_"
+    elif [ "$STATUS" = "OLD" ]; then
+        OLD_VER=$(echo "$DETECT" | cut -d'|' -f3)
+        warn "Found old $OLD_VER — needs 3.10+. Installing newer..."
+        if ! install_python; then
+            err "Python install failed."
+            echo -e "  Manual fix:" >&2
+            if [[ "$OSTYPE" == "darwin"* ]]; then
+                echo -e "    ${B}brew install python@3.12${N}"
+            elif [ -f /etc/debian_version ]; then
+                echo -e "    ${B}sudo apt install python3 python3-pip python3-venv${N}"
+            else
+                echo -e "    ${B}https://python.org/downloads/${N}"
+            fi
+            exit 1
+        fi
+        DETECT=$(find_python || true)
+        STATUS=$(echo "$DETECT" | cut -d'|' -f1)
+        if [ "$STATUS" = "OK" ]; then
+            PYTHON=$(echo "$DETECT" | cut -d'|' -f2)
+            VER=$(echo "$DETECT" | cut -d'|' -f3)
+            ok "Installed $VER"
+        else
+            err "Install ran but Python still not detected. Open a new shell and retry."
+            exit 1
+        fi
+    fi
+else
+    warn "No Python found — auto-installing..."
+    if ! install_python; then
+        err "Python install failed across all strategies."
+        echo "" >&2
+        echo "  Possible causes:" >&2
+        echo "  - No internet" >&2
+        echo "  - sudo password not entered" >&2
+        echo "  - Corporate / locked-down system" >&2
+        echo "" >&2
+        echo "  Install Python 3.10+ manually then re-run." >&2
         exit 1
     fi
+    DETECT=$(find_python || true)
+    STATUS=$(echo "$DETECT" | cut -d'|' -f1)
+    if [ "$STATUS" = "OK" ]; then
+        PYTHON=$(echo "$DETECT" | cut -d'|' -f2)
+        VER=$(echo "$DETECT" | cut -d'|' -f3)
+        ok "Installed $VER"
+    else
+        err "Install ran but Python still not detected. Open a new shell and retry."
+        exit 1
+    fi
+fi
+
+# Final sanity check
+if ! "$PYTHON" -c "import sys; print('Python exe:', sys.executable)" 2>/dev/null; then
+    err "Python found but failed to run."
+    exit 1
 fi
 
 # ─── Step 2/5: pip + OpenBro ─────────────────────────────────

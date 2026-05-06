@@ -237,13 +237,13 @@ def test_tool_registry():
 
 
 def test_tool_registry_count():
-    assert len(BUILTIN_TOOLS) == 17
+    assert len(BUILTIN_TOOLS) == 18
 
 
 def test_tool_registry_schema():
     registry = ToolRegistry()
     schemas = registry.get_tools_schema()
-    assert len(schemas) == 17
+    assert len(schemas) == 18
     for s in schemas:
         assert "name" in s
         assert "parameters" in s

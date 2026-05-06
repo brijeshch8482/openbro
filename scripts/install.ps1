@@ -30,86 +30,210 @@ Write-Host "  ║      Tera Apna AI Bro - Open Source      ║" -ForegroundColor
 Write-Host "  ╚═══════════════════════════════════════════╝" -ForegroundColor Cyan
 Write-Host ""
 
-# ─── Step 1/5: Python (auto-install if missing) ──────────────
+# ─── Step 1/5: Python (robust detect + install) ──────────────
 Write-Step 1 5 "Checking Python..."
 
+# Refresh session PATH from registry (covers earlier installs in same session)
+function Refresh-Path {
+    $env:Path = [Environment]::GetEnvironmentVariable("Path","Machine") + ";" +
+                [Environment]::GetEnvironmentVariable("Path","User")
+}
+
+# Detects Microsoft Store Python alias (a stub that opens Store, not real Python)
+function Is-StorePythonStub($exePath) {
+    if (-not $exePath) { return $false }
+    return $exePath -like "*\WindowsApps\*"
+}
+
+# Try to launch a python exe and parse "Python X.Y.Z"; returns @{cmd, version, minor, path} or $null
+function Probe-Python($exe) {
+    try {
+        $resolved = (Get-Command $exe -ErrorAction Stop).Source
+        if (Is-StorePythonStub $resolved) { return $null }
+        # Use --version which writes to stdout in 3.4+; redirect both anyway
+        $verRaw = & $exe --version 2>&1 | Out-String
+        if ($verRaw -match "Python\s+3\.(\d+)\.(\d+)?") {
+            $minor = [int]$Matches[1]
+            return @{
+                cmd     = $exe
+                version = $verRaw.Trim()
+                minor   = $minor
+                path    = $resolved
+            }
+        }
+    } catch {}
+    return $null
+}
+
+# Hunt across PATH, py launcher targets, and known install dirs.
 function Find-Python {
-    foreach ($cmd in @("python", "python3", "py")) {
-        try {
-            $version = & $cmd --version 2>&1
-            if ($version -match "Python 3\.(\d+)") {
-                $minor = [int]$Matches[1]
-                if ($minor -ge 10) {
-                    return @{ cmd = $cmd; version = $version }
+    $candidates = @()
+
+    foreach ($cmd in @("python", "python3")) {
+        $info = Probe-Python $cmd
+        if ($info) { $candidates += $info }
+    }
+
+    # py launcher: list every installed Python
+    try {
+        $null = Get-Command py -ErrorAction Stop
+        $list = & py --list-paths 2>&1
+        foreach ($line in $list) {
+            if ($line -match "(-V:)?(\d+\.\d+)\s+\*?\s*(.+)$") {
+                $exe = $Matches[3].Trim()
+                if ($exe -and (Test-Path $exe)) {
+                    $info = Probe-Python $exe
+                    if ($info) { $candidates += $info }
                 }
             }
-        } catch {}
+        }
+    } catch {}
+
+    # Common install dirs (per-user + machine-wide)
+    $globs = @(
+        "$env:LocalAppData\Programs\Python\Python3*\python.exe",
+        "$env:ProgramFiles\Python3*\python.exe",
+        "${env:ProgramFiles(x86)}\Python3*\python.exe",
+        "C:\Python3*\python.exe"
+    )
+    foreach ($g in $globs) {
+        Get-ChildItem -Path $g -ErrorAction SilentlyContinue | ForEach-Object {
+            $info = Probe-Python $_.FullName
+            if ($info) { $candidates += $info }
+        }
+    }
+
+    # Pick the highest 3.10+
+    $valid = $candidates | Where-Object { $_.minor -ge 10 } | Sort-Object minor -Descending
+    if ($valid) { return $valid[0] }
+    # Or report best-but-too-old so we can warn user
+    if ($candidates) {
+        return ($candidates | Sort-Object minor -Descending)[0] | Add-Member -NotePropertyName tooOld -NotePropertyValue $true -PassThru
     }
     return $null
 }
 
-$pyInfo = Find-Python
-if ($pyInfo) {
-    $python = $pyInfo.cmd
-    Write-OK "Found $($pyInfo.version)"
-} else {
-    Write-Warn "Python 3.10+ not found — auto-installing Python 3.12..."
-
-    # Strategy 1: winget (Windows 10/11 default since 2021)
-    $wingetOk = $false
-    try {
-        $null = Get-Command winget -ErrorAction Stop
-        Write-Info "Using winget..."
-        & winget install --id Python.Python.3.12 --silent --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
-        if ($LASTEXITCODE -eq 0) { $wingetOk = $true }
-    } catch {
-        Write-Info "winget not available, falling back to direct download"
+# Install Python 3.12 — try multiple strategies
+function Install-Python {
+    # Strategy 1: winget (modern Win10/Win11)
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        Write-Info "Using winget (Python.Python.3.12, user scope)..."
+        $wgArgs = @(
+            "install", "--id", "Python.Python.3.12",
+            "--source", "winget",
+            "--silent", "--accept-source-agreements", "--accept-package-agreements",
+            "--scope", "user"
+        )
+        $proc = Start-Process winget -ArgumentList $wgArgs -Wait -PassThru -NoNewWindow
+        # winget exit 0 = installed; -1978335189 = already installed (also fine)
+        if ($proc.ExitCode -eq 0 -or $proc.ExitCode -eq -1978335189) {
+            return $true
+        }
+        Write-Info "winget exit=$($proc.ExitCode), trying direct download..."
+    } else {
+        Write-Info "winget not available, using direct download..."
     }
 
-    # Strategy 2: direct download from python.org (silent install)
-    if (-not $wingetOk) {
-        $pyUrl = "https://www.python.org/ftp/python/3.12.7/python-3.12.7-amd64.exe"
-        $pyTmp = "$env:TEMP\python-installer.exe"
+    # Strategy 2: direct download from python.org
+    # We pin a known stable version and verify the URL exists before downloading.
+    $candidates = @("3.12.8", "3.12.7", "3.12.6", "3.13.1", "3.13.0")
+    foreach ($ver in $candidates) {
+        $url = "https://www.python.org/ftp/python/$ver/python-$ver-amd64.exe"
         try {
-            Write-Info "Downloading Python 3.12 installer (~25 MB)..."
-            Invoke-WebRequest $pyUrl -OutFile $pyTmp -UseBasicParsing
-            Write-Info "Running installer (silent, adds to PATH)..."
-            # Quiet install for current user, add to PATH, no UAC prompt
-            $args = @(
-                "/quiet",
-                "InstallAllUsers=0",
-                "PrependPath=1",
-                "Include_test=0",
-                "Include_doc=0",
-                "Include_launcher=1"
-            )
-            Start-Process -FilePath $pyTmp -ArgumentList $args -Wait -NoNewWindow
-            Remove-Item $pyTmp -Force -ErrorAction SilentlyContinue
+            $head = Invoke-WebRequest -Method Head -Uri $url -UseBasicParsing -ErrorAction Stop -TimeoutSec 10
+            if ($head.StatusCode -eq 200) {
+                $tmp = "$env:TEMP\python-$ver-installer.exe"
+                Write-Info "Downloading Python $ver (~25 MB)..."
+                Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing -TimeoutSec 120
+                Write-Info "Running installer (silent, user scope, adds to PATH)..."
+                $instArgs = @(
+                    "/quiet",
+                    "InstallAllUsers=0",
+                    "PrependPath=1",
+                    "Include_test=0",
+                    "Include_doc=0",
+                    "Include_launcher=1",
+                    "AssociateFiles=0",
+                    "Shortcuts=0"
+                )
+                $p = Start-Process $tmp -ArgumentList $instArgs -Wait -PassThru -NoNewWindow
+                Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+                if ($p.ExitCode -eq 0) { return $true }
+                Write-Info "Installer exit=$($p.ExitCode), trying next version..."
+            }
         } catch {
-            Write-Err "Python download failed: $_"
-            Write-Host ""
-            Write-Host "  Install manually: https://python.org/downloads/" -ForegroundColor Yellow
-            Write-Host "  IMPORTANT: Tick 'Add Python to PATH' during install!" -ForegroundColor Yellow
-            exit 1
+            continue
         }
     }
+    return $false
+}
 
-    # Refresh PATH for current session so newly-installed python is findable
-    $env:Path = [Environment]::GetEnvironmentVariable("Path","Machine") + ";" +
-                [Environment]::GetEnvironmentVariable("Path","User")
+# ── Detect what we have ──
+$pyInfo = Find-Python
 
-    # Re-detect Python
-    $pyInfo = Find-Python
-    if ($pyInfo) {
-        $python = $pyInfo.cmd
-        Write-OK "Installed $($pyInfo.version)"
-    } else {
-        Write-Err "Python install completed but command not found on PATH"
+if ($pyInfo -and -not $pyInfo.tooOld) {
+    $python = $pyInfo.cmd
+    Write-OK "Found $($pyInfo.version) at $($pyInfo.path)"
+} elseif ($pyInfo -and $pyInfo.tooOld) {
+    Write-Warn "Found old $($pyInfo.version) — needs 3.10+. Installing newer alongside..."
+    if (-not (Install-Python)) {
+        Write-Err "Python install failed across all strategies."
         Write-Host ""
-        Write-Host "  Open a NEW PowerShell window and re-run the installer:" -ForegroundColor Yellow
+        Write-Host "  Manual fix: download Python 3.12 from https://python.org/downloads/" -ForegroundColor Yellow
+        Write-Host "  IMPORTANT: tick 'Add Python to PATH' during install!" -ForegroundColor Yellow
+        exit 1
+    }
+    Refresh-Path
+    Start-Sleep -Seconds 2  # brief settle for installer registry writes
+    $pyInfo = Find-Python
+    if ($pyInfo -and -not $pyInfo.tooOld) {
+        $python = $pyInfo.cmd
+        Write-OK "Installed $($pyInfo.version) at $($pyInfo.path)"
+    } else {
+        Write-Err "Install completed but Python still not detected."
+        Write-Host "  Open a NEW PowerShell window and re-run the installer." -ForegroundColor Yellow
+        Write-Host "  Or run: py -3.12 -m pip install 'openbro[all,voice]'" -ForegroundColor Cyan
+        exit 1
+    }
+} else {
+    Write-Warn "No Python found — installing Python 3.12 (~30 sec)..."
+    if (-not (Install-Python)) {
+        Write-Err "Python install failed across all strategies."
+        Write-Host ""
+        Write-Host "  Possible causes:" -ForegroundColor Yellow
+        Write-Host "  - No internet (winget + python.org both blocked)" -ForegroundColor DarkGray
+        Write-Host "  - Antivirus / firewall blocking the installer" -ForegroundColor DarkGray
+        Write-Host "  - Corporate policy disallows package install" -ForegroundColor DarkGray
+        Write-Host ""
+        Write-Host "  Manual fix:" -ForegroundColor Yellow
+        Write-Host "    winget install Python.Python.3.12 --scope user" -ForegroundColor Cyan
+        Write-Host "    OR download from https://python.org/downloads/" -ForegroundColor Cyan
+        Write-Host "    (tick 'Add Python to PATH' during install)" -ForegroundColor DarkGray
+        exit 1
+    }
+    Refresh-Path
+    Start-Sleep -Seconds 2
+    $pyInfo = Find-Python
+    if ($pyInfo -and -not $pyInfo.tooOld) {
+        $python = $pyInfo.cmd
+        Write-OK "Installed $($pyInfo.version) at $($pyInfo.path)"
+    } else {
+        Write-Err "Install ran but Python still not detected on PATH."
+        Write-Host ""
+        Write-Host "  Open a NEW PowerShell window (PATH refresh) and re-run:" -ForegroundColor Yellow
         Write-Host "    iwr -useb https://github.com/$REPO/raw/$Branch/scripts/install.ps1 | iex" -ForegroundColor Cyan
         exit 1
     }
+}
+
+# Final sanity: actually run python and confirm it works
+try {
+    $sanityOut = & $python -c "import sys; print(sys.executable)" 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE: $sanityOut" }
+    Write-Info "Python exe: $sanityOut"
+} catch {
+    Write-Err "Python found but failed to run: $_"
+    exit 1
 }
 
 # ─── Step 2/5: pip + OpenBro ─────────────────────────────────
