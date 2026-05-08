@@ -124,21 +124,44 @@ class VoiceListener:
                 pass
             q.put(indata.copy())
 
-        with sd.InputStream(
+        # Bail early if stop was requested between chunks - don't open the
+        # mic stream just to immediately tear it down.
+        if not self._running and self._running is not False:
+            return None
+
+        stream = sd.InputStream(
             samplerate=self.sample_rate,
             channels=1,
             dtype="float32",
             callback=_cb,
-        ):
+        )
+        try:
+            stream.start()
             collected = []
             collected_frames = 0
             while collected_frames < frames:
+                if not self._running:
+                    # Caller asked us to stop mid-recording. Discard buffer
+                    # and exit so PortAudio releases the mic immediately.
+                    return None
                 try:
-                    data = q.get(timeout=seconds + 1)
+                    data = q.get(timeout=0.5)
                 except queue.Empty:
-                    break
+                    continue
                 collected.append(data)
                 collected_frames += len(data)
+        finally:
+            # Hard cleanup: stop + close the stream even if an exception or
+            # KeyboardInterrupt fires. This is what prevents the "mic still
+            # held by python.exe after exit" zombie state.
+            try:
+                stream.stop()
+            except Exception:
+                pass
+            try:
+                stream.close()
+            except Exception:
+                pass
 
         if not collected:
             return None

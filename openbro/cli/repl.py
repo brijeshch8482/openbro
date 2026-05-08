@@ -76,40 +76,50 @@ def start_repl():
     if cfg.get("voice", {}).get("auto_start"):
         _start_voice(agent)
 
-    while True:
-        try:
-            user_input = session.prompt("You > ").strip()
+    # Register atexit handler so even if REPL crashes / window is X-closed,
+    # we still try to stop the voice listener and release the mic.
+    import atexit
 
-            if not user_input:
-                continue
+    atexit.register(_stop_voice)
 
-            if user_input.lower() in ("exit", "quit", "bye"):
-                console.print("[bold cyan]Chal bhai, phir milte hai![/bold cyan]")
-                break
-
-            # Handle built-in commands
-            if _handle_command(user_input, agent):
-                continue
-
-            # Chat with agent - use streaming for real-time output
-            console.print("\n[bold green]Bro:[/bold green] ", end="")
-            response = ""
+    try:
+        while True:
             try:
-                for token in agent.stream_chat(user_input):
-                    console.print(token, end="", highlight=False)
-                    response += token
-            except Exception:
-                # Fallback to non-streaming
-                with console.status("[dim]Bro soch raha hai...[/dim]", spinner="dots"):
-                    response = agent.chat(user_input)
-                console.print(response, highlight=False)
-            console.print("\n")
+                user_input = session.prompt("You > ").strip()
 
-        except KeyboardInterrupt:
-            console.print("\n[bold cyan]Ctrl+C? Chal theek hai, phir milte hai![/bold cyan]")
-            break
-        except EOFError:
-            break
+                if not user_input:
+                    continue
+
+                if user_input.lower() in ("exit", "quit", "bye"):
+                    console.print("[bold cyan]Chal bhai, phir milte hai![/bold cyan]")
+                    break
+
+                # Handle built-in commands
+                if _handle_command(user_input, agent):
+                    continue
+
+                # Chat with agent - use streaming for real-time output
+                console.print("\n[bold green]Bro:[/bold green] ", end="")
+                response = ""
+                try:
+                    for token in agent.stream_chat(user_input):
+                        console.print(token, end="", highlight=False)
+                        response += token
+                except Exception:
+                    # Fallback to non-streaming
+                    with console.status("[dim]Bro soch raha hai...[/dim]", spinner="dots"):
+                        response = agent.chat(user_input)
+                    console.print(response, highlight=False)
+                console.print("\n")
+
+            except KeyboardInterrupt:
+                console.print("\n[bold cyan]Ctrl+C? Chal theek hai, phir milte hai![/bold cyan]")
+                break
+            except EOFError:
+                break
+    finally:
+        # Hard cleanup so mic / threads release even if an exception escapes.
+        _stop_voice()
 
 
 def _handle_command(cmd: str, agent: Agent) -> bool:

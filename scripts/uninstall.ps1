@@ -36,6 +36,38 @@ if (-not $Force) {
     }
 }
 
+# ─── Step 0: kill any running OpenBro / Python processes that might
+# hold the mic, model server, or other resources. Without this, the user
+# uninstalls but mic / model stays "in use" by a zombie process.
+Write-Host ""
+Write-Host "[0/5] Stopping any running OpenBro processes..." -ForegroundColor Cyan
+$killed = 0
+$pids = @()
+# OpenBro CLI runs as python.exe -m openbro - find by command line
+try {
+    $procs = Get-CimInstance Win32_Process -Filter "Name LIKE 'python%'" -ErrorAction SilentlyContinue
+    foreach ($p in $procs) {
+        if ($p.CommandLine -and ($p.CommandLine -match "openbro|OpenBro")) {
+            $pids += $p.ProcessId
+        }
+    }
+    # Also catch the 'openbro' launcher exe if pip installed one
+    Get-Process -Name openbro -ErrorAction SilentlyContinue | ForEach-Object { $pids += $_.Id }
+} catch {}
+
+foreach ($targetPid in ($pids | Sort-Object -Unique)) {
+    try {
+        Stop-Process -Id $targetPid -Force -ErrorAction Stop
+        $killed++
+    } catch {}
+}
+if ($killed -gt 0) {
+    Write-OK "Stopped $killed running process(es) - mic and ports freed"
+    Start-Sleep -Seconds 1   # let OS release audio device handles
+} else {
+    Write-Info "No running OpenBro processes found"
+}
+
 # ─── Find Python (so we can read config + uninstall pip pkg) ──
 $python = $null
 foreach ($cmd in @("python", "python3", "py")) {
