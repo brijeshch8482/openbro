@@ -18,7 +18,8 @@ from openbro import __version__
 @click.option("--setup", is_flag=True, help="Re-run first-time setup wizard")
 @click.option("--telegram", is_flag=True, help="Run as Telegram bot instead of CLI")
 @click.option("--voice", is_flag=True, help="Run in voice mode (mic + TTS)")
-def main(provider, model, offline, setup, telegram, voice):
+@click.option("--gui/--cli", default=None, help="Launch browser UI (default) or terminal REPL")
+def main(provider, model, offline, setup, telegram, voice, gui):
     """OpenBro - Tera Apna AI Bro
 
     Open-source personal AI agent. Just run 'openbro' and start chatting!
@@ -54,9 +55,27 @@ def main(provider, model, offline, setup, telegram, voice):
         run_voice_mode()
         return
 
-    from openbro.cli.repl import start_repl
+    # Default surface: browser GUI. Fall back to CLI if user passed --cli or
+    # if the GUI deps aren't installed.
+    if gui is False:
+        from openbro.cli.repl import start_repl
 
-    start_repl()
+        start_repl()
+        return
+
+    try:
+        from openbro.ui.desktop import run_desktop
+
+        run_desktop()
+        return
+    except ImportError:
+        if gui is True:
+            print("GUI deps missing. Run: pip install 'openbro[gui]'")
+            return
+        # gui=None (default): silently fall back to CLI
+        from openbro.cli.repl import start_repl
+
+        start_repl()
 
 
 if __name__ == "__main__":

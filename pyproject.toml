@@ -50,6 +50,12 @@ office = [
     "python-docx>=1.1",
     "openpyxl>=3.1",
 ]
+brain = [
+    "sentence-transformers>=2.7",
+]
+gui = [
+    "customtkinter>=5.2",
+]
 all = [
     "ollama>=0.4",
     "anthropic>=0.40",
@@ -62,6 +68,8 @@ all = [
     "pyttsx3>=2.90",
     "python-docx>=1.1",
     "openpyxl>=3.1",
+    "sentence-transformers>=2.7",
+    "customtkinter>=5.2",
 ]
 # Note: Groq uses httpx directly (already a core dependency), no extra package needed
 dev = [
