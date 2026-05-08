@@ -19,8 +19,33 @@ import subprocess
 import httpx
 
 # Capability scores (rough approximation; tuned over time via reflection)
+# Higher = better at agent / tool-calling. Updated via daily online check.
 CAPABILITY = {
-    # Ollama (offline)
+    # Anthropic
+    "claude-opus": 100,
+    "claude-sonnet": 95,
+    "claude-haiku": 85,
+    # OpenAI
+    "gpt-4o": 95,
+    "gpt-4o-mini": 80,
+    "gpt-4-turbo": 90,
+    "gpt-3.5": 70,
+    "o1": 92,
+    "o1-mini": 82,
+    # Google
+    "gemini-2.0-pro": 96,
+    "gemini-2.0-flash": 90,
+    "gemini-1.5-pro": 92,
+    "gemini-1.5-flash": 85,
+    # DeepSeek
+    "deepseek-chat": 88,
+    "deepseek-reasoner": 92,
+    # Groq (open-source via fast cloud)
+    "groq-llama-3.3": 92,
+    "groq-llama-3.1": 87,
+    "groq-mixtral": 80,
+    "groq-gemma": 70,
+    # Ollama (offline) — kept for advanced users
     "llama3.3": 90,
     "llama3.2": 80,
     "llama3.1": 85,
@@ -32,14 +57,6 @@ CAPABILITY = {
     "mistral:7b": 72,
     "phi3": 60,
     "gemma2": 65,
-    # Cloud — usually beat local
-    "claude-opus": 100,
-    "claude-sonnet": 95,
-    "claude-haiku": 85,
-    "gpt-4o": 95,
-    "gpt-4o-mini": 80,
-    "groq-llama-3.3": 92,
-    "groq-llama-3.1": 87,
 }
 
 
@@ -115,7 +132,7 @@ def probe_available() -> list[dict]:
         }
     )
 
-    # Anthropic / OpenAI — same: depend on api_key
+    # All cloud providers - availability depends on api_key (set later)
     candidates.append(
         {
             "provider": "anthropic",
@@ -134,9 +151,30 @@ def probe_available() -> list[dict]:
             "source": "openai-cloud",
         }
     )
+    candidates.append(
+        {
+            "provider": "google",
+            "model": "gemini-2.0-flash",
+            "score": _capability_for("gemini-2.0-flash"),
+            "available": False,
+            "source": "google-cloud",
+        }
+    )
+    candidates.append(
+        {
+            "provider": "deepseek",
+            "model": "deepseek-chat",
+            "score": _capability_for("deepseek-chat"),
+            "available": False,
+            "source": "deepseek-cloud",
+        }
+    )
 
     candidates.sort(key=lambda c: -c["score"])
     return candidates
+
+
+CLOUD_PROVIDERS = {"groq", "anthropic", "openai", "google", "deepseek"}
 
 
 def best_available(config: dict | None = None) -> dict | None:
@@ -145,7 +183,7 @@ def best_available(config: dict | None = None) -> dict | None:
     candidates = probe_available()
     providers_cfg = config.get("providers", {}) or {}
     for c in candidates:
-        if c["provider"] in {"groq", "anthropic", "openai"}:
+        if c["provider"] in CLOUD_PROVIDERS:
             key = (providers_cfg.get(c["provider"], {}) or {}).get("api_key")
             c["available"] = bool(key)
     available = [c for c in candidates if c["available"]]

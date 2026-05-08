@@ -65,7 +65,34 @@ def create_provider(provider_name: str | None = None) -> LLMProvider:
             model=groq_cfg.get("model", "llama-3.3-70b-versatile"),
         )
 
+    elif provider_name == "google":
+        from openbro.llm.google_provider import GoogleProvider
+
+        google_cfg = providers_config.get("google", {})
+        api_key = google_cfg.get("api_key")
+        if not api_key:
+            raise ValueError(
+                "Google API key not set. Get one free at https://aistudio.google.com/apikey"
+            )
+        return GoogleProvider(
+            api_key=api_key,
+            model=google_cfg.get("model", "gemini-1.5-flash"),
+        )
+
+    elif provider_name == "deepseek":
+        from openbro.llm.deepseek_provider import DeepSeekProvider
+
+        ds_cfg = providers_config.get("deepseek", {})
+        api_key = ds_cfg.get("api_key")
+        if not api_key:
+            raise ValueError("DeepSeek API key not set. Get one at https://platform.deepseek.com")
+        return DeepSeekProvider(
+            api_key=api_key,
+            model=ds_cfg.get("model", "deepseek-chat"),
+        )
+
     else:
         raise ValueError(
-            f"Unknown provider: {provider_name}. Available: ollama, anthropic, openai, groq"
+            f"Unknown provider: {provider_name}. "
+            "Available: anthropic, openai, groq, google, deepseek, ollama"
         )

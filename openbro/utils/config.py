@@ -52,6 +52,14 @@ def default_config() -> dict:
                 "api_key": None,
                 "model": "llama-3.3-70b-versatile",
             },
+            "google": {
+                "api_key": None,
+                "model": "gemini-1.5-flash",
+            },
+            "deepseek": {
+                "api_key": None,
+                "model": "deepseek-chat",
+            },
         },
         "agent": {
             "system_prompt": (

@@ -74,8 +74,68 @@ def run_wizard():
     console.print("\n[bold cyan]Type anything to start chatting with your AI Bro![/bold cyan]\n")
 
 
+# Comprehensive provider catalogue. Order = display order in the wizard.
+# Each entry: name, tier, default model, signup URL, blurb, key prompt.
+PROVIDER_CATALOG = [
+    {
+        "id": "groq",
+        "name": "Groq",
+        "tier": "FREE",
+        "default_model": "llama-3.3-70b-versatile",
+        "signup": "https://console.groq.com",
+        "blurb": "Ultra-fast (<1s), free tier 30 req/min, hosts Llama 3.3, Mixtral, Gemma",
+        "tags": ["recommended"],
+    },
+    {
+        "id": "google",
+        "name": "Google Gemini",
+        "tier": "FREE",
+        "default_model": "gemini-1.5-flash",
+        "signup": "https://aistudio.google.com/apikey",
+        "blurb": "Free tier 1500 req/day, huge context window, Gemini 1.5 Flash/Pro",
+        "tags": [],
+    },
+    {
+        "id": "openai",
+        "name": "OpenAI",
+        "tier": "FREE-TRIAL",
+        "default_model": "gpt-4o-mini",
+        "signup": "https://platform.openai.com/api-keys",
+        "blurb": "$5 trial credit; GPT-4o (paid), GPT-4o-mini (cheap)",
+        "tags": [],
+    },
+    {
+        "id": "anthropic",
+        "name": "Anthropic Claude",
+        "tier": "PAID",
+        "default_model": "claude-sonnet-4-20250514",
+        "signup": "https://console.anthropic.com/settings/keys",
+        "blurb": "Best quality + tool calling. Claude Sonnet/Opus. Paid per token.",
+        "tags": ["best-quality"],
+    },
+    {
+        "id": "deepseek",
+        "name": "DeepSeek",
+        "tier": "CHEAP",
+        "default_model": "deepseek-chat",
+        "signup": "https://platform.deepseek.com",
+        "blurb": "$0.14/M tokens; strong reasoning, OpenAI-compatible API",
+        "tags": ["cheap"],
+    },
+    {
+        "id": "ollama",
+        "name": "Ollama (local)",
+        "tier": "OFFLINE",
+        "default_model": "llama3.1:8b",
+        "signup": "https://ollama.com",
+        "blurb": "Runs models on YOUR hardware. Free forever, no internet, fully private.",
+        "tags": ["advanced"],
+    },
+]
+
+
 def _step_provider(config: dict):
-    # Honor user's storage choice from step 1 — Ollama writes models to the
+    # Honor user's storage choice from step 1 - Ollama writes models to the
     # path in OLLAMA_MODELS env var. Set it BEFORE pulling so model files
     # land on the chosen drive, not C: by default.
     import os
@@ -84,58 +144,76 @@ def _step_provider(config: dict):
     if models_dir:
         os.environ["OLLAMA_MODELS"] = models_dir
 
-    console.print("[bold yellow]Step 2:[/bold yellow] Choose your LLM provider\n")
-    console.print("  [cyan]1.[/cyan] Ollama (offline, free, local) [green]<-- recommended[/green]")
-    console.print("  [cyan]2.[/cyan] Groq (cloud, free tier, ultra-fast)")
-    console.print("  [cyan]3.[/cyan] Anthropic (Claude API, paid)")
-    console.print("  [cyan]4.[/cyan] OpenAI (GPT API, paid)")
+    console.print("[bold yellow]Step 2:[/bold yellow] Choose your LLM\n")
+    console.print(
+        "[dim]Free, paid, and offline options. You can switch anytime via "
+        "'model switch <name>'. OpenBro auto-checks for new releases daily.[/dim]\n"
+    )
+
+    table = Table(border_style="cyan")
+    table.add_column("#", style="cyan", width=3)
+    table.add_column("Provider", style="bold")
+    table.add_column("Tier", justify="center")
+    table.add_column("Default model")
+    table.add_column("About", overflow="fold")
+
+    tier_color = {
+        "FREE": "green",
+        "FREE-TRIAL": "green",
+        "CHEAP": "yellow",
+        "PAID": "red",
+        "OFFLINE": "blue",
+    }
+    for i, p in enumerate(PROVIDER_CATALOG, 1):
+        tier_str = f"[{tier_color.get(p['tier'], 'white')}]{p['tier']}[/]"
+        recommended = " <-- recommended" if "recommended" in p["tags"] else ""
+        table.add_row(
+            str(i),
+            p["name"] + recommended,
+            tier_str,
+            p["default_model"],
+            p["blurb"],
+        )
+
+    console.print(table)
     console.print()
+    choices = [str(i) for i in range(1, len(PROVIDER_CATALOG) + 1)]
+    choice_idx = int(Prompt.ask("Select provider", choices=choices, default="1")) - 1
+    chosen = PROVIDER_CATALOG[choice_idx]
+    pid = chosen["id"]
 
-    choice = Prompt.ask("Select provider", choices=["1", "2", "3", "4"], default="1")
-
-    if choice == "1":
-        config["llm"]["provider"] = "ollama"
-
-        # Auto-setup: install Ollama, pick model, download it
+    # Ollama gets the existing full-setup flow (install + model picker + download)
+    if pid == "ollama":
         from openbro.utils.ollama_setup import full_ollama_setup
 
+        config["llm"]["provider"] = "ollama"
         model = full_ollama_setup()
         if model:
             config["llm"]["model"] = model
             console.print(f"\n[green]Ollama ready with model: {model}[/green]\n")
         else:
-            # Fallback - user skipped, set default
-            model = "qwen2.5-coder:7b"
+            model = chosen["default_model"]
             config["llm"]["model"] = model
-            console.print(f"[yellow]Ollama setup skipped. Default model set: {model}[/yellow]")
-            console.print("[dim]Download later: ollama pull qwen2.5-coder:7b[/dim]\n")
+            console.print(f"[yellow]Ollama setup skipped. Default model: {model}[/yellow]\n")
+        return
 
-    elif choice == "2":
-        config["llm"]["provider"] = "groq"
-        api_key = Prompt.ask("Groq API key (free at console.groq.com)")
-        config["providers"]["groq"]["api_key"] = api_key
-        model = Prompt.ask("Model", default="llama-3.3-70b-versatile")
-        config["providers"]["groq"]["model"] = model
-        config["llm"]["model"] = model
-        console.print(f"[green]Groq selected: {model}[/green]\n")
+    # Cloud providers: ask for API key, configure
+    config["llm"]["provider"] = pid
+    console.print(f"\n[cyan]Sign up / get key:[/cyan] {chosen['signup']}\n")
+    api_key = Prompt.ask(f"{chosen['name']} API key", password=True)
+    if not api_key:
+        console.print(
+            "[yellow]Skipped. Set later with: "
+            f"openbro config set providers.{pid}.api_key YOUR_KEY[/yellow]\n"
+        )
+        return
 
-    elif choice == "3":
-        config["llm"]["provider"] = "anthropic"
-        api_key = Prompt.ask("Anthropic API key")
-        config["providers"]["anthropic"]["api_key"] = api_key
-        model = Prompt.ask("Model", default="claude-sonnet-4-20250514")
-        config["providers"]["anthropic"]["model"] = model
-        config["llm"]["model"] = model
-        console.print(f"[green]Anthropic selected: {model}[/green]\n")
-
-    elif choice == "4":
-        config["llm"]["provider"] = "openai"
-        api_key = Prompt.ask("OpenAI API key")
-        config["providers"]["openai"]["api_key"] = api_key
-        model = Prompt.ask("Model", default="gpt-4o")
-        config["providers"]["openai"]["model"] = model
-        config["llm"]["model"] = model
-        console.print(f"[green]OpenAI selected: {model}[/green]\n")
+    config.setdefault("providers", {}).setdefault(pid, {})
+    config["providers"][pid]["api_key"] = api_key
+    model = Prompt.ask("Model", default=chosen["default_model"])
+    config["providers"][pid]["model"] = model
+    config["llm"]["model"] = model
+    console.print(f"[green]{chosen['name']} selected: {model}[/green]\n")
 
 
 def _step_storage(config: dict):

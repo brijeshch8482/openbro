@@ -103,6 +103,38 @@ class Brain:
             "message": "brain update will land in v2 Phase 8.",
         }
 
+    # ─── daily LLM-update check ────────────────────────────────────
+
+    def check_for_better_llm(
+        self,
+        current: tuple[str, str],
+        config: dict | None = None,
+        force: bool = False,
+    ) -> dict | None:
+        """Once-a-day online check: 'is there a better LLM available than what
+        the user is on right now?' Returns the suggestion dict or None.
+
+        force=True bypasses the 24-hour cooldown (used by 'brain update' CLI).
+        """
+        from datetime import datetime, timezone
+
+        from openbro.llm.auto_select import suggest_upgrade
+
+        meta = self.storage.read_meta()
+        last_check = meta.get("last_llm_check")
+        if not force and last_check:
+            try:
+                prev = datetime.fromisoformat(last_check)
+                hours = (datetime.now(timezone.utc) - prev).total_seconds() / 3600
+                if hours < 24:
+                    return None  # already checked today
+            except ValueError:
+                pass
+
+        suggestion = suggest_upgrade(current, config)
+        self.storage.update_meta(last_llm_check=datetime.now(timezone.utc).isoformat())
+        return suggestion
+
     # ─── export / import ───────────────────────────────────────────
 
     def export(self, output_path: str | Path) -> Path:
