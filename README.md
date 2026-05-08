@@ -112,6 +112,23 @@ The installer will:
 2. `pip install openbro[all,voice]` — Telegram + voice + every LLM provider
 3. Auto-run `openbro --setup` so you finish with a fully configured, ready-to-chat OpenBro
 
+### Update
+
+```powershell
+# Windows / Linux / macOS — same command
+pip install --upgrade "openbro[all,voice,office]"
+```
+
+Or re-run the install one-liner (idempotent — it detects an existing install and upgrades).
+
+### Reopen the chat
+
+After closing the terminal, open any new shell and run:
+```bash
+openbro
+```
+Your config, memory, and chat history are preserved at `~/.openbro/`. Just type `openbro` and the session resumes.
+
 ### Uninstall
 
 Same one-liner — removes pip package, config, memory, and optionally Ollama models + Whisper cache (asks you each time).

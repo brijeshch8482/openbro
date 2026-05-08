@@ -43,11 +43,13 @@ def run_wizard():
 
     config = default_config()
 
-    # Step 1: Choose LLM provider
-    _step_provider(config)
-
-    # Step 2: Storage location
+    # Step 1: Storage location FIRST so the offline-model download in step 2
+    # can use the chosen drive via OLLAMA_MODELS env var, instead of dumping
+    # 5+ GB into C: by default.
     _step_storage(config)
+
+    # Step 2: LLM provider (uses storage path from step 1 for Ollama models)
+    _step_provider(config)
 
     # Step 3: Safety settings
     _step_safety(config)
@@ -73,7 +75,16 @@ def run_wizard():
 
 
 def _step_provider(config: dict):
-    console.print("[bold yellow]Step 1:[/bold yellow] Choose your LLM provider\n")
+    # Honor user's storage choice from step 1 — Ollama writes models to the
+    # path in OLLAMA_MODELS env var. Set it BEFORE pulling so model files
+    # land on the chosen drive, not C: by default.
+    import os
+
+    models_dir = config.get("storage", {}).get("models_dir")
+    if models_dir:
+        os.environ["OLLAMA_MODELS"] = models_dir
+
+    console.print("[bold yellow]Step 2:[/bold yellow] Choose your LLM provider\n")
     console.print("  [cyan]1.[/cyan] Ollama (offline, free, local) [green]<-- recommended[/green]")
     console.print("  [cyan]2.[/cyan] Groq (cloud, free tier, ultra-fast)")
     console.print("  [cyan]3.[/cyan] Anthropic (Claude API, paid)")
@@ -128,9 +139,11 @@ def _step_provider(config: dict):
 
 
 def _step_storage(config: dict):
-    console.print("[bold yellow]Step 2:[/bold yellow] Choose storage location\n")
+    console.print("[bold yellow]Step 1:[/bold yellow] Choose storage location\n")
     console.print("[dim]OpenBro stores memory, chat history, cache, and logs locally.[/dim]")
-    console.print("[dim]Offline models (Ollama) are stored separately.[/dim]\n")
+    console.print(
+        "[dim]Offline models (Ollama, ~5 GB each) will go in <path>/models.[/dim]\n"
+    )
 
     # Show available drives
     drives = get_available_drives()

@@ -17,16 +17,50 @@ console = Console()
 
 OLLAMA_API = "http://localhost:11434"
 
-# Popular models with size info
+# Models picked specifically for AGENT use — must call tools reliably.
+# (Coding-only variants like qwen2.5-coder ignore tool definitions and just
+# chat; they're great for code completion, terrible for agentic tasks.)
 MODELS = {
-    "qwen2.5-coder:7b": {"size": "4.7 GB", "desc": "Best for coding, recommended", "ram": "8 GB"},
-    "qwen2.5-coder:3b": {"size": "2.0 GB", "desc": "Lighter coding model, faster", "ram": "4 GB"},
-    "qwen2.5-coder:1.5b": {"size": "1.0 GB", "desc": "Smallest coder, low-end PCs", "ram": "4 GB"},
-    "llama3.2:3b": {"size": "2.0 GB", "desc": "General purpose, good quality", "ram": "4 GB"},
-    "llama3.2:1b": {"size": "1.3 GB", "desc": "Tiny but capable", "ram": "4 GB"},
-    "phi3:mini": {"size": "2.3 GB", "desc": "Microsoft's small model", "ram": "4 GB"},
-    "mistral:7b": {"size": "4.1 GB", "desc": "Strong general purpose", "ram": "8 GB"},
-    "gemma2:2b": {"size": "1.6 GB", "desc": "Google's lightweight model", "ram": "4 GB"},
+    "llama3.1:8b": {
+        "size": "4.7 GB",
+        "desc": "Best agent / tool-calling model (recommended)",
+        "ram": "8 GB",
+    },
+    "llama3.2:3b": {
+        "size": "2.0 GB",
+        "desc": "Smaller agent, solid tool calling",
+        "ram": "4 GB",
+    },
+    "llama3.2:1b": {
+        "size": "1.3 GB",
+        "desc": "Tiny agent for low-end PCs",
+        "ram": "4 GB",
+    },
+    "qwen2.5:7b": {
+        "size": "4.7 GB",
+        "desc": "Strong general agent (NOT the -coder variant)",
+        "ram": "8 GB",
+    },
+    "mistral-nemo": {
+        "size": "7.1 GB",
+        "desc": "Excellent tool calling, large context",
+        "ram": "12 GB",
+    },
+    "qwen2.5-coder:7b": {
+        "size": "4.7 GB",
+        "desc": "Code-focused only (poor at tool calls / agent tasks)",
+        "ram": "8 GB",
+    },
+    "phi3:mini": {
+        "size": "2.3 GB",
+        "desc": "Microsoft's small model",
+        "ram": "4 GB",
+    },
+    "gemma2:2b": {
+        "size": "1.6 GB",
+        "desc": "Google's lightweight model (limited tool support)",
+        "ram": "4 GB",
+    },
 }
 
 
@@ -356,11 +390,19 @@ def show_model_picker() -> str | None:
 def full_ollama_setup() -> str | None:
     """Complete Ollama setup flow: install -> start -> pick model -> pull.
     Returns the selected model name or None if setup was skipped.
+
+    Honors OLLAMA_MODELS env var (set by wizard step 1) so model files land
+    on the user's chosen drive instead of C: by default.
     """
     console.print("\n[bold yellow]Offline Model Setup[/bold yellow]")
     console.print(
-        "[dim]Ollama lets you run AI models locally - no internet needed, fully private.[/dim]\n"
+        "[dim]Ollama lets you run AI models locally - no internet needed, fully private.[/dim]"
     )
+    models_dir = os.environ.get("OLLAMA_MODELS")
+    if models_dir:
+        console.print(f"[dim]Models will be stored at: {models_dir}[/dim]\n")
+    else:
+        console.print()
 
     # Step 1: Check/Install Ollama
     if not is_ollama_installed():
