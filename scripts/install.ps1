@@ -229,7 +229,7 @@ if ($pyInfo -and -not $pyInfo.tooOld) {
 # Final sanity: actually run python and confirm it works
 try {
     $sanityOut = & $python -c "import sys; print(sys.executable)" 2>&1
-    if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE: $sanityOut" }
+    if ($LASTEXITCODE -ne 0) { throw "exit ${LASTEXITCODE} - ${sanityOut}" }
     Write-Info "Python exe: $sanityOut"
 } catch {
     Write-Err "Python found but failed to run: $_"
