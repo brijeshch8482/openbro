@@ -63,10 +63,13 @@ function Invoke-WithRetry {
 
 # 6. Internet connectivity check — fail fast with clear message instead of
 #    minutes-long pip timeouts on offline machines.
+#    Note: $host is a PowerShell read-only automatic variable, so we use
+#    $endpoint as the loop variable. (User report: "Cannot overwrite
+#    variable Host because it is read-only or constant.")
 function Test-Internet {
-    foreach ($host in @("pypi.org", "github.com", "ollama.com")) {
+    foreach ($endpoint in @("pypi.org", "github.com", "ollama.com")) {
         try {
-            $r = Invoke-WebRequest -Uri "https://$host" -Method Head -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop
+            $r = Invoke-WebRequest -Uri "https://$endpoint" -Method Head -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop
             if ($r.StatusCode -lt 500) { return $true }
         } catch {}
     }
