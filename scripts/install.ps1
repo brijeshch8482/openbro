@@ -13,12 +13,65 @@ param(
 $ErrorActionPreference = "Stop"
 $REPO = "brijeshch8482/openbro"
 
-# Force UTF-8 output so box-drawing chars and check marks render properly
-# (Windows PowerShell defaults to OEM/Win-1252 which mangles them to '?')
+# ─── Pre-flight defenses (handle a wide range of user environments) ──
+
+# 1. UTF-8 output: avoid '???' for box-drawing/check marks under Win-1252
 try {
     [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
     $OutputEncoding = [System.Text.UTF8Encoding]::new()
 } catch {}
+
+# 2. TLS 1.2: older Windows (Server 2016, Win10 < 1709) defaults to TLS 1.0
+#    which python.org and pypi.org rejected years ago. Explicit upgrade.
+try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor `
+        [Net.ServicePointManager]::SecurityProtocol
+} catch {}
+
+# 3. ExecutionPolicy: if user's policy is Restricted/AllSigned, our script
+#    can't even run. Bypass for THIS process only — does not change system.
+try {
+    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force -ErrorAction SilentlyContinue
+} catch {}
+
+# 4. Detect WSL / non-Windows shells that somehow ran this — give a clear redirect
+if ($IsLinux -or $IsMacOS) {
+    Write-Host "This is the Windows installer. On Linux/macOS use:" -ForegroundColor Yellow
+    Write-Host "  curl -fsSL https://github.com/$REPO/raw/main/scripts/install.sh | bash" -ForegroundColor Cyan
+    exit 1
+}
+
+# 5. Helper: retry a network call with exponential backoff
+function Invoke-WithRetry {
+    param(
+        [scriptblock]$Action,
+        [int]$MaxAttempts = 3,
+        [int]$DelaySeconds = 2,
+        [string]$Label = "operation"
+    )
+    for ($i = 1; $i -le $MaxAttempts; $i++) {
+        try {
+            return & $Action
+        } catch {
+            if ($i -eq $MaxAttempts) { throw }
+            Write-Host "  ($Label attempt $i failed: $($_.Exception.Message); retrying in ${DelaySeconds}s...)" -ForegroundColor DarkYellow
+            Start-Sleep -Seconds $DelaySeconds
+            $DelaySeconds = $DelaySeconds * 2
+        }
+    }
+}
+
+# 6. Internet connectivity check — fail fast with clear message instead of
+#    minutes-long pip timeouts on offline machines.
+function Test-Internet {
+    foreach ($host in @("pypi.org", "github.com", "ollama.com")) {
+        try {
+            $r = Invoke-WebRequest -Uri "https://$host" -Method Head -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop
+            if ($r.StatusCode -lt 500) { return $true }
+        } catch {}
+    }
+    return $false
+}
 
 function Write-Step($num, $total, $msg) {
     Write-Host ""
@@ -36,6 +89,23 @@ Write-Host "  |          OpenBro Installer v1.0          |" -ForegroundColor Cya
 Write-Host "  |      Tera Apna AI Bro - Open Source      |" -ForegroundColor Cyan
 Write-Host "  +-------------------------------------------+" -ForegroundColor Cyan
 Write-Host ""
+
+# Internet pre-check — bail with clear message if offline
+Write-Host "[0/5] Checking internet..." -ForegroundColor Cyan
+if (-not (Test-Internet)) {
+    Write-Err "No internet connection (pypi.org / github.com unreachable)."
+    Write-Host ""
+    Write-Host "  Possible causes:" -ForegroundColor Yellow
+    Write-Host "  - Wi-Fi captive portal not signed in" -ForegroundColor DarkGray
+    Write-Host "  - Corporate proxy not configured for PowerShell" -ForegroundColor DarkGray
+    Write-Host "  - Firewall blocking outbound HTTPS" -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "  If behind a proxy, set:" -ForegroundColor Yellow
+    Write-Host '    $env:HTTPS_PROXY = "http://proxy.example.com:8080"' -ForegroundColor Cyan
+    Write-Host "  then retry the installer." -ForegroundColor DarkGray
+    exit 1
+}
+Write-OK "online"
 
 # ─── Step 1/5: Python (robust detect + install) ──────────────
 Write-Step 1 5 "Checking Python..."
@@ -286,6 +356,14 @@ function Invoke-Pip {
     }
 }
 
+# Existing-install detection — idempotency: don't punish users for re-running
+$existingVer = $null
+$probe = & $python -c "import openbro; print(openbro.__version__)" 2>$null
+if ($LASTEXITCODE -eq 0 -and $probe) {
+    $existingVer = $probe.Trim()
+    Write-Info "OpenBro v$existingVer is already installed — will upgrade"
+}
+
 $pipExit = Invoke-Pip @("install", "--upgrade", "pip", "--quiet")
 if ($pipExit -ne 0) {
     Write-Info "pip self-upgrade returned $pipExit (continuing)"
@@ -399,9 +477,26 @@ if (-not $NoSetup) {
 }
 
 Write-Host ""
-Write-Host "  ╔═══════════════════════════════════════════╗" -ForegroundColor Green
-Write-Host "  ║       ✓ OpenBro is ready!                ║" -ForegroundColor Green
-Write-Host "  ╚═══════════════════════════════════════════╝" -ForegroundColor Green
+# Smoke test — actually invoke openbro --version end-to-end so user knows
+# their PATH + entry point are wired up correctly.
+$smokeOk = $false
+try {
+    $smokeOut = & $python -m openbro --version 2>&1 | Out-String
+    if ($LASTEXITCODE -eq 0 -and $smokeOut -match "OpenBro") {
+        $smokeOk = $true
+    }
+} catch {}
+
+if ($smokeOk) {
+    Write-Host "  +-------------------------------------------+" -ForegroundColor Green
+    Write-Host "  |       [OK] OpenBro is ready!             |" -ForegroundColor Green
+    Write-Host "  +-------------------------------------------+" -ForegroundColor Green
+} else {
+    Write-Host "  +-------------------------------------------+" -ForegroundColor Yellow
+    Write-Host "  |  Install ran but smoke test FAILED.      |" -ForegroundColor Yellow
+    Write-Host "  |  Try: python -m openbro --version        |" -ForegroundColor Yellow
+    Write-Host "  +-------------------------------------------+" -ForegroundColor Yellow
+}
 Write-Host ""
 Write-Host "  Quick commands:" -ForegroundColor White
 Write-Host "    openbro              " -NoNewline -ForegroundColor Cyan
