@@ -141,9 +141,7 @@ def _step_provider(config: dict):
 def _step_storage(config: dict):
     console.print("[bold yellow]Step 1:[/bold yellow] Choose storage location\n")
     console.print("[dim]OpenBro stores memory, chat history, cache, and logs locally.[/dim]")
-    console.print(
-        "[dim]Offline models (Ollama, ~5 GB each) will go in <path>/models.[/dim]\n"
-    )
+    console.print("[dim]Offline models (Ollama, ~5 GB each) will go in <path>/models.[/dim]\n")
 
     # Show available drives
     drives = get_available_drives()
