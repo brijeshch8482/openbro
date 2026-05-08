@@ -81,15 +81,31 @@ Single command, zero-friction. Auto-installs Python (if missing), pip-installs O
 
 **Windows** (PowerShell)
 ```powershell
-$u="https://raw.githubusercontent.com/brijeshch8482/openbro/main/scripts/install.ps1?cb=$(Get-Random)"; iwr -useb $u|iex
+$sha=(iwr -useb 'https://api.github.com/repos/brijeshch8482/openbro/commits/main'|ConvertFrom-Json).sha; iwr -useb "https://raw.githubusercontent.com/brijeshch8482/openbro/$sha/scripts/install.ps1" | iex
 ```
 
 **Linux / macOS** (bash)
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/brijeshch8482/openbro/main/scripts/install.sh?cb=$RANDOM" | bash
+sha=$(curl -fsSL https://api.github.com/repos/brijeshch8482/openbro/commits/main | python3 -c 'import sys,json; print(json.load(sys.stdin)["sha"])') && curl -fsSL "https://raw.githubusercontent.com/brijeshch8482/openbro/$sha/scripts/install.sh" | bash
 ```
 
-> **Why the `?cb=` cache-buster?** GitHub's CDN caches raw files at edge nodes for 5–10 min. If we ship a hotfix and you ran the installer just before, your region's edge might still serve the stale version. The random query parameter forces a fresh fetch every time. Without it you may need to wait or use a commit-pinned URL.
+> **Why fetch the commit SHA first?** GitHub's `/raw/main/...` URL goes through CDN edge caches (Fastly) AND many ISPs (especially in India) run transparent HTTP caches that ignore query-string cache-busters like `?cb=...`. By fetching the latest commit SHA from GitHub's API and pinning the install URL to that exact commit, we get a different URL every push — zero cache collisions, always-fresh script.
+
+<details>
+<summary><strong>Simpler one-liner</strong> (works if your network doesn't aggressively cache)</summary>
+
+```powershell
+# Windows
+iwr -useb https://raw.githubusercontent.com/brijeshch8482/openbro/main/scripts/install.ps1 | iex
+```
+
+```bash
+# Linux/macOS
+curl -fsSL https://raw.githubusercontent.com/brijeshch8482/openbro/main/scripts/install.sh | bash
+```
+
+If you get an old/stale version, switch to the SHA-pinned form above.
+</details>
 
 The installer will:
 1. Detect & auto-install Python 3.12 (winget on Windows · brew on macOS · apt/dnf on Linux)
@@ -102,12 +118,12 @@ Same one-liner — removes pip package, config, memory, and optionally Ollama mo
 
 **Windows**
 ```powershell
-$u="https://raw.githubusercontent.com/brijeshch8482/openbro/main/scripts/uninstall.ps1?cb=$(Get-Random)"; iwr -useb $u|iex
+$sha=(iwr -useb 'https://api.github.com/repos/brijeshch8482/openbro/commits/main'|ConvertFrom-Json).sha; iwr -useb "https://raw.githubusercontent.com/brijeshch8482/openbro/$sha/scripts/uninstall.ps1" | iex
 ```
 
 **Linux / macOS**
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/brijeshch8482/openbro/main/scripts/uninstall.sh?cb=$RANDOM" | bash
+sha=$(curl -fsSL https://api.github.com/repos/brijeshch8482/openbro/commits/main | python3 -c 'import sys,json; print(json.load(sys.stdin)["sha"])') && curl -fsSL "https://raw.githubusercontent.com/brijeshch8482/openbro/$sha/scripts/uninstall.sh" | bash
 ```
 
 > Add `-Force` (PowerShell) or `OPENBRO_FORCE=1` (bash) for non-interactive uninstall. `-KeepData` / `OPENBRO_KEEP_DATA=1` preserves config + memory.
