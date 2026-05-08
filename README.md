@@ -81,13 +81,15 @@ Single command, zero-friction. Auto-installs Python (if missing), pip-installs O
 
 **Windows** (PowerShell)
 ```powershell
-iwr -useb https://github.com/brijeshch8482/openbro/raw/main/scripts/install.ps1 | iex
+$u="https://raw.githubusercontent.com/brijeshch8482/openbro/main/scripts/install.ps1?cb=$(Get-Random)"; iwr -useb $u|iex
 ```
 
 **Linux / macOS** (bash)
 ```bash
-curl -fsSL https://github.com/brijeshch8482/openbro/raw/main/scripts/install.sh | bash
+curl -fsSL "https://raw.githubusercontent.com/brijeshch8482/openbro/main/scripts/install.sh?cb=$RANDOM" | bash
 ```
+
+> **Why the `?cb=` cache-buster?** GitHub's CDN caches raw files at edge nodes for 5–10 min. If we ship a hotfix and you ran the installer just before, your region's edge might still serve the stale version. The random query parameter forces a fresh fetch every time. Without it you may need to wait or use a commit-pinned URL.
 
 The installer will:
 1. Detect & auto-install Python 3.12 (winget on Windows · brew on macOS · apt/dnf on Linux)
@@ -100,12 +102,12 @@ Same one-liner — removes pip package, config, memory, and optionally Ollama mo
 
 **Windows**
 ```powershell
-iwr -useb https://github.com/brijeshch8482/openbro/raw/main/scripts/uninstall.ps1 | iex
+$u="https://raw.githubusercontent.com/brijeshch8482/openbro/main/scripts/uninstall.ps1?cb=$(Get-Random)"; iwr -useb $u|iex
 ```
 
 **Linux / macOS**
 ```bash
-curl -fsSL https://github.com/brijeshch8482/openbro/raw/main/scripts/uninstall.sh | bash
+curl -fsSL "https://raw.githubusercontent.com/brijeshch8482/openbro/main/scripts/uninstall.sh?cb=$RANDOM" | bash
 ```
 
 > Add `-Force` (PowerShell) or `OPENBRO_FORCE=1` (bash) for non-interactive uninstall. `-KeepData` / `OPENBRO_KEEP_DATA=1` preserves config + memory.
