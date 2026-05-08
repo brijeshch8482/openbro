@@ -36,6 +36,7 @@ COMMANDS = [
     "boss",
     "activity",
     "voice",
+    "brain",
     "clear",
     "reset",
 ]
@@ -75,6 +76,10 @@ def start_repl():
     cfg = load_config()
     if cfg.get("voice", {}).get("auto_start"):
         _start_voice(agent)
+
+    # Daily LLM-update check (non-blocking, 24h cooldown). If a meaningfully
+    # better model is available, prompt the user once.
+    _maybe_suggest_llm_upgrade(agent, cfg)
 
     # Register atexit handler so even if REPL crashes / window is X-closed,
     # we still try to stop the voice listener and release the mic.
@@ -225,6 +230,40 @@ def _handle_command(cmd: str, agent: Agent) -> bool:
         _start_voice(agent)
         return True
 
+    if cmd_lower == "brain" or cmd_lower == "brain stats":
+        _brain_stats()
+        return True
+
+    if cmd_lower == "brain skills":
+        _brain_skills()
+        return True
+
+    if cmd_lower == "brain learnings":
+        _brain_learnings()
+        return True
+
+    if cmd_lower == "brain update":
+        _brain_update()
+        return True
+
+    if cmd_lower.startswith("brain export"):
+        path = cmd[len("brain export") :].strip() or "openbro_brain_backup.tar.gz"
+        _brain_export(path)
+        return True
+
+    if cmd_lower.startswith("brain import "):
+        path = cmd[len("brain import ") :].strip()
+        _brain_import(path)
+        return True
+
+    if cmd_lower == "brain reset":
+        _brain_reset()
+        return True
+
+    if cmd_lower == "brain check-llm":
+        _brain_check_llm(agent)
+        return True
+
     if cmd_lower == "voice off":
         _stop_voice()
         return True
@@ -304,6 +343,14 @@ def _show_help():
     table.add_row("boss / boss off", "Toggle Boss mode — agent asks permission for every tool")
     table.add_row("voice / voice off", "Toggle voice listener (mic always-on inside REPL)")
     table.add_row("voice test", "Quick 5-sec mic test - records + transcribes + prints")
+    table.add_row("brain / brain stats", "Show brain stats (skills, memory, profile)")
+    table.add_row("brain skills", "List learned skills with usage + success rate")
+    table.add_row("brain learnings", "Recent reflection events (signal + delta)")
+    table.add_row("brain update", "Pull community patterns + new skills")
+    table.add_row("brain export <path>", "Backup brain to a tar.gz")
+    table.add_row("brain import <path>", "Restore brain from a tar.gz")
+    table.add_row("brain check-llm", "Force LLM upgrade check (skip 24h cooldown)")
+    table.add_row("brain reset", "Wipe the entire brain (with confirmation)")
     table.add_row("model list", "List all available models with status")
     table.add_row("model add <name>", "Add a model (downloads Ollama OR stores API key)")
     table.add_row("model switch <name>", "Switch active model (offers to remove old offline)")
@@ -813,3 +860,191 @@ def _show_sessions(agent: Agent):
 
     console.print(table)
     console.print()
+
+
+# ─── Brain commands ───────────────────────────────────────────────
+
+
+def _get_brain():
+    from openbro.brain import Brain
+    from openbro.brain.memory import SemanticMemory
+    from openbro.brain.skills import SkillRegistry
+
+    brain = Brain.load()
+    if not getattr(brain, "memory", None):
+        brain.memory = SemanticMemory(brain.storage.memory_db_path)
+    if not getattr(brain, "skills", None):
+        brain.skills = SkillRegistry(brain.storage.skills_dir)
+    return brain
+
+
+def _brain_stats():
+    brain = _get_brain()
+    stats = brain.stats()
+    table = Table(title="Brain Stats", border_style="cyan")
+    table.add_column("Field", style="bold")
+    table.add_column("Value")
+    for key in (
+        "version",
+        "brain_id",
+        "created_at",
+        "last_update",
+        "interaction_count",
+        "patterns",
+        "skills",
+        "size_kb",
+    ):
+        v = stats.get(key, "-")
+        if key == "size_kb":
+            v = f"{v} KB"
+        table.add_row(key, str(v))
+    console.print(table)
+    profile = stats.get("profile_summary", "")
+    if profile:
+        console.print(f"\n[dim]{profile}[/dim]\n")
+
+
+def _brain_skills():
+    brain = _get_brain()
+    skills = brain.skills.list()
+    if not skills:
+        console.print("[dim]No skills learned yet. They appear as you use OpenBro.[/dim]\n")
+        return
+    table = Table(title="Learned Skills", border_style="cyan")
+    table.add_column("Name", style="bold")
+    table.add_column("Triggers")
+    table.add_column("Uses", justify="right")
+    table.add_column("Success rate", justify="right")
+    for s in skills:
+        total = s.success_count + s.fail_count
+        rate = f"{(s.success_count / total * 100):.0f}%" if total else "-"
+        table.add_row(
+            s.name,
+            ", ".join((s.triggers or [])[:3]),
+            str(total),
+            rate,
+        )
+    console.print(table)
+    console.print()
+
+
+def _brain_learnings():
+    brain = _get_brain()
+    events = brain.storage.read_learnings(limit=20)
+    if not events:
+        console.print("[dim]No learning events yet.[/dim]\n")
+        return
+    for ev in events:
+        ts = ev.get("ts", "")[:19].replace("T", " ")
+        kind = ev.get("type", "?")
+        signal = ev.get("signal", "")
+        skill = ev.get("used_skill") or ""
+        delta = ev.get("delta", 0.0)
+        line = f"[dim]{ts}[/dim] [bold]{kind}[/bold]"
+        if signal:
+            line += f" signal={signal}"
+        if skill:
+            line += f" skill={skill}"
+        if delta:
+            line += f" Δ={delta:+.2f}"
+        console.print(line)
+    console.print()
+
+
+def _brain_update():
+    brain = _get_brain()
+    console.print("[dim]Pulling community manifest...[/dim]")
+    result = brain.update()
+    if result.get("ok"):
+        console.print(f"[green]{result.get('message', 'updated')}[/green]")
+    else:
+        console.print(f"[yellow]{result.get('message', 'no update')}[/yellow]")
+    console.print()
+
+
+def _brain_export(path: str):
+    brain = _get_brain()
+    try:
+        out = brain.export(path)
+        size_kb = out.stat().st_size // 1024
+        console.print(f"[green]Brain exported: {out} ({size_kb} KB)[/green]\n")
+    except Exception as e:
+        console.print(f"[red]Export failed: {e}[/red]\n")
+
+
+def _brain_import(path: str):
+    if not path:
+        console.print("[red]Usage: brain import <path/to/backup.tar.gz>[/red]\n")
+        return
+    from rich.prompt import Confirm
+
+    if not Confirm.ask(f"Replace current brain with contents of {path}?", default=False):
+        console.print("[dim]Cancelled.[/dim]\n")
+        return
+    brain = _get_brain()
+    try:
+        brain.import_from(path, replace=True)
+        console.print(f"[green]Brain restored from {path}[/green]\n")
+    except Exception as e:
+        console.print(f"[red]Import failed: {e}[/red]\n")
+
+
+def _brain_reset():
+    from rich.prompt import Confirm
+
+    if not Confirm.ask(
+        "Wipe brain (memory, skills, learnings, profile)? This cannot be undone.",
+        default=False,
+    ):
+        console.print("[dim]Cancelled.[/dim]\n")
+        return
+    brain = _get_brain()
+    import shutil
+
+    try:
+        shutil.rmtree(brain.storage.dir, ignore_errors=True)
+        console.print("[green]Brain wiped. A fresh brain starts on next chat.[/green]\n")
+    except Exception as e:
+        console.print(f"[red]Reset failed: {e}[/red]\n")
+
+
+def _brain_check_llm(agent):
+    """Manual trigger of the daily LLM upgrade check."""
+    brain = _get_brain()
+    cfg = load_config()
+    current = (
+        cfg.get("llm", {}).get("provider", ""),
+        cfg.get("llm", {}).get("model", ""),
+    )
+    suggestion = brain.check_for_better_llm(current, cfg, force=True)
+    if suggestion:
+        console.print(
+            f"[bold yellow]Better LLM available:[/bold yellow] "
+            f"{suggestion['provider']}/{suggestion['model']} "
+            f"(score {suggestion['score']})"
+        )
+        console.print(f"[dim]Switch with: model switch {suggestion['provider']}[/dim]\n")
+    else:
+        console.print(f"[green]You're already on a top model: {current[0]}/{current[1]}[/green]\n")
+
+
+def _maybe_suggest_llm_upgrade(agent, cfg):
+    """Non-blocking 24h-cooldown LLM upgrade suggestion at REPL startup."""
+    try:
+        brain = _get_brain()
+        current = (
+            cfg.get("llm", {}).get("provider", ""),
+            cfg.get("llm", {}).get("model", ""),
+        )
+        suggestion = brain.check_for_better_llm(current, cfg, force=False)
+        if suggestion:
+            console.print(
+                f"\n[bold yellow]Naya LLM available:[/bold yellow] "
+                f"{suggestion['provider']}/{suggestion['model']} "
+                f"(score {suggestion['score']} vs current "
+                f"{current[0]}/{current[1]})"
+            )
+            console.print(f"[dim]Switch anytime: 'model switch {suggestion['provider']}'[/dim]\n")
+    except Exception:
+        # Never block startup on the upgrade check
+        pass
