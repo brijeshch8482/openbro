@@ -5,6 +5,7 @@ import platform
 import shutil
 import subprocess
 import time
+from pathlib import Path
 
 import httpx
 from rich.console import Console
@@ -29,9 +30,33 @@ MODELS = {
 }
 
 
+def _find_ollama_binary() -> str | None:
+    """Find Ollama exe even if not on PATH.
+
+    Windows: installer puts it in %LocalAppData%\\Programs\\Ollama\\ollama.exe
+    macOS/Linux: usually /usr/local/bin/ollama
+    """
+    found = shutil.which("ollama")
+    if found:
+        return found
+    if platform.system() == "Windows":
+        candidates = [
+            Path.home() / "AppData" / "Local" / "Programs" / "Ollama" / "ollama.exe",
+            Path("C:/Program Files/Ollama/ollama.exe"),
+        ]
+        for c in candidates:
+            if c.exists():
+                return str(c)
+    else:
+        for c in ("/usr/local/bin/ollama", "/opt/homebrew/bin/ollama", "/usr/bin/ollama"):
+            if Path(c).exists():
+                return c
+    return None
+
+
 def is_ollama_installed() -> bool:
-    """Check if Ollama CLI is available."""
-    return shutil.which("ollama") is not None
+    """Check if Ollama CLI is available (PATH or known install dirs)."""
+    return _find_ollama_binary() is not None
 
 
 def is_ollama_running() -> bool:
@@ -66,38 +91,58 @@ def is_model_available(model: str) -> bool:
 
 
 def start_ollama_server():
-    """Start Ollama serve in background."""
+    """Start Ollama serve in background.
+
+    On Windows the official installer launches a tray app that auto-starts
+    the server. We give it a window to come up before declaring it broken.
+    """
+    # Already responding (Ollama tray app or another shell already started it)
     if is_ollama_running():
         return True
 
+    # Wait briefly in case the tray app is still warming up after a fresh install
+    for _ in range(5):
+        time.sleep(1)
+        if is_ollama_running():
+            return True
+
+    binary = _find_ollama_binary()
+    if not binary:
+        console.print(
+            "[red]Ollama binary not found.[/red] "
+            "Install it manually from https://ollama.com or re-run setup."
+        )
+        return False
+
     console.print("[dim]Starting Ollama server...[/dim]")
     try:
+        kwargs = {
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+        }
         if platform.system() == "Windows":
-            subprocess.Popen(
-                ["ollama", "serve"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-        else:
-            subprocess.Popen(
-                ["ollama", "serve"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        subprocess.Popen([binary, "serve"], **kwargs)
 
-        # Wait for server to be ready
         for _ in range(15):
             time.sleep(1)
             if is_ollama_running():
                 console.print("[green]Ollama server started![/green]")
                 return True
 
-        console.print("[yellow]Ollama server took too long to start.[/yellow]")
-        return False
+        console.print(
+            "[yellow]Server didn't respond in 15s.[/yellow] "
+            "[dim]It may still be starting; model pull will retry.[/dim]"
+        )
+        # Return True optimistically — pull_model has its own retry / API call
+        return is_ollama_running()
     except Exception as e:
-        console.print(f"[red]Failed to start Ollama: {e}[/red]")
-        return False
+        console.print(f"[yellow]Could not auto-start Ollama: {e}[/yellow]")
+        console.print(
+            "[dim]If Ollama tray app is running this is fine; "
+            "model pull will use the API directly.[/dim]"
+        )
+        return is_ollama_running()
 
 
 def pull_model(model: str) -> bool:

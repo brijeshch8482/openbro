@@ -255,7 +255,7 @@ if ($pyInfo -and -not $pyInfo.tooOld) {
     $python = $pyInfo.cmd
     Write-OK "Found $($pyInfo.version) at $($pyInfo.path)"
 } elseif ($pyInfo -and $pyInfo.tooOld) {
-    Write-Warn "Found old $($pyInfo.version) — needs 3.10+. Installing newer alongside..."
+    Write-Warn "Found old $($pyInfo.version) - needs 3.10+. Installing newer alongside..."
     if (-not (Install-Python)) {
         Write-Err "Python install failed across all strategies."
         Write-Host ""
@@ -276,7 +276,7 @@ if ($pyInfo -and -not $pyInfo.tooOld) {
         exit 1
     }
 } else {
-    Write-Warn "No Python found — installing Python 3.12 (~30 sec)..."
+    Write-Warn "No Python found - installing Python 3.12 (~30 sec)..."
     if (-not (Install-Python)) {
         Write-Err "Python install failed across all strategies."
         Write-Host ""
@@ -364,7 +364,7 @@ $existingVer = $null
 $probe = & $python -c "import openbro; print(openbro.__version__)" 2>$null
 if ($LASTEXITCODE -eq 0 -and $probe) {
     $existingVer = $probe.Trim()
-    Write-Info "OpenBro v$existingVer is already installed — will upgrade"
+    Write-Info "OpenBro v$existingVer is already installed - will upgrade"
 }
 
 $pipExit = Invoke-Pip @("install", "--upgrade", "pip", "--quiet")
@@ -451,7 +451,7 @@ try {
     $null = Get-Command openbro -ErrorAction Stop
     Write-OK "'openbro' command available"
 } catch {
-    Write-Warn "'openbro' not on PATH yet — using 'python -m openbro' fallback"
+    Write-Warn "'openbro' not on PATH yet - using 'python -m openbro' fallback"
 }
 
 # ─── Step 5/5: Configure LLM (auto-runs wizard) ──────────────
