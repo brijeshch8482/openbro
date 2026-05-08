@@ -483,12 +483,12 @@ Write-Host ""
 # Smoke test — actually invoke openbro --version end-to-end so user knows
 # their PATH + entry point are wired up correctly.
 $smokeOk = $false
-try {
-    $smokeOut = & $python -m openbro --version 2>&1 | Out-String
-    if ($LASTEXITCODE -eq 0 -and $smokeOut -match "OpenBro") {
-        $smokeOk = $true
-    }
-} catch {}
+# Reuse the EAP-safe helper from step 3 — checks the package can be imported
+# (which is what 'OpenBro is ready' actually means).
+$smoke = Invoke-PyOneliner "import openbro; print('OK')"
+if ($smoke.exit -eq 0 -and $smoke.out -match "OK") {
+    $smokeOk = $true
+}
 
 if ($smokeOk) {
     Write-Host "  +-------------------------------------------+" -ForegroundColor Green

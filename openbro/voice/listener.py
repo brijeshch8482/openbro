@@ -73,7 +73,10 @@ class VoiceListener:
             return
 
         self._running = True
-        print("Voice listener started. Say a wake word (e.g. 'Hey bro').")
+        # NOTE: don't print here — when this listener runs in background of the
+        # REPL (voice.auto_start=True), prompt_toolkit owns the terminal and
+        # any stray print() collides with the input line. The REPL's
+        # _start_voice() already shows a status message before spawning us.
         while self._running:
             try:
                 text = self.listen_once()

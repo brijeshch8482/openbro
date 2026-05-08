@@ -310,21 +310,36 @@ def _step_voice(config: dict):
 
         console.print("[dim]Installing voice deps (1-2 min)...[/dim]")
         try:
-            subprocess.run(
+            # Pass --no-cache-dir + --disable-pip-version-check so harmless
+            # pip warnings (cache deserialize, version check) don't pollute
+            # the wizard output. Capture stderr so warnings don't surface.
+            result = subprocess.run(
                 [
                     sys.executable,
                     "-m",
                     "pip",
                     "install",
                     "--quiet",
+                    "--no-cache-dir",
+                    "--no-warn-script-location",
+                    "--disable-pip-version-check",
                     "faster-whisper>=1.0",
                     "edge-tts>=6.1",
                     "sounddevice>=0.4",
                     "numpy>=1.24",
                     "pyttsx3>=2.90",
                 ],
-                check=True,
+                capture_output=True,
+                text=True,
+                check=False,
             )
+            if result.returncode != 0:
+                # Show error tail so user sees what actually broke
+                console.print(f"[red]Install failed (exit {result.returncode})[/red]")
+                if result.stderr:
+                    console.print(f"[dim]{result.stderr.strip()[-500:]}[/dim]")
+                config["voice"]["auto_start"] = False
+                return
             console.print("[green]Voice deps installed.[/green]\n")
         except Exception as e:
             console.print(f"[red]Install failed: {e}[/red]")

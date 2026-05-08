@@ -219,6 +219,10 @@ def _handle_command(cmd: str, agent: Agent) -> bool:
         _stop_voice()
         return True
 
+    if cmd_lower == "voice test":
+        _voice_test()
+        return True
+
     if cmd_lower.startswith("model add "):
         from openbro.cli.model_manager import add_model
 
@@ -289,6 +293,7 @@ def _show_help():
     table.add_row("activity", "Print last 30 activity events (one-shot)")
     table.add_row("boss / boss off", "Toggle Boss mode — agent asks permission for every tool")
     table.add_row("voice / voice off", "Toggle voice listener (mic always-on inside REPL)")
+    table.add_row("voice test", "Quick 5-sec mic test - records + transcribes + prints")
     table.add_row("model list", "List all available models with status")
     table.add_row("model add <name>", "Add a model (downloads Ollama OR stores API key)")
     table.add_row("model switch <name>", "Switch active model (offers to remove old offline)")
@@ -707,6 +712,51 @@ def _stop_voice():
     _voice_listener = None
     _voice_thread = None
     console.print("[yellow]Voice listening stopped.[/yellow]")
+
+
+def _voice_test():
+    """Quick mic + STT sanity check: record 5 seconds, transcribe, print."""
+    try:
+        from openbro.voice.listener import VoiceListener
+    except Exception as e:
+        console.print(f"[red]Voice deps missing: {e}[/red]")
+        console.print("[dim]Install: pip install 'openbro[voice]'[/dim]")
+        return
+
+    cfg = load_config()
+    voice_cfg = cfg.get("voice", {}) or {}
+    try:
+        v = VoiceListener(
+            wake_words=voice_cfg.get("wake_words"),
+            stt_model=voice_cfg.get("stt_model", "base"),
+            chunk_seconds=5.0,
+            speak_replies=False,
+        )
+    except Exception as e:
+        console.print(f"[red]Voice init failed: {e}[/red]")
+        return
+
+    console.print(
+        "[bold cyan]Voice test:[/bold cyan] [dim]speak now - recording for 5 seconds...[/dim]"
+    )
+    try:
+        text = v.listen_once()
+    except Exception as e:
+        console.print(f"[red]Recording failed: {e}[/red]")
+        return
+
+    if not text:
+        console.print(
+            "[yellow]No speech detected.[/yellow] "
+            "[dim]Check: mic plugged in, Windows mic permission allowed, "
+            "spoke loud enough, no other app holding the mic.[/dim]"
+        )
+        return
+    console.print(f"[green]Heard:[/green] {text}")
+    console.print(
+        "[dim]If that looks right, voice mode will work. "
+        "Say 'hey bro <command>' (e.g. 'hey bro notepad open kar') to use it.[/dim]"
+    )
 
 
 def _start_panel():
