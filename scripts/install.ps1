@@ -233,26 +233,57 @@ if ($pyInfo -and -not $pyInfo.tooOld) {
     }
 }
 
-# Final sanity: actually run python and confirm it works
+# Final sanity: actually run python and confirm it works.
+# Lower EAP locally to avoid stderr-warning crashes (PS5.1 quirk).
+$oldEAP = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
 try {
-    $sanityOut = & $python -c "import sys; print(sys.executable)" 2>&1
-    if ($LASTEXITCODE -ne 0) { throw "exit ${LASTEXITCODE} - ${sanityOut}" }
-    Write-Info "Python exe: $sanityOut"
-} catch {
-    Write-Err "Python found but failed to run: $_"
-    exit 1
+    $sanityOut = & $python -c "import sys; print(sys.executable)" 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "Python found but failed to run (exit ${LASTEXITCODE})"
+        Write-Host $sanityOut -ForegroundColor DarkGray
+        exit 1
+    }
+    Write-Info "Python exe: $($sanityOut.Trim())"
+} finally {
+    $ErrorActionPreference = $oldEAP
 }
 
 # ─── Step 2/5: pip + OpenBro ─────────────────────────────────
 Write-Step 2 5 "Installing OpenBro [$Extras] (this may take 1-2 minutes)..."
 
-# pip writes warnings to stderr (e.g. "Scripts not on PATH"). Under
-# $ErrorActionPreference=Stop, any stderr line from a native command becomes
-# a terminating error. We swallow stderr explicitly to avoid that.
+# pip writes warnings to stderr (e.g. "Scripts not on PATH", "Cache entry
+# deserialization failed"). Under $ErrorActionPreference=Stop, any stderr
+# line from a native command becomes a terminating error EVEN with `2>$null`
+# (PS 5.1 quirk). The only reliable fix is to lower EAP locally and discard
+# all output streams. We also pass --no-cache-dir to skip pip's cache entirely
+# so the cache-deserialization warning can't fire in the first place.
 function Invoke-Pip {
     param([string[]]$PipArgs)
-    & $python -m pip @PipArgs --no-warn-script-location 2>$null
-    return $LASTEXITCODE
+    $allArgs = @("-m", "pip") + $PipArgs + @(
+        "--no-warn-script-location",
+        "--no-cache-dir",
+        "--disable-pip-version-check"
+    )
+    $oldEAP = $ErrorActionPreference
+    $oldNativeEAP = $null
+    if (Test-Path Variable:PSNativeCommandUseErrorActionPreference) {
+        $oldNativeEAP = $PSNativeCommandUseErrorActionPreference
+        $PSNativeCommandUseErrorActionPreference = $false
+    }
+    $ErrorActionPreference = "Continue"
+    try {
+        # *>&1 merges every stream (stdout/stderr/warning/info/verbose/debug)
+        # into the success stream, then Out-Null swallows them all. Combined
+        # with EAP=Continue, no terminating error can escape.
+        & $python @allArgs *>&1 | Out-Null
+        return $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $oldEAP
+        if ($null -ne $oldNativeEAP) {
+            $PSNativeCommandUseErrorActionPreference = $oldNativeEAP
+        }
+    }
 }
 
 $pipExit = Invoke-Pip @("install", "--upgrade", "pip", "--quiet")
@@ -290,16 +321,29 @@ if ($installExit -ne 0) {
 }
 Write-OK "OpenBro installed"
 
+# Helper: run python with a -c snippet, return stdout as string. Lowers EAP
+# locally so a stderr warning can't crash us under EAP=Stop.
+function Invoke-PyOneliner {
+    param([string]$Code)
+    $oldEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $out = & $python -c $Code 2>&1 | Where-Object { $_ -is [string] }
+        return @{ exit = $LASTEXITCODE; out = ($out -join "`n").Trim() }
+    } finally {
+        $ErrorActionPreference = $oldEAP
+    }
+}
+
 # Add Python's user Scripts dir to PATH (current session + persistent)
 # so `openbro` command works without restarting shell.
 try {
-    $userScripts = & $python -c "import sysconfig; print(sysconfig.get_path('scripts', 'nt_user'))" 2>$null
+    $r = Invoke-PyOneliner "import sysconfig; print(sysconfig.get_path('scripts', 'nt_user'))"
+    $userScripts = $r.out
     if ($userScripts -and (Test-Path $userScripts)) {
-        # Current session
         if ($env:Path -notlike "*$userScripts*") {
             $env:Path = "$userScripts;$env:Path"
         }
-        # Persist for future shells (user-scope PATH)
         $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
         if (-not $userPath) { $userPath = "" }
         if ($userPath -notlike "*$userScripts*") {
@@ -312,11 +356,11 @@ try {
 
 # ─── Step 3/5: Verify ────────────────────────────────────────
 Write-Step 3 5 "Verifying installation..."
-$verifyOut = & $python -c "import openbro; print(openbro.__version__)" 2>&1
-if ($LASTEXITCODE -eq 0) {
-    Write-OK "OpenBro v$verifyOut ready"
+$r = Invoke-PyOneliner "import openbro; print(openbro.__version__)"
+if ($r.exit -eq 0 -and $r.out) {
+    Write-OK "OpenBro v$($r.out) ready"
 } else {
-    Write-Err "Verification failed: $verifyOut"
+    Write-Err "Verification failed (exit $($r.exit)): $($r.out)"
     exit 1
 }
 
