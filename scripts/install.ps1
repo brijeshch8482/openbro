@@ -13,21 +13,28 @@ param(
 $ErrorActionPreference = "Stop"
 $REPO = "brijeshch8482/openbro"
 
+# Force UTF-8 output so box-drawing chars and check marks render properly
+# (Windows PowerShell defaults to OEM/Win-1252 which mangles them to '?')
+try {
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+    $OutputEncoding = [System.Text.UTF8Encoding]::new()
+} catch {}
+
 function Write-Step($num, $total, $msg) {
     Write-Host ""
     Write-Host "[$num/$total] $msg" -ForegroundColor Cyan
 }
 
-function Write-OK($msg)   { Write-Host "  ✓ $msg" -ForegroundColor Green }
+function Write-OK($msg)   { Write-Host "  [OK] $msg" -ForegroundColor Green }
 function Write-Info($msg) { Write-Host "  $msg" -ForegroundColor DarkGray }
-function Write-Warn($msg) { Write-Host "  ! $msg" -ForegroundColor Yellow }
-function Write-Err($msg)  { Write-Host "  ✗ $msg" -ForegroundColor Red }
+function Write-Warn($msg) { Write-Host "  [!] $msg" -ForegroundColor Yellow }
+function Write-Err($msg)  { Write-Host "  [X] $msg" -ForegroundColor Red }
 
 Write-Host ""
-Write-Host "  ╔═══════════════════════════════════════════╗" -ForegroundColor Cyan
-Write-Host "  ║          OpenBro Installer v1.0          ║" -ForegroundColor Cyan
-Write-Host "  ║      Tera Apna AI Bro - Open Source      ║" -ForegroundColor Cyan
-Write-Host "  ╚═══════════════════════════════════════════╝" -ForegroundColor Cyan
+Write-Host "  +-------------------------------------------+" -ForegroundColor Cyan
+Write-Host "  |          OpenBro Installer v1.0          |" -ForegroundColor Cyan
+Write-Host "  |      Tera Apna AI Bro - Open Source      |" -ForegroundColor Cyan
+Write-Host "  +-------------------------------------------+" -ForegroundColor Cyan
 Write-Host ""
 
 # ─── Step 1/5: Python (robust detect + install) ──────────────
@@ -238,22 +245,70 @@ try {
 
 # ─── Step 2/5: pip + OpenBro ─────────────────────────────────
 Write-Step 2 5 "Installing OpenBro [$Extras] (this may take 1-2 minutes)..."
-& $python -m pip install --upgrade pip --quiet 2>&1 | Out-Null
 
-# Try PyPI first; fall back to GitHub
-$pkgSpec = "openbro[$Extras]"
-& $python -m pip install --upgrade $pkgSpec --quiet 2>&1 | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    Write-Info "PyPI install failed, installing from GitHub ($Branch)..."
-    & $python -m pip install --upgrade "git+https://github.com/$REPO.git@$Branch#egg=openbro[$Extras]" 2>&1
+# pip writes warnings to stderr (e.g. "Scripts not on PATH"). Under
+# $ErrorActionPreference=Stop, any stderr line from a native command becomes
+# a terminating error. We swallow stderr explicitly to avoid that.
+function Invoke-Pip {
+    param([string[]]$PipArgs)
+    & $python -m pip @PipArgs --no-warn-script-location 2>$null
+    return $LASTEXITCODE
 }
 
-if ($LASTEXITCODE -ne 0) {
+$pipExit = Invoke-Pip @("install", "--upgrade", "pip", "--quiet")
+if ($pipExit -ne 0) {
+    Write-Info "pip self-upgrade returned $pipExit (continuing)"
+}
+
+# Try PyPI first; fall back to GitHub. Try with chosen extras, then trim
+# voice if Python is too new for some wheels.
+$pkgSpec = "openbro[$Extras]"
+$installExit = Invoke-Pip @("install", "--upgrade", $pkgSpec, "--quiet")
+
+if ($installExit -ne 0 -and $Extras -match "voice") {
+    # Some voice deps (faster-whisper, sounddevice) lack wheels for very new
+    # Python versions. Retry without voice so user still gets a working bro.
+    Write-Warn "Install with voice deps failed. Retrying without voice..."
+    $reduced = ($Extras -split "," | Where-Object { $_ -ne "voice" }) -join ","
+    if (-not $reduced) { $reduced = "all" }
+    $pkgSpec = "openbro[$reduced]"
+    $installExit = Invoke-Pip @("install", "--upgrade", $pkgSpec, "--quiet")
+}
+
+if ($installExit -ne 0) {
+    Write-Info "PyPI install failed (exit $installExit), trying GitHub @$Branch..."
+    $installExit = Invoke-Pip @(
+        "install", "--upgrade",
+        "git+https://github.com/$REPO.git@$Branch#egg=openbro[$Extras]"
+    )
+}
+
+if ($installExit -ne 0) {
     Write-Err "Installation failed. Try manually:"
     Write-Host "    $python -m pip install '$pkgSpec'" -ForegroundColor Yellow
     exit 1
 }
 Write-OK "OpenBro installed"
+
+# Add Python's user Scripts dir to PATH (current session + persistent)
+# so `openbro` command works without restarting shell.
+try {
+    $userScripts = & $python -c "import sysconfig; print(sysconfig.get_path('scripts', 'nt_user'))" 2>$null
+    if ($userScripts -and (Test-Path $userScripts)) {
+        # Current session
+        if ($env:Path -notlike "*$userScripts*") {
+            $env:Path = "$userScripts;$env:Path"
+        }
+        # Persist for future shells (user-scope PATH)
+        $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+        if (-not $userPath) { $userPath = "" }
+        if ($userPath -notlike "*$userScripts*") {
+            $newUserPath = if ($userPath) { "$userScripts;$userPath" } else { $userScripts }
+            [Environment]::SetEnvironmentVariable("Path", $newUserPath, "User")
+            Write-Info "Added $userScripts to user PATH"
+        }
+    }
+} catch {}
 
 # ─── Step 3/5: Verify ────────────────────────────────────────
 Write-Step 3 5 "Verifying installation..."
