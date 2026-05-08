@@ -209,11 +209,18 @@ def test_brain_stats_shape(brain_dir):
     assert stats["skills"] == 0  # no skills yet
 
 
-def test_brain_update_stub_returns_status(brain_dir):
-    """Phase 8 not implemented yet — should return a clear status."""
+def test_brain_update_handles_offline(brain_dir):
+    """When the community manifest is unreachable, update() returns ok=False."""
+    from unittest.mock import patch
+
+    import httpx
+
     brain = Brain.load()
-    result = brain.update()
-    assert result["status"] == "not_implemented"
+    with patch("openbro.brain.updater.httpx.get") as mock_get:
+        mock_get.side_effect = httpx.ConnectError("no internet")
+        result = brain.update()
+    assert result["ok"] is False
+    assert "manifest_url" in result
 
 
 def test_brain_skills_count_reflects_files(brain_dir):

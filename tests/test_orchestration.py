@@ -194,12 +194,19 @@ def test_cli_agent_tool_not_installed():
     assert "not found" in out.lower()
 
 
+# Tests below now also patch ensure_signed_in (added in v1 sign-in flow) so
+# they exercise the actual cli_agent code path rather than the auth gate.
+
+_FAKE_AUTH_OK = {"ready": True, "message": "test"}
+
+
 def test_cli_agent_tool_budget_hit(tmp_path, monkeypatch):
     monkeypatch.setattr("openbro.orchestration.base.get_storage_paths", lambda: {"base": tmp_path})
     record_spend("claude", 11.0)  # over $10 default
 
     with patch("openbro.orchestration.base.shutil.which", return_value="/fake/claude"):
-        out = CliAgentTool().run(agent="claude", task="do X")
+        with patch("openbro.orchestration.sign_in.ensure_signed_in", return_value=_FAKE_AUTH_OK):
+            out = CliAgentTool().run(agent="claude", task="do X")
     assert "budget hit" in out.lower()
 
 
@@ -224,6 +231,20 @@ def test_cli_agent_full_flow(tmp_path, monkeypatch):
 
     with patch("openbro.orchestration.base.shutil.which", return_value="/fake/claude"):
         with patch("openbro.orchestration.base.subprocess.Popen", return_value=fake_proc):
-            out = CliAgentTool().run(agent="claude", task="say ok", cwd=str(tmp_path))
+            with patch(
+                "openbro.orchestration.sign_in.ensure_signed_in", return_value=_FAKE_AUTH_OK
+            ):
+                out = CliAgentTool().run(agent="claude", task="say ok", cwd=str(tmp_path))
     assert "Claude Code finished" in out
     assert "$0.02" in out
+
+
+def test_cli_agent_blocks_when_not_signed_in(tmp_path, monkeypatch):
+    """The new sign-in gate: if ensure_signed_in says not ready, we return early."""
+    monkeypatch.setattr("openbro.orchestration.base.get_storage_paths", lambda: {"base": tmp_path})
+    not_ready = {"ready": False, "message": "Run claude /login first"}
+    with patch("openbro.orchestration.base.shutil.which", return_value="/fake/claude"):
+        with patch("openbro.orchestration.sign_in.ensure_signed_in", return_value=not_ready):
+            out = CliAgentTool().run(agent="claude", task="do X")
+    assert "sign-in" in out.lower()
+    assert "claude /login" in out.lower()
