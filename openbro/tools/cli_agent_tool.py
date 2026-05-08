@@ -103,6 +103,22 @@ class CliAgentTool(BaseTool):
         if not agent.is_installed():
             return agent.install_hint()
 
+        # Sign-in detection — if the CLI exists but isn't authenticated, surface
+        # the login flow so the user can complete it before the task retries.
+        try:
+            from openbro.orchestration.sign_in import ensure_signed_in
+
+            auth = ensure_signed_in(agent_name)
+            if not auth.get("ready"):
+                return (
+                    f"{agent.name} requires sign-in.\n"
+                    f"{auth.get('message', '')}\n"
+                    f"Once signed in, ask me again to run the task."
+                )
+        except Exception:
+            # Fail-open: if our probe breaks, let the actual call surface auth errors
+            pass
+
         cfg = load_config()
         cli_cfg = cfg.get("safety", {}).get("cli_agent", {}) or {}
         max_per_call = float(

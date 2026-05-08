@@ -135,5 +135,15 @@ class ReasoningPipeline:
             if hasattr(self.brain, "memory") and self.brain.memory:
                 self.brain.memory.add(prompt, kind="user", meta={"lang": lang})
                 self.brain.memory.add(reply, kind="assistant", meta={"lang": lang})
+
+            # Reflection: extract patterns + adjust skill confidence + profile drift
+            from openbro.brain.reflection import Reflector
+
+            Reflector(self.brain).reflect(
+                prompt=prompt,
+                response=reply,
+                used_skill=used_skill,
+                success=True,
+            )
         except Exception as e:
             self.bus.emit("brain", f"record_interaction error: {e}")

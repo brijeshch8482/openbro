@@ -88,19 +88,38 @@ class Brain:
         )
         self.save()
 
-    # ─── community sync (Phase 8) ──────────────────────────────────
+    # ─── community sync ────────────────────────────────────────────
 
-    def update(self) -> dict:
-        """Pull community patterns from github.com/openbro/openbro-brain.
+    def update(self, manifest_url: str | None = None) -> dict:
+        """Pull the latest community manifest and apply it.
 
-        Stub for now; full implementation lands in Phase 8 (Brain Updater).
-        Returns a summary dict so the CLI can report what happened.
+        Returns {ok, manifest_url, summary, message}. If the brain doesn't
+        have a skills registry attached yet, only the model_scores get
+        updated (skills need brain.skills to land).
         """
-        # TODO: clone/pull openbro-brain repo, merge patterns + skills,
-        # verify safety in sandbox, apply.
+        from openbro.brain.updater import (
+            DEFAULT_MANIFEST_URL,
+            apply_manifest,
+            fetch_community_brain,
+        )
+
+        url = manifest_url or DEFAULT_MANIFEST_URL
+        manifest = fetch_community_brain(url)
+        if not manifest:
+            return {
+                "ok": False,
+                "manifest_url": url,
+                "message": "Could not fetch manifest (offline or 404).",
+            }
+        summary = apply_manifest(self, manifest)
         return {
-            "status": "not_implemented",
-            "message": "brain update will land in v2 Phase 8.",
+            "ok": True,
+            "manifest_url": url,
+            "summary": summary,
+            "message": (
+                f"+{summary['skills_added']} skills, "
+                f"+{summary['model_scores_updated']} model scores updated"
+            ),
         }
 
     # ─── daily LLM-update check ────────────────────────────────────
