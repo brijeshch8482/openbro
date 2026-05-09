@@ -7,7 +7,8 @@ param(
     [string]$Extras = "all,voice",
     [string]$Branch = "main",
     [switch]$NoSetup,
-    [switch]$NoLaunch
+    [switch]$NoLaunch,
+    [switch]$NoNode    # set to skip Node.js install (Node is needed for MCP servers)
 )
 
 $ErrorActionPreference = "Stop"
@@ -320,6 +321,64 @@ try {
     Write-Info "Python exe: $($sanityOut.Trim())"
 } finally {
     $ErrorActionPreference = $oldEAP
+}
+
+# ─── Step 1.5: Node.js (for MCP servers via npx) ─────────────
+# Most MCP servers (filesystem, github, slack, sqlite, ...) ship as
+# npm packages and run with 'npx'. Without Node, MCP integration is
+# limited to Python-only servers. We auto-install unless -NoNode.
+if (-not $NoNode) {
+    Write-Host ""
+    Write-Host "[1.5/5] Checking Node.js (for MCP servers)..." -ForegroundColor Cyan
+    $nodeOk = $false
+    try {
+        $nodeVer = & node --version 2>$null
+        if ($nodeVer -match "v(\d+)") {
+            $major = [int]$Matches[1]
+            if ($major -ge 18) {
+                Write-OK "Node.js $nodeVer found"
+                $nodeOk = $true
+            } else {
+                Write-Info "Node.js $nodeVer too old (need 18+); upgrading"
+            }
+        }
+    } catch {}
+
+    if (-not $nodeOk) {
+        Write-Warn "Node.js not found - installing LTS via winget..."
+        $installed = $false
+        if (Get-Command winget -ErrorAction SilentlyContinue) {
+            $oldEAP2 = $ErrorActionPreference
+            $ErrorActionPreference = "Continue"
+            try {
+                $proc = Start-Process winget -Wait -PassThru -NoNewWindow -ArgumentList @(
+                    "install", "--id", "OpenJS.NodeJS.LTS",
+                    "--silent",
+                    "--accept-source-agreements", "--accept-package-agreements",
+                    "--scope", "user"
+                )
+                if ($proc.ExitCode -eq 0 -or $proc.ExitCode -eq -1978335189) {
+                    $installed = $true
+                }
+            } finally {
+                $ErrorActionPreference = $oldEAP2
+            }
+        }
+
+        if ($installed) {
+            Refresh-Path
+            Start-Sleep -Seconds 2
+            try {
+                $nodeVer = & node --version 2>$null
+                if ($nodeVer) { Write-OK "Installed Node.js $nodeVer" }
+            } catch {
+                Write-Warn "Node installed but PATH not refreshed - new shell needed for 'node' command"
+            }
+        } else {
+            Write-Warn "Could not auto-install Node.js. MCP servers using npx will fail."
+            Write-Info "Manual install: https://nodejs.org/  (or: winget install OpenJS.NodeJS.LTS)"
+        }
+    }
 }
 
 # ─── Step 2/5: pip + OpenBro ─────────────────────────────────

@@ -63,6 +63,9 @@ def run_wizard():
     # Step 6: Telegram (optional)
     _step_telegram(config)
 
+    # Step 7: MCP servers (optional, plug in external data sources)
+    _step_mcp(config)
+
     # Save config
     save_config(config)
 
@@ -461,6 +464,125 @@ def _step_voice(config: dict):
             console.print("[dim]Will download on first wake-word instead.[/dim]\n")
 
     console.print("[green]Voice mode enabled.[/green] [dim]Say 'Hey bro' anytime in chat.[/dim]\n")
+
+
+# ─── Step 7: MCP servers (curated catalogue) ─────────────────────────
+
+
+MCP_CATALOG = [
+    {
+        "id": "filesystem",
+        "name": "Filesystem",
+        "needs_internet": False,
+        "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem"],
+        "extra_args_prompt": "Path to expose (e.g. C:/Users/me/Documents)",
+        "blurb": "Read/write/list files in a folder you allow",
+    },
+    {
+        "id": "github",
+        "name": "GitHub",
+        "needs_internet": True,
+        "command": ["npx", "-y", "@modelcontextprotocol/server-github"],
+        "env_keys": ["GITHUB_PERSONAL_ACCESS_TOKEN"],
+        "blurb": "Repos, issues, PRs (needs personal access token)",
+    },
+    {
+        "id": "sqlite",
+        "name": "SQLite",
+        "needs_internet": False,
+        "command": ["uvx", "mcp-server-sqlite"],
+        "extra_args_prompt": "SQLite DB path (e.g. D:/data/my.db)",
+        "extra_arg_flag": "--db-path",
+        "blurb": "Query a local SQLite database",
+    },
+    {
+        "id": "time",
+        "name": "Time",
+        "needs_internet": False,
+        "command": ["uvx", "mcp-server-time"],
+        "blurb": "Time/date helpers (timezones, conversions)",
+    },
+    {
+        "id": "fetch",
+        "name": "Fetch",
+        "needs_internet": True,
+        "command": ["uvx", "mcp-server-fetch"],
+        "blurb": "HTTP fetch + HTML-to-markdown for any URL",
+    },
+]
+
+
+def _step_mcp(config: dict):
+    console.print("\n[bold yellow]Step 7:[/bold yellow] MCP servers (optional)\n")
+    console.print(
+        "[dim]MCP = standardized tool plumbing. Plug filesystem, GitHub, "
+        "SQLite, etc. into OpenBro as if they were built-in tools.[/dim]"
+    )
+    console.print("[dim]Most servers run via 'npx' (Node.js auto-installed).[/dim]\n")
+
+    if not Confirm.ask("Configure MCP servers now?", default=False):
+        console.print("[dim]Skipped. Add servers later via 'config set mcp.servers'.[/dim]\n")
+        return
+
+    table = Table(border_style="cyan")
+    table.add_column("#", style="cyan", width=3)
+    table.add_column("Server", style="bold")
+    table.add_column("Net?", justify="center")
+    table.add_column("About")
+    for i, s in enumerate(MCP_CATALOG, 1):
+        net = "[red]online[/]" if s["needs_internet"] else "[green]offline[/]"
+        table.add_row(str(i), s["name"], net, s["blurb"])
+    console.print(table)
+    console.print()
+
+    raw = Prompt.ask(
+        "Pick servers (comma-separated numbers, e.g. 1,3) or 'none'",
+        default="none",
+    )
+    if raw.strip().lower() in {"none", "", "0"}:
+        console.print("[dim]No MCP servers enabled.[/dim]\n")
+        return
+
+    picks = []
+    for tok in raw.split(","):
+        tok = tok.strip()
+        if tok.isdigit():
+            idx = int(tok) - 1
+            if 0 <= idx < len(MCP_CATALOG):
+                picks.append(MCP_CATALOG[idx])
+
+    servers = config.setdefault("mcp", {}).setdefault("servers", [])
+
+    for pick in picks:
+        entry = {
+            "name": pick["id"],
+            "command": list(pick["command"]),
+            "enabled": True,
+        }
+        # Extra runtime args (e.g. filesystem path)
+        if pick.get("extra_args_prompt"):
+            value = Prompt.ask(f"  {pick['name']}: {pick['extra_args_prompt']}")
+            if value:
+                if pick.get("extra_arg_flag"):
+                    entry["command"].extend([pick["extra_arg_flag"], value])
+                else:
+                    entry["command"].append(value)
+        # Env vars (API keys, tokens)
+        if pick.get("env_keys"):
+            env_dict = {}
+            for key in pick["env_keys"]:
+                v = Prompt.ask(f"  {pick['name']}: {key}", password=True, default="")
+                if v:
+                    env_dict[key] = v
+            if env_dict:
+                entry["env"] = env_dict
+        servers.append(entry)
+        console.print(f"  [green]✓ Added MCP server: {pick['name']}[/green]")
+
+    console.print(
+        f"\n[green]MCP configured with {len(picks)} server(s). "
+        f"They auto-connect at OpenBro startup.[/green]\n"
+    )
 
 
 def _step_telegram(config: dict):

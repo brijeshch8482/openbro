@@ -200,6 +200,44 @@ if ! "$PYTHON" -c "import sys; print('Python exe:', sys.executable)" 2>/dev/null
     exit 1
 fi
 
+# ─── Step 1.5: Node.js (for MCP servers via npx) ────────────
+NO_NODE="${OPENBRO_NO_NODE:-0}"
+if [ "$NO_NODE" != "1" ]; then
+    echo ""
+    echo -e "${C}[1.5/5] Checking Node.js (for MCP servers)...${N}"
+    NODE_OK=0
+    if command -v node &> /dev/null; then
+        NODE_VER=$(node --version 2>/dev/null | sed 's/^v//')
+        NODE_MAJOR=$(echo "$NODE_VER" | cut -d. -f1)
+        if [ -n "$NODE_MAJOR" ] && [ "$NODE_MAJOR" -ge 18 ] 2>/dev/null; then
+            ok "Node.js v$NODE_VER found"
+            NODE_OK=1
+        fi
+    fi
+
+    if [ "$NODE_OK" != "1" ]; then
+        warn "Node.js not found - installing..."
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            command -v brew &> /dev/null && brew install node && NODE_OK=1
+        elif [ -f /etc/debian_version ]; then
+            # Use NodeSource for a recent LTS
+            curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash - 2>/dev/null \
+                && sudo apt-get install -y nodejs && NODE_OK=1
+        elif [ -f /etc/redhat-release ] || [ -f /etc/fedora-release ]; then
+            sudo dnf install -y nodejs && NODE_OK=1
+        elif [ -f /etc/arch-release ]; then
+            sudo pacman -S --noconfirm nodejs npm && NODE_OK=1
+        fi
+
+        if [ "$NODE_OK" = "1" ] && command -v node &> /dev/null; then
+            ok "Installed Node.js $(node --version)"
+        else
+            warn "Could not auto-install Node.js. MCP servers using npx will fail."
+            info "Install manually: https://nodejs.org/"
+        fi
+    fi
+fi
+
 # ─── Step 2/5: pip + OpenBro ─────────────────────────────────
 step 2 5 "Installing OpenBro [$EXTRAS] (this may take 1-2 minutes)..."
 "$PYTHON" -m pip install --upgrade pip --quiet 2>/dev/null || true
