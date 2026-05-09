@@ -63,6 +63,37 @@ class ToolRegistry:
         for tool in self._skill_registry.all_tools(only_configured=True):
             self._tools[tool.name] = tool
 
+        # MCP servers — connect and inject their tools too
+        try:
+            self._register_mcp(config)
+        except Exception:
+            pass
+
+    def _register_mcp(self, config: dict):
+        servers_cfg = (config.get("mcp", {}) or {}).get("servers", []) or []
+        if not servers_cfg:
+            return
+        from openbro.mcp.client import MCPServerConfig, register_mcp_tools
+
+        configs = []
+        for raw in servers_cfg:
+            if not isinstance(raw, dict):
+                continue
+            cmd = raw.get("command")
+            if not cmd:
+                continue
+            configs.append(
+                MCPServerConfig(
+                    name=raw.get("name", "mcp"),
+                    command=list(cmd),
+                    cwd=raw.get("cwd"),
+                    env=raw.get("env", {}) or {},
+                    enabled=raw.get("enabled", True),
+                )
+            )
+        if configs:
+            register_mcp_tools(configs, self)
+
     def skills_info(self) -> list[dict]:
         if not self._skill_registry:
             return []

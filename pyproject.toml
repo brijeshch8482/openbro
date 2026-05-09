@@ -56,6 +56,11 @@ brain = [
 gui = [
     "customtkinter>=5.2",
 ]
+tray = [
+    "pystray>=0.19",
+    "pynput>=1.7",
+    "pillow>=10.0",
+]
 all = [
     "ollama>=0.4",
     "anthropic>=0.40",
@@ -70,6 +75,9 @@ all = [
     "openpyxl>=3.1",
     "sentence-transformers>=2.7",
     "customtkinter>=5.2",
+    "pystray>=0.19",
+    "pynput>=1.7",
+    "pillow>=10.0",
 ]
 # Note: Groq uses httpx directly (already a core dependency), no extra package needed
 dev = [

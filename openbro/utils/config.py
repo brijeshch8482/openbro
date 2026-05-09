@@ -102,6 +102,12 @@ def default_config() -> dict:
             "gcal": {"ical_url": None},
             "notion": {"token": None},
         },
+        "mcp": {
+            "servers": [
+                # Example:
+                # {"name": "fs", "command": ["mcp-server-filesystem", "/data"], "enabled": false}
+            ],
+        },
         "voice": {
             "enabled": True,
             "auto_start": False,  # if true, voice listens by default in REPL

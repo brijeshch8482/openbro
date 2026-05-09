@@ -19,7 +19,11 @@ from openbro import __version__
 @click.option("--telegram", is_flag=True, help="Run as Telegram bot instead of CLI")
 @click.option("--voice", is_flag=True, help="Run in voice mode (mic + TTS)")
 @click.option("--gui/--cli", default=None, help="Launch browser UI (default) or terminal REPL")
-def main(provider, model, offline, setup, telegram, voice, gui):
+@click.option(
+    "--mcp-server", is_flag=True, help="Run as MCP server (stdio, for Claude Desktop etc.)"
+)
+@click.option("--tray", is_flag=True, help="Run as system tray app with global hotkey")
+def main(provider, model, offline, setup, telegram, voice, gui, mcp_server, tray):
     """OpenBro - Tera Apna AI Bro
 
     Open-source personal AI agent. Just run 'openbro' and start chatting!
@@ -42,6 +46,18 @@ def main(provider, model, offline, setup, telegram, voice, gui):
         if offline:
             config["llm"]["provider"] = "ollama"
         save_config(config)
+
+    if mcp_server:
+        from openbro.mcp.server import run_mcp_server
+
+        run_mcp_server()
+        return
+
+    if tray:
+        from openbro.ui.tray import run_tray
+
+        run_tray()
+        return
 
     if telegram:
         from openbro.channels.telegram_bot import run_telegram_from_config
