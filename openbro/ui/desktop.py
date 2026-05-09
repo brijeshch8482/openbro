@@ -197,6 +197,12 @@ class OpenBroApp:
             return
         self.input.delete(0, "end")
         self._add_message("user", text)
+
+        # Slash commands run REPL-style handlers, give parity with the CLI
+        if text.startswith("/"):
+            threading.Thread(target=self._handle_slash, args=(text[1:],), daemon=True).start()
+            return
+
         self._set_thinking(True)
         # Run pipeline in background thread so UI doesn't freeze
         threading.Thread(target=self._handle_prompt, args=(text,), daemon=True).start()
@@ -205,17 +211,91 @@ class OpenBroApp:
         try:
             result = self.pipeline.handle(prompt)
             reply = result.reply
-            meta = ""
+            meta_bits = []
             if result.used_skill:
-                meta = f"  [skill: {result.used_skill}]"
-            elif result.memory_hits:
-                meta = f"  [{result.memory_hits} memories used]"
+                meta_bits.append(f"skill: {result.used_skill}")
+            if result.memory_hits:
+                meta_bits.append(f"mem: {result.memory_hits}")
+            if result.used_planner:
+                meta_bits.append("planner")
+            if result.used_verifier:
+                meta_bits.append("verified")
+            if result.used_web:
+                meta_bits.append("web")
+            if not result.online:
+                meta_bits.append("offline")
+            meta = f"  [{' · '.join(meta_bits)}]" if meta_bits else ""
             self.root.after(0, lambda: self._add_message("bro", reply + meta))
         except Exception as exc:
             err = f"Error: {exc}"
             self.root.after(0, lambda: self._add_message("bro", err))
         finally:
             self.root.after(0, lambda: self._set_thinking(False))
+
+    def _handle_slash(self, cmd: str):
+        """Slash commands give the desktop UI feature-parity with the REPL.
+
+        Examples:
+          /brain stats     /skills           /voice on
+          /model switch groq    /boss        /audit
+        """
+        cmd = cmd.strip()
+        if not cmd:
+            return
+        try:
+            output = self._run_slash(cmd)
+        except Exception as exc:
+            output = f"Error: {exc}"
+        self.root.after(0, lambda: self._add_message("bro", output or "(no output)"))
+
+    def _run_slash(self, cmd: str) -> str:
+        """Map a slash command to brain / agent state actions, return text reply."""
+        parts = cmd.split(maxsplit=2)
+        head = parts[0].lower()
+        if head == "brain":
+            sub = parts[1].lower() if len(parts) > 1 else "stats"
+            if sub == "stats":
+                stats = self.brain.stats()
+                return "\n".join(f"{k}: {v}" for k, v in stats.items())
+            if sub == "skills":
+                skills = self.brain.skills.list()
+                if not skills:
+                    return "No skills learned yet."
+                return "\n".join(
+                    f"- {s.name} (uses: {s.success_count + s.fail_count})" for s in skills
+                )
+            if sub == "learnings":
+                events = self.brain.storage.read_learnings(limit=10)
+                return (
+                    "\n".join(
+                        f"{e.get('ts', '')[:19]}  {e.get('type', '?')}  {e.get('signal', '')}"
+                        for e in events
+                    )
+                    or "No learnings yet."
+                )
+            if sub == "update":
+                r = self.brain.update()
+                return r.get("message", str(r))
+            if sub == "world":
+                return str(self.brain.refresh_world())
+            return f"Unknown brain subcommand: {sub}"
+        if head == "model":
+            from openbro.cli.model_manager import list_available
+
+            list_available()
+            return "(check terminal for model table)"
+        if head == "boss":
+            mode = "boss" if (len(parts) < 2 or parts[1] != "off") else "normal"
+            self.agent.permissions.mode = mode
+            return f"Boss mode: {mode}"
+        if head == "voice":
+            sub = parts[1].lower() if len(parts) > 1 else "on"
+            if sub == "off":
+                self._stop_voice()
+                return "Voice off."
+            self._start_voice()
+            return "Voice on."
+        return f"Unknown slash command: /{cmd}"
 
     def _toggle_voice(self):
         if self.voice_running:
@@ -254,7 +334,14 @@ class OpenBroApp:
             try:
                 result = self.pipeline.handle(text)
                 self.root.after(0, lambda: self._add_message("bro", result.reply))
-                # Voice mode replies aloud too
+                # Voice mode replies aloud too — auto-pick TTS voice for the
+                # detected reply language (Hindi -> hi-IN-Swara, else en-IN-Neerja)
+                try:
+                    from openbro.utils.language import voice_for
+
+                    tts.voice = voice_for(getattr(self.agent, "last_language", "en"))
+                except Exception:
+                    pass
                 tts.speak(result.reply)
                 return result.reply
             except Exception as e:
@@ -326,6 +413,27 @@ class OpenBroApp:
     def _on_activity(self, ev):
         # Called from worker threads via bus.subscribe
         self.root.after(0, lambda: self._append_activity(ev.kind, ev.text))
+        # CLI orchestration events also surface as live progress in chat so
+        # the user sees Claude / Codex working step-by-step (not just final reply).
+        if ev.kind == "cli_agent":
+            self.root.after(0, lambda: self._add_progress(f"[CLI] {ev.text[:120]}"))
+
+    def _add_progress(self, text: str):
+        """A subtle progress line in the chat area for live tool output."""
+        import customtkinter as ctk
+
+        line = ctk.CTkLabel(
+            self.chat_frame,
+            text=text,
+            font=ctk.CTkFont(size=11, family="Consolas"),
+            text_color="#8b949e",
+            anchor="w",
+        )
+        line.pack(anchor="w", padx=18, pady=1, fill="x")
+        try:
+            self.chat_frame._parent_canvas.yview_moveto(1.0)
+        except Exception:
+            pass
 
     def _append_activity(self, kind: str, text: str):
         import customtkinter as ctk

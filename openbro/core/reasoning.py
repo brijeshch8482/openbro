@@ -99,13 +99,21 @@ class ReasoningPipeline:
                 steps.append("web: injected fresh data")
                 result.used_web = True
 
-        # 4. Inject context (profile + memory + web) into agent system prompt
+        # 4. Inject context (profile + world + memory + web) into agent system prompt
         original_history = list(self.agent.history)
         original_sys = self.agent.history[0].content if self.agent.history else ""
         injected = []
         try:
             if hasattr(self.brain, "profile") and self.brain.profile:
                 injected.append(self.brain.profile.context_snippet())
+            try:
+                from openbro.brain import world as world_mod
+
+                world_ctx = world_mod.context_snippet(self.brain.world)
+                if world_ctx:
+                    injected.append(world_ctx)
+            except Exception:
+                pass
             if memory_ctx:
                 injected.append(memory_ctx)
             if web_ctx:

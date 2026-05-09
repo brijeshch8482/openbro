@@ -45,6 +45,22 @@ class Brain:
         profile = UserProfile.load(storage.profile_path)
         return cls(storage=storage, profile=profile)
 
+    @property
+    def world(self) -> dict:
+        """Lazy-load static PC facts (OS, paths, installed apps, online state)."""
+        if not hasattr(self, "_world_cache") or self._world_cache is None:
+            from openbro.brain import world as world_mod
+
+            self._world_cache = world_mod.load(self)
+        return self._world_cache
+
+    def refresh_world(self) -> dict:
+        """Force-refresh the world snapshot."""
+        from openbro.brain import world as world_mod
+
+        self._world_cache = world_mod.refresh(self)
+        return self._world_cache
+
     # ─── persistence ───────────────────────────────────────────────
 
     def save(self) -> None:
