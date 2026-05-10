@@ -44,11 +44,11 @@ def run_wizard():
     config = default_config()
 
     # Step 1: Storage location FIRST so the offline-model download in step 2
-    # can use the chosen drive via OLLAMA_MODELS env var, instead of dumping
+    # can use the chosen drive via OPENBRO_MODELS env var, instead of dumping
     # 5+ GB into C: by default.
     _step_storage(config)
 
-    # Step 2: LLM provider (uses storage path from step 1 for Ollama models)
+    # Step 2: LLM provider (uses storage path from step 1 for local GGUF files)
     _step_provider(config)
 
     # Step 3: Safety settings
@@ -233,7 +233,7 @@ def _step_provider(config: dict):
 def _step_storage(config: dict):
     console.print("[bold yellow]Step 1:[/bold yellow] Choose storage location\n")
     console.print("[dim]OpenBro stores memory, chat history, cache, and logs locally.[/dim]")
-    console.print("[dim]Offline models (Ollama, ~5 GB each) will go in <path>/models.[/dim]\n")
+    console.print("[dim]Offline models (GGUF, ~2-13 GB each) will go in <path>/models.[/dim]\n")
 
     # Show available drives
     drives = get_available_drives()
