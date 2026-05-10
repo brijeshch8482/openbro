@@ -69,11 +69,11 @@ tray = [
     "pillow>=10.0",
 ]
 all = [
-    # Full install — every feature wired up. Big download (~3 GB total
-    # because of torch via sentence-transformers, plus faster-whisper).
-    # Takes 20-40 min on average broadband. Worth it: every capability
-    # works out of the box without any "pip install ..." follow-ups.
-    "ollama>=0.4",
+    # Full install — every feature wired up EXCEPT Ollama.
+    # Ollama is excluded from default because most users pick a cloud
+    # LLM (Groq / Google / Claude / OpenAI / DeepSeek). Ollama (offline
+    # LLM runtime) is opt-in via 'pip install openbro[ollama]' or by
+    # picking it in the wizard's LLM step (which pip-installs it then).
     "anthropic>=0.40",
     "openai>=1.50",
     "python-telegram-bot>=21.0",
