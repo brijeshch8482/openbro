@@ -243,12 +243,16 @@ step 2 5 "Installing OpenBro [$EXTRAS] (this may take 1-2 minutes)..."
 "$PYTHON" -m pip install --upgrade pip --quiet 2>/dev/null || true
 
 PKG_SPEC="openbro[$EXTRAS]"
-if "$PYTHON" -m pip install --upgrade "$PKG_SPEC" --quiet 2>/dev/null; then
+# llama-cpp-python wheels live on a separate index (NOT PyPI). Without this,
+# pip downloads a 68 MB source tarball and tries to compile — usually fails.
+LLAMA_WHEEL_INDEX="https://abetlen.github.io/llama-cpp-python/whl/cpu"
+if "$PYTHON" -m pip install --upgrade --extra-index-url "$LLAMA_WHEEL_INDEX" "$PKG_SPEC" --quiet 2>/dev/null; then
     :
 else
     info "PyPI install failed, installing from GitHub ($BRANCH)..."
     # PEP 508 direct-URL form (pip >= 23 rejects the old '#egg=name[extra]')
     "$PYTHON" -m pip install --upgrade \
+        --extra-index-url "$LLAMA_WHEEL_INDEX" \
         "openbro[$EXTRAS] @ git+https://github.com/$REPO.git@$BRANCH"
 fi
 ok "OpenBro installed"

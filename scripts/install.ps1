@@ -520,13 +520,29 @@ if ($finalParts.Count -eq 2) {
 # extras via the PEP 508 direct-URL form: 'name[extra] @ git+https://...'.
 $ghSpec = "openbro[$effectiveExtras] @ git+https://github.com/$REPO.git@$Branch"
 Write-Info "Installing from GitHub @$Branch (latest code)..."
-$installExit = Invoke-Pip @("install", "--upgrade", $ghSpec)
+
+# llama-cpp-python (offline LLM engine) ships wheels at a separate index,
+# NOT on PyPI. Without --extra-index-url, pip falls back to a 68 MB source
+# tarball that needs a C++ toolchain AND Windows long-path support to
+# unpack — which crashed the previous install attempt. CPU wheels work
+# everywhere (Windows / Mac / Linux x64); CUDA users can switch the URL
+# suffix to /cu121, /cu122, etc. later.
+$llamaWheelIndex = "https://abetlen.github.io/llama-cpp-python/whl/cpu"
+$installExit = Invoke-Pip @(
+    "install", "--upgrade",
+    "--extra-index-url", $llamaWheelIndex,
+    $ghSpec
+)
 
 # Fallback: PyPI (if GitHub is blocked / firewalled / git missing)
 if ($installExit -ne 0) {
     Write-Info "GitHub install failed (exit $installExit), trying PyPI..."
     $pkgSpec = "openbro[$effectiveExtras]"
-    $installExit = Invoke-Pip @("install", "--upgrade", $pkgSpec, "--quiet")
+    $installExit = Invoke-Pip @(
+        "install", "--upgrade",
+        "--extra-index-url", $llamaWheelIndex,
+        $pkgSpec, "--quiet"
+    )
 }
 
 # If voice was requested but install failed even with wheels-only, trim it
@@ -536,6 +552,7 @@ if ($installExit -ne 0 -and $effectiveExtras -match "voice") {
     if (-not $reduced) { $reduced = "all" }
     $installExit = Invoke-Pip @(
         "install", "--upgrade",
+        "--extra-index-url", $llamaWheelIndex,
         "openbro[$reduced] @ git+https://github.com/$REPO.git@$Branch"
     )
 }

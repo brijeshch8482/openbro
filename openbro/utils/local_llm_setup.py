@@ -278,6 +278,12 @@ def ensure_llama_cpp_python() -> bool:
     import subprocess
 
     console.print("[dim]Installing llama-cpp-python (1-3 min, wheel-only)...[/dim]")
+    # llama-cpp-python wheels live at the project's GitHub Pages index — NOT
+    # PyPI. Without --extra-index-url pip downloads a 68 MB source tarball
+    # and tries to compile, which often fails (Windows long-path, missing
+    # C++ toolchain). The /cpu suffix works everywhere; CUDA/Metal users can
+    # rerun with /cu121 etc. later if they want GPU offload.
+    llama_wheel_index = "https://abetlen.github.io/llama-cpp-python/whl/cpu"
     try:
         result = subprocess.run(
             [
@@ -289,6 +295,8 @@ def ensure_llama_cpp_python() -> bool:
                 "--disable-pip-version-check",
                 "--no-warn-script-location",
                 "--only-binary=:all:",
+                "--extra-index-url",
+                llama_wheel_index,
                 "llama-cpp-python>=0.3.0",
                 "huggingface-hub>=0.20",
             ],
