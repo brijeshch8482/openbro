@@ -418,12 +418,21 @@ function Invoke-Pip {
     }
 }
 
-# Existing-install detection — idempotency: don't punish users for re-running
+# Existing-install detection — idempotency: don't punish users for re-running.
+# When openbro isn't installed yet, Python prints a Traceback on stderr;
+# under EAP=Stop, PowerShell turns that into a NativeCommandError and
+# crashes the installer. Lower EAP locally so the probe stays silent.
 $existingVer = $null
-$probe = & $python -c "import openbro; print(openbro.__version__)" 2>$null
-if ($LASTEXITCODE -eq 0 -and $probe) {
-    $existingVer = $probe.Trim()
-    Write-Info "OpenBro v$existingVer is already installed - will upgrade"
+$_oldEAP = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+try {
+    $probe = & $python -c "import openbro; print(openbro.__version__)" 2>&1 | Out-String
+    if ($LASTEXITCODE -eq 0 -and $probe -and $probe -notmatch "Traceback|Error") {
+        $existingVer = $probe.Trim()
+        Write-Info "OpenBro v$existingVer is already installed - will upgrade"
+    }
+} finally {
+    $ErrorActionPreference = $_oldEAP
 }
 
 $pipExit = Invoke-Pip @("install", "--upgrade", "pip", "--quiet")
