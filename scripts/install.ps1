@@ -407,10 +407,17 @@ function Invoke-Pip {
     try {
         # 2>&1 merges stderr into stdout so pip's progress lines (which go
         # to stderr) display live to the user. EAP=Continue keeps stderr
-        # from being promoted to a terminating error. The user actually
-        # SEES the download progress now (3GB+ install needs visible
-        # feedback otherwise people think the shell froze).
-        & $python @allArgs 2>&1
+        # from being promoted to a terminating error.
+        #
+        # CRITICAL: pipe to Out-Host. Without it, every line pip prints
+        # gets accumulated into this function's return value — so the
+        # caller's '$exit = Invoke-Pip ...' captures a giant string array
+        # of pip output instead of just the int exit code, and any
+        # comparison like '$exit -ne 0' is always true. (We hit exactly
+        # this: a successful install was misreported as "GitHub install
+        # failed (exit ...lots of output... 0)" and the script silently
+        # fell back to PyPI's stale 1.0.0-beta.)
+        & $python @allArgs 2>&1 | Out-Host
         return $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $oldEAP
