@@ -535,6 +535,23 @@ Write-Info "Installing from GitHub @$Branch (latest code)..."
 # everywhere (Windows / Mac / Linux x64); CUDA users can switch the URL
 # suffix to /cu121, /cu122, etc. later.
 $llamaWheelIndex = "https://abetlen.github.io/llama-cpp-python/whl/cpu"
+
+# When an older openbro is already installed, pip's '--upgrade' often skips
+# reinstalling the package itself if version comparison says "satisfied"
+# (we hit this: GitHub 1.0.0b1 vs PyPI-installed 1.0.0-beta — pip normalized
+# both to 1.0.0b0/b1 and decided the existing copy was fine, so the user's
+# wizard kept showing the OLD code). --force-reinstall on openbro itself
+# guarantees a clean swap to the GitHub HEAD without re-downloading the
+# 3 GB of cached deps (--no-deps scopes the force to openbro only).
+if ($existingVer) {
+    Write-Info "Forcing clean reinstall of openbro (deps stay cached)..."
+    Invoke-Pip @(
+        "install", "--upgrade", "--force-reinstall", "--no-deps",
+        "--extra-index-url", $llamaWheelIndex,
+        "openbro @ git+https://github.com/$REPO.git@$Branch"
+    ) | Out-Null
+}
+
 $installExit = Invoke-Pip @(
     "install", "--upgrade",
     "--extra-index-url", $llamaWheelIndex,
