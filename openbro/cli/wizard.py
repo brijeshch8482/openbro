@@ -378,7 +378,20 @@ def _step_voice(config: dict):
     console.print("[dim]Always-on mic + wake word ('Hey bro') + TTS reply.[/dim]")
     console.print("[dim]You can type AND speak — both work simultaneously.[/dim]\n")
 
-    # Check voice deps
+    import sys
+
+    # Voice deps (faster-whisper, sounddevice, etc.) often LACK pre-built
+    # wheels for very-recent Python versions (3.14 came out Oct 2025; wheels
+    # take weeks/months to catch up). Without wheels, pip falls back to
+    # source builds that pull in torch/cuda/ctranslate2 — which can take
+    # 30+ minutes and sometimes segfault, killing the whole shell.
+    #
+    # If we detect a Python version that's likely too new for voice wheels,
+    # we surface that upfront and let the user opt out cleanly.
+    py_major, py_minor = sys.version_info[:2]
+    too_new = (py_major, py_minor) >= (3, 14)
+
+    # Check if voice deps are already installed
     try:
         import faster_whisper  # noqa: F401
         import sounddevice  # noqa: F401
@@ -387,54 +400,89 @@ def _step_voice(config: dict):
     except Exception:
         deps_ok = False
 
-    if not deps_ok:
-        console.print(
-            "[yellow]Voice dependencies missing.[/yellow] "
-            "[dim]Install with: pip install 'openbro[voice]'[/dim]\n"
-        )
-        if not Confirm.ask("Install voice dependencies now?", default=True):
-            config["voice"]["auto_start"] = False
-            console.print("[dim]Skipped. Use 'openbro --voice' later if you install them.[/dim]\n")
-            return
+    if deps_ok:
+        # Already installed — skip the install dance
+        pass
+    else:
+        if too_new:
+            console.print(
+                f"[yellow]Voice deps don't have pre-built wheels for "
+                f"Python {py_major}.{py_minor} yet.[/yellow]"
+            )
+            console.print(
+                "[dim]Source-build attempt would pull in torch/ctranslate2 "
+                "(30+ min, often crashes). Recommended: skip voice for now, or "
+                "downgrade to Python 3.12.[/dim]\n"
+            )
+            if not Confirm.ask(
+                "Try voice install anyway? (will likely fail; you can skip)",
+                default=False,
+            ):
+                config["voice"]["auto_start"] = False
+                console.print(
+                    "[dim]Voice skipped. Text + voice via cloud LLMs still works "
+                    "fine. To add voice later: install Python 3.12 and run "
+                    "'pip install openbro[voice]'.[/dim]\n"
+                )
+                return
+        else:
+            console.print(
+                "[yellow]Voice dependencies missing.[/yellow] "
+                "[dim]Install with: pip install 'openbro[voice]'[/dim]\n"
+            )
+            if not Confirm.ask("Install voice dependencies now?", default=True):
+                config["voice"]["auto_start"] = False
+                console.print(
+                    "[dim]Skipped. Use 'openbro --voice' later if you install them.[/dim]\n"
+                )
+                return
 
         import subprocess
-        import sys
 
-        console.print("[dim]Installing voice deps (1-2 min)...[/dim]")
+        console.print("[dim]Installing voice deps (1-2 min, wheel-only)...[/dim]")
         try:
-            # Pass --no-cache-dir + --disable-pip-version-check so harmless
-            # pip warnings (cache deserialize, version check) don't pollute
-            # the wizard output. Capture stderr so warnings don't surface.
+            # --only-binary=:all: forces pip to refuse source builds.
+            # Cleaner: either a wheel exists and installs in seconds, or pip
+            # exits with a clear 'no compatible wheel' error. NEVER hangs in
+            # a 30-minute compile that segfaults the whole shell.
+            #
+            # We DON'T use capture_output: streaming pip's progress lets the
+            # user see what's happening, and avoids buffer-related freezes.
             result = subprocess.run(
                 [
                     sys.executable,
                     "-m",
                     "pip",
                     "install",
-                    "--quiet",
                     "--no-cache-dir",
                     "--no-warn-script-location",
                     "--disable-pip-version-check",
+                    "--only-binary=:all:",  # <-- key safety flag
                     "faster-whisper>=1.0",
                     "edge-tts>=6.1",
                     "sounddevice>=0.4",
                     "numpy>=1.24",
                     "pyttsx3>=2.90",
                 ],
-                capture_output=True,
-                text=True,
                 check=False,
+                timeout=300,  # hard cap: 5 min max
             )
             if result.returncode != 0:
-                # Show error tail so user sees what actually broke
-                console.print(f"[red]Install failed (exit {result.returncode})[/red]")
-                if result.stderr:
-                    console.print(f"[dim]{result.stderr.strip()[-500:]}[/dim]")
+                console.print(f"[red]Voice deps install returned exit {result.returncode}[/red]")
+                console.print(
+                    "[dim]Most common cause: no compatible wheel for your "
+                    f"Python ({py_major}.{py_minor}). Skipping voice; rest of "
+                    "OpenBro will work fine.[/dim]\n"
+                )
                 config["voice"]["auto_start"] = False
                 return
             console.print("[green]Voice deps installed.[/green]\n")
+        except subprocess.TimeoutExpired:
+            console.print("[red]Voice install timed out (>5 min). Skipping.[/red]\n")
+            config["voice"]["auto_start"] = False
+            return
         except Exception as e:
-            console.print(f"[red]Install failed: {e}[/red]")
+            console.print(f"[red]Voice install error: {e}[/red]")
             config["voice"]["auto_start"] = False
             return
 
