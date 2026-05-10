@@ -440,26 +440,99 @@ if ($pipExit -ne 0) {
     Write-Info "pip self-upgrade returned $pipExit (continuing)"
 }
 
-# Try PyPI first; fall back to GitHub. Try with chosen extras, then trim
-# voice if Python is too new for some wheels.
-$pkgSpec = "openbro[$Extras]"
-$installExit = Invoke-Pip @("install", "--upgrade", $pkgSpec, "--quiet")
+# Detect Python version. faster-whisper / ctranslate2 / sounddevice often
+# lack pre-built wheels for very-new Python versions (e.g. 3.14, released
+# Oct 2025 - wheels lag by weeks/months). Without wheels, pip falls back
+# to source builds which segfault and kill the shell.
+#
+# If user wants voice (offline) and current Python is too new, install
+# Python 3.12 ALONGSIDE and use that for OpenBro. This keeps voice fully
+# offline (faster-whisper) without forcing cloud STT.
+$pyVer = & $python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
+$pyVerParts = $pyVer.Trim() -split '\.'
+$pyMajor = [int]$pyVerParts[0]
+$pyMinor = [int]$pyVerParts[1]
 
-if ($installExit -ne 0 -and $Extras -match "voice") {
-    # Some voice deps (faster-whisper, sounddevice) lack wheels for very new
-    # Python versions. Retry without voice so user still gets a working bro.
-    Write-Warn "Install with voice deps failed. Retrying without voice..."
-    $reduced = ($Extras -split "," | Where-Object { $_ -ne "voice" }) -join ","
-    if (-not $reduced) { $reduced = "all" }
-    $pkgSpec = "openbro[$reduced]"
+if (($pyMajor -gt 3) -or ($pyMajor -eq 3 -and $pyMinor -ge 14)) {
+    if ($Extras -match "voice") {
+        Write-Warn "Python $pyVer is too new for offline voice (faster-whisper has no wheels yet)."
+        Write-Info "Installing Python 3.12 alongside so offline voice works..."
+
+        # Install Python 3.12 specifically (Install-Python already targets 3.12)
+        $needs312 = $true
+        # Already installed? Try to find it via py launcher
+        try {
+            $py312Out = & py -3.12 --version 2>$null
+            if ($py312Out -match "Python 3\.12") {
+                Write-OK "Python 3.12 already present"
+                $needs312 = $false
+            }
+        } catch {}
+
+        if ($needs312) {
+            $ok = Install-Python
+            if (-not $ok) {
+                Write-Warn "Could not install Python 3.12. Voice will be skipped."
+            } else {
+                Refresh-Path
+                Start-Sleep -Seconds 2
+                Write-OK "Python 3.12 installed"
+            }
+        }
+
+        # Re-resolve $python to specifically use 3.12 if available
+        try {
+            $py312Test = & py -3.12 -c "import sys; print(sys.executable)" 2>$null
+            if ($py312Test -and (Test-Path $py312Test)) {
+                $python = $py312Test
+                Write-Info "Using Python 3.12 for OpenBro: $python"
+            } else {
+                Write-Warn "Couldn't switch to Python 3.12. Falling back to current Python (voice will skip)."
+            }
+        } catch {
+            Write-Warn "py -3.12 not callable; sticking with current Python."
+        }
+    }
+}
+
+$effectiveExtras = $Extras
+
+# Now check: if we're STILL on a Python version without voice wheel
+# support, drop 'voice' from extras to avoid the source-compile crash.
+$finalPyVer = & $python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
+$finalParts = $finalPyVer.Trim() -split '\.'
+if ($finalParts.Count -eq 2) {
+    $fMajor = [int]$finalParts[0]
+    $fMinor = [int]$finalParts[1]
+    if ((($fMajor -gt 3) -or ($fMajor -eq 3 -and $fMinor -ge 14)) -and ($Extras -match "voice")) {
+        Write-Warn "Voice deps still unavailable on Python $finalPyVer; trimming voice extra."
+        $effectiveExtras = ($Extras -split "," | Where-Object { $_ -ne "voice" }) -join ","
+        if (-not $effectiveExtras) { $effectiveExtras = "all" }
+    }
+}
+
+# Install OpenBro from GitHub directly (latest code, including all wizard
+# bug fixes). PyPI lags behind active development and would give the user
+# a stale wizard that doesn't have our voice / install fixes.
+$ghSpec = "git+https://github.com/$REPO.git@$Branch#egg=openbro[$effectiveExtras]"
+Write-Info "Installing from GitHub @$Branch (latest code)..."
+$installExit = Invoke-Pip @("install", "--upgrade", $ghSpec)
+
+# Fallback: PyPI (if GitHub is blocked / firewalled / git missing)
+if ($installExit -ne 0) {
+    Write-Info "GitHub install failed (exit $installExit), trying PyPI..."
+    $pkgSpec = "openbro[$effectiveExtras]"
     $installExit = Invoke-Pip @("install", "--upgrade", $pkgSpec, "--quiet")
 }
 
-if ($installExit -ne 0) {
-    Write-Info "PyPI install failed (exit $installExit), trying GitHub @$Branch..."
+# If voice was requested but install failed even with wheels-only, trim it
+if ($installExit -ne 0 -and $effectiveExtras -match "voice") {
+    Write-Warn "Install with voice deps failed. Retrying without voice..."
+    $reduced = ($effectiveExtras -split "," | Where-Object { $_ -ne "voice" }) -join ","
+    if (-not $reduced) { $reduced = "all" }
     $installExit = Invoke-Pip @(
         "install", "--upgrade",
-        "git+https://github.com/$REPO.git@$Branch#egg=openbro[$Extras]"
+        "git+https://github.com/$REPO.git@$Branch#egg=openbro[$reduced]"
     )
 }
 

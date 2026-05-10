@@ -40,6 +40,9 @@ anthropic = ["anthropic>=0.40"]
 openai = ["openai>=1.50"]
 telegram = ["python-telegram-bot>=21.0"]
 voice = [
+    # Fully offline voice. faster-whisper for local STT (no cloud).
+    # Requires Python 3.10-3.13 (wheels not yet available for 3.14+).
+    # The installer auto-installs Python 3.12 if needed.
     "faster-whisper>=1.0",
     "edge-tts>=6.1",
     "sounddevice>=0.4",
