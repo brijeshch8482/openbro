@@ -157,10 +157,78 @@ def find_installed_match(name: str) -> Path | None:
 # ─── HuggingFace download ─────────────────────────────────────────────
 
 
+def _download_via_httpx(url: str, target: Path) -> bool:
+    """Stream-download a file with an immediate Rich progress bar.
+
+    We use this instead of huggingface_hub.hf_hub_download because the
+    hub library now defaults to the XET chunked protocol, which sits at
+    "0%" for 30-60 sec on first use while it negotiates — looking
+    completely frozen to the user. Direct httpx streaming starts showing
+    bytes within a second.
+
+    Resumes partial downloads via Range header (if .part file exists).
+    """
+    import httpx
+    from rich.progress import (
+        BarColumn,
+        DownloadColumn,
+        Progress,
+        SpinnerColumn,
+        TextColumn,
+        TimeRemainingColumn,
+        TransferSpeedColumn,
+    )
+
+    part = target.with_suffix(target.suffix + ".part")
+    resume_from = part.stat().st_size if part.exists() else 0
+    headers = {}
+    if resume_from > 0:
+        headers["Range"] = f"bytes={resume_from}-"
+        console.print(f"[dim]Resuming from {resume_from / 1e9:.2f} GB...[/dim]")
+
+    try:
+        with httpx.stream("GET", url, headers=headers, timeout=None, follow_redirects=True) as r:
+            if r.status_code not in (200, 206):
+                console.print(f"[red]HTTP {r.status_code} from {url}[/red]")
+                return False
+            total = int(r.headers.get("content-length", 0)) + resume_from
+            mode = "ab" if resume_from > 0 else "wb"
+            with (
+                open(part, mode) as f,
+                Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    BarColumn(),
+                    DownloadColumn(),
+                    TransferSpeedColumn(),
+                    TimeRemainingColumn(),
+                    console=console,
+                ) as progress,
+            ):
+                task = progress.add_task(
+                    f"Downloading {target.name}",
+                    total=total or None,
+                    completed=resume_from,
+                )
+                for chunk in r.iter_bytes(chunk_size=1024 * 1024):  # 1 MiB
+                    if not chunk:
+                        continue
+                    f.write(chunk)
+                    progress.advance(task, len(chunk))
+        # Atomic rename — only the complete file appears as the target.
+        part.replace(target)
+        return True
+    except (httpx.HTTPError, OSError) as e:
+        console.print(f"[red]Download error: {e}[/red]")
+        return False
+
+
 def download_model(name: str) -> Path | None:
     """Download a GGUF model from HuggingFace into the user's models dir.
 
     Idempotent: if the file already exists, returns its path immediately.
+    Streams via httpx with a Rich progress bar — predictable progress from
+    the very first byte, no XET protocol negotiation delay.
     """
     info = MODELS.get(name)
     if not info:
@@ -176,18 +244,24 @@ def download_model(name: str) -> Path | None:
         console.print(f"[green]Already downloaded: {target}[/green]")
         return target
 
-    try:
-        from huggingface_hub import hf_hub_download
-    except ImportError:
-        console.print("[red]huggingface_hub missing.[/red] Run: pip install 'openbro[local]'")
-        return None
-
+    # HuggingFace's public 'resolve' URL serves the raw file with redirects
+    # to the CDN. No auth needed for public repos. Far simpler / more
+    # predictable than hf_hub_download's XET negotiation.
+    url = f"https://huggingface.co/{info['repo']}/resolve/main/{info['file']}"
     console.print(f"\n[cyan]Downloading {name} ({info['size']}) from HuggingFace...[/cyan]")
     console.print(f"[dim]Source: {info['repo']}/{info['file']}[/dim]")
     console.print(f"[dim]Saving to: {target}[/dim]\n")
 
+    if _download_via_httpx(url, target):
+        console.print(f"\n[bold green]Model saved: {target}[/bold green]")
+        return target
+
+    # Fallback: try huggingface_hub's downloader (handles auth-gated repos
+    # and adds retries; only reached if direct httpx failed).
+    console.print("[yellow]Direct download failed; falling back to huggingface_hub...[/yellow]")
     try:
-        # hf_hub_download has its own tqdm progress bar.
+        from huggingface_hub import hf_hub_download
+
         downloaded = hf_hub_download(
             repo_id=info["repo"],
             filename=info["file"],
@@ -195,16 +269,16 @@ def download_model(name: str) -> Path | None:
         )
         downloaded_p = Path(downloaded)
         if downloaded_p.resolve() != target.resolve():
-            # HF sometimes lands the file in a subdir; pull it up.
             shutil.move(str(downloaded_p), str(target))
         console.print(f"\n[bold green]Model saved: {target}[/bold green]")
         return target
     except Exception as e:
-        console.print(f"\n[red]Download failed: {e}[/red]")
+        console.print(f"\n[red]Both download methods failed: {e}[/red]")
         console.print(
-            "[dim]Network issue? Try manual import:\n"
-            f"  1. Get {info['file']} from huggingface.co/{info['repo']}\n"
-            "  2. Run: openbro model import <path-to-file>[/dim]"
+            "[dim]Try manual import instead:\n"
+            f"  1. Open https://huggingface.co/{info['repo']}/blob/main/{info['file']}\n"
+            "  2. Click 'Download', save the file\n"
+            "  3. Run: openbro model import <path-to-file>[/dim]"
         )
         return None
 
