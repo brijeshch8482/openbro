@@ -54,6 +54,10 @@ office = [
     "openpyxl>=3.1",
 ]
 brain = [
+    # Semantic memory backend. Pulls torch (~2.5 GB on Windows). Optional —
+    # without it, OpenBro falls back to keyword-based memory search which
+    # works fine for most users. Install separately if you want true
+    # vector-similarity search:  pip install 'openbro[brain]'
     "sentence-transformers>=2.7",
 ]
 gui = [
@@ -65,6 +69,10 @@ tray = [
     "pillow>=10.0",
 ]
 all = [
+    # Full install — every feature wired up. Big download (~3 GB total
+    # because of torch via sentence-transformers, plus faster-whisper).
+    # Takes 20-40 min on average broadband. Worth it: every capability
+    # works out of the box without any "pip install ..." follow-ups.
     "ollama>=0.4",
     "anthropic>=0.40",
     "openai>=1.50",

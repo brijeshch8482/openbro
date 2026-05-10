@@ -405,10 +405,12 @@ function Invoke-Pip {
     }
     $ErrorActionPreference = "Continue"
     try {
-        # *>&1 merges every stream (stdout/stderr/warning/info/verbose/debug)
-        # into the success stream, then Out-Null swallows them all. Combined
-        # with EAP=Continue, no terminating error can escape.
-        & $python @allArgs *>&1 | Out-Null
+        # 2>&1 merges stderr into stdout so pip's progress lines (which go
+        # to stderr) display live to the user. EAP=Continue keeps stderr
+        # from being promoted to a terminating error. The user actually
+        # SEES the download progress now (3GB+ install needs visible
+        # feedback otherwise people think the shell froze).
+        & $python @allArgs 2>&1
         return $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $oldEAP

@@ -53,7 +53,12 @@ class SemanticMemory:
             return self._model
         try:
             from sentence_transformers import SentenceTransformer
-
+        except ImportError:
+            # sentence-transformers is optional; without it, fall back to
+            # keyword-based search. To enable semantic search:
+            #   pip install 'openbro[brain]'
+            return None
+        try:
             self._model = SentenceTransformer(self.model_name)
             return self._model
         except Exception:
