@@ -35,7 +35,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-ollama = ["ollama>=0.4"]
+local = [
+    # Built-in offline LLM. llama-cpp-python = Python bindings for the
+    # Apache 2.0 llama.cpp engine (same engine Ollama / LM Studio wrap
+    # under the hood — but no daemon, no separate install). GGUF models
+    # downloaded directly from HuggingFace via huggingface_hub.
+    "llama-cpp-python>=0.3.0",
+    "huggingface-hub>=0.20",
+]
 anthropic = ["anthropic>=0.40"]
 openai = ["openai>=1.50"]
 telegram = ["python-telegram-bot>=21.0"]
@@ -69,10 +76,12 @@ tray = [
     "pillow>=10.0",
 ]
 all = [
-    # Full install — every feature wired up, including offline LLM (Ollama).
+    # Full install — every feature wired up, including offline LLM.
     # Offline-first by design: user can test entirely without internet
-    # using Ollama + faster-whisper. Cloud providers are optional fallbacks.
-    "ollama>=0.4",
+    # using built-in llama.cpp + faster-whisper. Cloud providers are
+    # optional fallbacks for users who want them.
+    "llama-cpp-python>=0.3.0",
+    "huggingface-hub>=0.20",
     "anthropic>=0.40",
     "openai>=1.50",
     "python-telegram-bot>=21.0",

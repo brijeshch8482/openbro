@@ -11,18 +11,28 @@ def test_default_config_structure():
     assert "safety" in config
 
 
-def test_default_provider_is_ollama():
+def test_default_provider_is_local():
     config = default_config()
-    assert config["llm"]["provider"] == "ollama"
+    assert config["llm"]["provider"] == "local"
 
 
 def test_all_providers_present():
     config = default_config()
     providers = config["providers"]
-    assert "ollama" in providers
+    assert "local" in providers
     assert "anthropic" in providers
     assert "openai" in providers
     assert "groq" in providers
+    assert "google" in providers
+    assert "deepseek" in providers
+
+
+def test_local_provider_has_path_field():
+    config = default_config()
+    local = config["providers"]["local"]
+    assert "model_path" in local
+    assert "n_ctx" in local
+    assert "n_gpu_layers" in local
 
 
 def test_safety_defaults():

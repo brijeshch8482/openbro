@@ -126,26 +126,32 @@ PROVIDER_CATALOG = [
         "tags": ["cheap"],
     },
     {
-        "id": "ollama",
-        "name": "Ollama (local)",
+        "id": "local",
+        "name": "Local (offline)",
         "tier": "OFFLINE",
         "default_model": "llama3.1:8b",
-        "signup": "https://ollama.com",
-        "blurb": "Runs models on YOUR hardware. Free forever, no internet, fully private.",
-        "tags": ["advanced"],
+        "signup": "https://huggingface.co",
+        "blurb": (
+            "Built-in offline LLM via llama.cpp. Runs on YOUR hardware. "
+            "Models from HuggingFace (one-time download), then forever offline."
+        ),
+        "tags": [],
     },
 ]
 
 
 def _step_provider(config: dict):
-    # Honor user's storage choice from step 1 - Ollama writes models to the
-    # path in OLLAMA_MODELS env var. Set it BEFORE pulling so model files
-    # land on the chosen drive, not C: by default.
+    # Honor user's storage choice from step 1 - local model files live in
+    # the path in OPENBRO_MODELS env var (or storage.models_dir in config).
+    # Set the env var BEFORE downloading so big GGUF files land on the
+    # chosen drive, not C: by default.
     import os
 
     models_dir = config.get("storage", {}).get("models_dir")
     if models_dir:
-        os.environ["OLLAMA_MODELS"] = models_dir
+        os.environ["OPENBRO_MODELS"] = models_dir
+        # Old name still honored for back-compat
+        os.environ.setdefault("OLLAMA_MODELS", models_dir)
 
     console.print("[bold yellow]Step 2:[/bold yellow] Choose your LLM\n")
     console.print(
@@ -185,19 +191,24 @@ def _step_provider(config: dict):
     chosen = PROVIDER_CATALOG[choice_idx]
     pid = chosen["id"]
 
-    # Ollama gets the existing full-setup flow (install + model picker + download)
-    if pid == "ollama":
-        from openbro.utils.ollama_setup import full_ollama_setup
+    # Local LLM: install llama-cpp-python, pick a GGUF, download from HuggingFace
+    if pid == "local":
+        from openbro.utils.local_llm_setup import full_local_setup
 
-        config["llm"]["provider"] = "ollama"
-        model = full_ollama_setup()
-        if model:
-            config["llm"]["model"] = model
-            console.print(f"\n[green]Ollama ready with model: {model}[/green]\n")
+        config["llm"]["provider"] = "local"
+        result = full_local_setup()
+        if result:
+            name, path = result
+            config["llm"]["model"] = name
+            config.setdefault("providers", {}).setdefault("local", {})
+            config["providers"]["local"]["model_path"] = str(path)
+            console.print(f"\n[green]Local LLM ready: {name}[/green]")
+            console.print(f"[dim]File: {path}[/dim]\n")
         else:
             model = chosen["default_model"]
             config["llm"]["model"] = model
-            console.print(f"[yellow]Ollama setup skipped. Default model: {model}[/yellow]\n")
+            console.print(f"[yellow]Local LLM setup skipped. Default model name: {model}[/yellow]")
+            console.print(f"[dim]Download later with: openbro model download {model}[/dim]\n")
         return
 
     # Cloud providers: ask for API key, configure

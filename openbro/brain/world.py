@@ -40,7 +40,6 @@ COMMON_APPS = [
     "codex",
     "aider",
     "gemini",
-    "ollama",
     "spotify",
     "discord",
     "slack",

@@ -1,12 +1,10 @@
-"""Model add/remove/switch - one command for any model, online or offline.
+"""Model add/remove/switch — one command for any model, online or offline.
 
-Knows about both Ollama (offline, downloads + uninstalls) and cloud
-providers (anthropic/openai/groq - just stores or clears API keys).
+Knows about both local LLMs (downloads/imports/deletes GGUF files) and cloud
+providers (anthropic/openai/groq/google/deepseek — just stores or clears API keys).
 """
 
 from __future__ import annotations
-
-import subprocess
 
 from rich.console import Console
 from rich.prompt import Confirm, Prompt
@@ -16,10 +14,11 @@ from openbro.utils.config import load_config, save_config
 
 console = Console()
 
-CLOUD_PROVIDERS = {"anthropic", "openai", "groq"}
-OFFLINE_PROVIDERS = {"ollama"}
+CLOUD_PROVIDERS = {"anthropic", "openai", "groq", "google", "deepseek"}
+LOCAL_PROVIDERS = {"local"}
 
-# Friendly aliases → (provider, model_name)
+# Friendly aliases → (provider, model_name).
+# Local aliases use the registry keys from openbro.utils.local_llm_setup.MODELS
 ALIASES = {
     "claude": ("anthropic", "claude-sonnet-4-20250514"),
     "claude-opus": ("anthropic", "claude-opus-4-20250514"),
@@ -27,10 +26,16 @@ ALIASES = {
     "gpt-4o": ("openai", "gpt-4o"),
     "gpt-mini": ("openai", "gpt-4o-mini"),
     "groq": ("groq", "llama-3.3-70b-versatile"),
-    "llama": ("ollama", "llama3.2:3b"),
-    "qwen": ("ollama", "qwen2.5-coder:7b"),
-    "mistral": ("ollama", "mistral:7b"),
-    "gemma": ("ollama", "gemma2:2b"),
+    "gemini": ("google", "gemini-1.5-flash"),
+    "deepseek": ("deepseek", "deepseek-chat"),
+    "llama": ("local", "llama3.1:8b"),
+    "llama-small": ("local", "llama3.2:3b"),
+    "llama-tiny": ("local", "llama3.2:1b"),
+    "mistral": ("local", "mistral:7b"),
+    "mistral-nemo": ("local", "mistral-nemo"),
+    "codestral": ("local", "codestral:22b"),
+    "phi": ("local", "phi3:mini"),
+    "gemma": ("local", "gemma2:2b"),
 }
 
 
@@ -39,17 +44,22 @@ def _resolve(name: str) -> tuple[str, str]:
     name = name.strip().lower()
     if name in ALIASES:
         return ALIASES[name]
-    if name in CLOUD_PROVIDERS or name in OFFLINE_PROVIDERS:
+    if name in CLOUD_PROVIDERS or name in LOCAL_PROVIDERS:
         cfg = load_config()
         model = cfg.get("providers", {}).get(name, {}).get("model", "")
         return name, model
-    if ":" in name or "/" in name:
-        return "ollama", name
+    if name == "ollama":  # back-compat alias
+        return "local", "llama3.1:8b"
     if name.startswith("claude"):
         return "anthropic", name
     if name.startswith("gpt") or name.startswith("o1"):
         return "openai", name
-    return "ollama", name
+    if name.startswith("gemini"):
+        return "google", name
+    # Anything else with a colon (registry-style) treated as a local model
+    if ":" in name:
+        return "local", name
+    return "local", name
 
 
 def list_available() -> None:
@@ -65,17 +75,22 @@ def list_available() -> None:
         cfg.get("llm", {}).get("model", ""),
     )
 
+    from openbro.utils.local_llm_setup import find_installed_match
+
     for alias, (prov, model) in ALIASES.items():
         is_active = (prov, model) == current
         status = "[green]✓ active[/green]" if is_active else ""
         if prov in CLOUD_PROVIDERS:
             has_key = bool(cfg.get("providers", {}).get(prov, {}).get("api_key"))
             status += " [dim](key set)[/dim]" if has_key else " [dim](no key)[/dim]"
+        elif prov == "local":
+            on_disk = find_installed_match(model) is not None
+            status += " [dim](downloaded)[/dim]" if on_disk else " [dim](not downloaded)[/dim]"
         table.add_row(alias, prov, model, status)
     console.print(table)
     console.print(
         "\n[dim]Use 'model add <alias>' to add, "
-        "'model switch <alias>' to switch, 'model remove <alias>' to delete offline.[/dim]\n"
+        "'model switch <alias>' to switch, 'model remove <alias>' to delete.[/dim]\n"
     )
 
 
@@ -84,27 +99,32 @@ def add_model(name: str) -> bool:
     provider, model = _resolve(name)
     cfg = load_config()
 
-    if provider == "ollama":
-        from openbro.utils.ollama_setup import (
-            is_ollama_installed,
-            is_ollama_running,
-            pull_model,
-            start_ollama_server,
+    if provider == "local":
+        from openbro.utils.local_llm_setup import (
+            MODELS,
+            download_model,
+            ensure_llama_cpp_python,
         )
 
-        if not is_ollama_installed():
-            console.print("[red]Ollama not installed. Run 'openbro --setup' first.[/red]")
+        if model not in MODELS:
+            console.print(
+                f"[red]Unknown local model: {model}[/red]\n"
+                f"[dim]Available: {', '.join(MODELS.keys())}[/dim]"
+            )
             return False
-        if not is_ollama_running():
-            console.print("[dim]Starting Ollama server...[/dim]")
-            start_ollama_server()
-        console.print(f"[cyan]Downloading {model}...[/cyan]")
-        ok = pull_model(model)
-        if ok:
-            console.print(f"[green]✓ Added offline model: {model}[/green]")
-        return ok
+        if not ensure_llama_cpp_python():
+            return False
+        path = download_model(model)
+        if path:
+            cfg.setdefault("providers", {}).setdefault("local", {})
+            cfg["providers"]["local"]["model_path"] = str(path)
+            cfg["providers"]["local"]["model"] = model
+            save_config(cfg)
+            console.print(f"[green]✓ Added local model: {model}[/green]")
+            return True
+        return False
 
-    # Cloud provider - just take API key if missing
+    # Cloud provider — just take API key if missing
     cur_key = cfg.get("providers", {}).get(provider, {}).get("api_key")
     if not cur_key:
         key = Prompt.ask(f"Paste your {provider} API key", password=True)
@@ -123,7 +143,7 @@ def add_model(name: str) -> bool:
 
 
 def remove_model(name: str) -> bool:
-    """Uninstall offline model OR clear cloud API key."""
+    """Delete a local GGUF file OR clear a cloud API key."""
     provider, model = _resolve(name)
     cfg = load_config()
 
@@ -139,21 +159,19 @@ def remove_model(name: str) -> bool:
         ):
             return False
 
-    if provider == "ollama":
+    if provider == "local":
+        from openbro.utils.local_llm_setup import find_installed_match
+
+        path = find_installed_match(model)
+        if not path:
+            console.print(f"[yellow]Model not on disk: {model}[/yellow]")
+            return False
         try:
-            result = subprocess.run(
-                ["ollama", "rm", model],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if result.returncode != 0:
-                console.print(f"[red]Failed: {result.stderr.strip()}[/red]")
-                return False
-            console.print(f"[green]✓ Removed offline model: {model}[/green]")
+            path.unlink()
+            console.print(f"[green]✓ Removed local model file: {path.name}[/green]")
             return True
-        except FileNotFoundError:
-            console.print("[red]Ollama not found.[/red]")
+        except OSError as e:
+            console.print(f"[red]Failed: {e}[/red]")
             return False
 
     # Cloud: clear API key
@@ -167,28 +185,26 @@ def remove_model(name: str) -> bool:
 
 
 def switch_model(name: str, prompt_remove_old: bool = True) -> bool:
-    """Switch active model. If switching offline → optionally remove old offline model."""
+    """Switch active model. If switching local → optionally remove old file."""
     new_provider, new_model = _resolve(name)
     cfg = load_config()
     old_provider = cfg.get("llm", {}).get("provider")
     old_model = cfg.get("llm", {}).get("model")
 
     # Make sure target is available
-    if new_provider == "ollama":
-        from openbro.utils.ollama_setup import get_installed_models, is_ollama_running
+    if new_provider == "local":
+        from openbro.utils.local_llm_setup import find_installed_match
 
-        if not is_ollama_running():
-            console.print("[yellow]Ollama not running. Starting...[/yellow]")
-            from openbro.utils.ollama_setup import start_ollama_server
-
-            start_ollama_server()
-        installed = get_installed_models()
-        if new_model not in installed:
-            if Confirm.ask(f"{new_model} downloaded nahi hai. Abhi download karu?", default=True):
+        path = find_installed_match(new_model)
+        if not path:
+            if Confirm.ask(f"{new_model} not downloaded. Download abhi karu?", default=True):
                 if not add_model(name):
                     return False
+                path = find_installed_match(new_model)
             else:
                 return False
+        cfg.setdefault("providers", {}).setdefault("local", {})
+        cfg["providers"]["local"]["model_path"] = str(path) if path else None
     elif new_provider in CLOUD_PROVIDERS:
         if not cfg.get("providers", {}).get(new_provider, {}).get("api_key"):
             if not add_model(name):
@@ -201,21 +217,27 @@ def switch_model(name: str, prompt_remove_old: bool = True) -> bool:
     save_config(cfg)
     console.print(f"[green]✓ Switched to: {new_provider} / {new_model}[/green]")
 
-    # Offer to remove old offline model
-    if prompt_remove_old and old_provider == "ollama" and old_model and old_model != new_model:
-        from openbro.utils.ollama_setup import get_installed_models
+    # Offer to remove old local model file to free disk
+    if (
+        prompt_remove_old
+        and old_provider in ("local", "ollama")
+        and old_model
+        and old_model != new_model
+    ):
+        from openbro.utils.local_llm_setup import find_installed_match
 
-        installed = get_installed_models() if old_provider == "ollama" else []
-        if old_model in installed:
+        old_path = find_installed_match(old_model)
+        if old_path and old_path.exists():
+            size_gb = old_path.stat().st_size / 1e9
             if Confirm.ask(
-                f"Purana offline model '{old_model}' laptop pe hai. Disk free karne "
-                f"ke liye remove karu?",
+                f"Purana model '{old_model}' ({size_gb:.1f} GB) disk pe hai. "
+                "Free karne ke liye delete karu?",
                 default=False,
             ):
                 try:
-                    subprocess.run(["ollama", "rm", old_model], check=False)
-                    console.print(f"[green]✓ Removed old model: {old_model}[/green]")
-                except Exception as e:
+                    old_path.unlink()
+                    console.print(f"[green]✓ Removed old model: {old_path.name}[/green]")
+                except OSError as e:
                     console.print(f"[yellow]Could not remove: {e}[/yellow]")
 
     return True

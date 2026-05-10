@@ -410,7 +410,10 @@ def _switch_model(model_name: str, agent: Agent):
     config = load_config()
 
     # Check if it's a provider switch (e.g. "anthropic" or "openai")
-    if model_name in ("ollama", "anthropic", "openai", "groq"):
+    if model_name in ("local", "ollama", "anthropic", "openai", "groq", "google", "deepseek"):
+        # 'ollama' kept as alias — both route to the in-process local engine
+        if model_name == "ollama":
+            model_name = "local"
         config["llm"]["provider"] = model_name
         save_config(config)
         agent.provider = __import__(
@@ -527,61 +530,45 @@ def _move_storage():
 
 
 def _pull_model(model_name: str | None = None):
-    from openbro.utils.ollama_setup import (
-        is_ollama_installed,
-        is_ollama_running,
-        pull_model,
+    from openbro.utils.local_llm_setup import (
+        download_model,
+        ensure_llama_cpp_python,
         show_model_picker,
-        start_ollama_server,
     )
 
-    if not is_ollama_installed():
-        console.print("[red]Ollama not installed. Install from https://ollama.ai[/red]\n")
+    if not ensure_llama_cpp_python():
         return
 
-    if not is_ollama_running():
-        console.print("[dim]Starting Ollama server...[/dim]")
-        if not start_ollama_server():
-            console.print("[red]Could not start Ollama. Run 'ollama serve' manually.[/red]\n")
-            return
-
+    if not model_name:
+        model_name = show_model_picker()
     if model_name:
-        pull_model(model_name)
-    else:
-        model = show_model_picker()
-        if model:
-            pull_model(model)
+        download_model(model_name)
     console.print()
 
 
 def _show_models():
-    from openbro.utils.ollama_setup import (
-        get_installed_models,
-        is_ollama_installed,
-        is_ollama_running,
-    )
+    from openbro.utils.local_llm_setup import MODELS, list_installed, models_dir
 
-    if not is_ollama_installed():
-        console.print("[yellow]Ollama not installed. No offline models available.[/yellow]\n")
-        return
-
-    if not is_ollama_running():
-        console.print("[yellow]Ollama not running. Start with: ollama serve[/yellow]\n")
-        return
-
-    models = get_installed_models()
-    if not models:
-        console.print("[yellow]No models downloaded. Use 'pull' to download one.[/yellow]\n")
+    md = models_dir()
+    installed = list_installed()
+    if not installed:
+        console.print(
+            "[yellow]No local models downloaded yet.[/yellow] [dim]Use 'pull' to grab one.[/dim]\n"
+        )
+        console.print(f"[dim]Models dir: {md}[/dim]\n")
         return
 
     table = Table(title="Downloaded Models", border_style="cyan")
     table.add_column("Model", style="bold")
-
-    for m in models:
-        table.add_row(m)
-
+    table.add_column("Size", justify="right")
+    for f in installed:
+        size_gb = f.stat().st_size / 1e9
+        table.add_row(f.name, f"{size_gb:.1f} GB")
     console.print(table)
-    console.print(f"\n[dim]Total: {len(models)} model(s). Use 'pull' to download more.[/dim]\n")
+    console.print(
+        f"\n[dim]Total: {len(installed)} model(s) at {md}. "
+        f"Catalogue ({len(MODELS)} models): use 'pull' to add more.[/dim]\n"
+    )
 
 
 def _show_audit():

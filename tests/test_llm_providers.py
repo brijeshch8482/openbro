@@ -176,7 +176,7 @@ def test_router_google_missing_key_raises(monkeypatch):
 def test_auto_select_includes_google_and_deepseek():
     from openbro.llm.auto_select import probe_available
 
-    with patch("openbro.llm.auto_select._ollama_installed_models", return_value=[]):
+    with patch("openbro.llm.auto_select._local_installed_models", return_value=[]):
         candidates = probe_available()
     providers = {c["provider"] for c in candidates}
     assert "google" in providers
@@ -187,7 +187,7 @@ def test_auto_select_picks_anthropic_when_all_keys_set():
     """Anthropic Claude scores highest in the catalog."""
     from openbro.llm.auto_select import best_available
 
-    with patch("openbro.llm.auto_select._ollama_installed_models", return_value=[]):
+    with patch("openbro.llm.auto_select._local_installed_models", return_value=[]):
         cfg = {
             "providers": {
                 "groq": {"api_key": "gsk"},
@@ -216,17 +216,17 @@ def test_brain_daily_check_respects_cooldown(tmp_path, monkeypatch):
     brain = Brain.load()
     # First call - should run the check
     cfg = {"providers": {"anthropic": {"api_key": "sk"}}}
-    with patch("openbro.llm.auto_select._ollama_installed_models", return_value=[]):
-        first = brain.check_for_better_llm(("ollama", "phi3:mini"), cfg)
+    with patch("openbro.llm.auto_select._local_installed_models", return_value=[]):
+        first = brain.check_for_better_llm(("local", "phi3:mini"), cfg)
     # Should have suggested an upgrade (anthropic claude is way better than phi3)
     assert first is not None
 
     # Second call within 24h - returns None
-    with patch("openbro.llm.auto_select._ollama_installed_models", return_value=[]):
-        second = brain.check_for_better_llm(("ollama", "phi3:mini"), cfg)
+    with patch("openbro.llm.auto_select._local_installed_models", return_value=[]):
+        second = brain.check_for_better_llm(("local", "phi3:mini"), cfg)
     assert second is None
 
     # Force=True bypasses cooldown
-    with patch("openbro.llm.auto_select._ollama_installed_models", return_value=[]):
-        third = brain.check_for_better_llm(("ollama", "phi3:mini"), cfg, force=True)
+    with patch("openbro.llm.auto_select._local_installed_models", return_value=[]):
+        third = brain.check_for_better_llm(("local", "phi3:mini"), cfg, force=True)
     assert third is not None

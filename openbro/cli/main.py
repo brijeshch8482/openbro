@@ -1,33 +1,52 @@
-"""OpenBro CLI - Terminal entry point."""
+"""OpenBro CLI - Terminal entry point.
+
+Top-level command runs the agent (GUI by default, REPL via --cli).
+Subcommands manage local LLM models (download / import / list).
+"""
 
 import click
 
 from openbro import __version__
 
 
-@click.command()
+@click.group(invoke_without_command=True)
 @click.version_option(version=__version__, prog_name="OpenBro")
 @click.option(
     "--provider",
     "-p",
-    type=click.Choice(["ollama", "anthropic", "openai", "groq"]),
+    type=click.Choice(["local", "anthropic", "openai", "groq", "google", "deepseek"]),
     help="LLM provider to use",
 )
 @click.option("--model", "-m", help="Model name to use")
-@click.option("--offline", is_flag=True, help="Force offline mode (Ollama only)")
+@click.option("--offline", is_flag=True, help="Force offline mode (local LLM only)")
 @click.option("--setup", is_flag=True, help="Re-run first-time setup wizard")
 @click.option("--telegram", is_flag=True, help="Run as Telegram bot instead of CLI")
 @click.option("--voice", is_flag=True, help="Run in voice mode (mic + TTS)")
-@click.option("--gui/--cli", default=None, help="Launch browser UI (default) or terminal REPL")
+@click.option("--gui/--cli", default=None, help="Launch desktop UI (default) or terminal REPL")
 @click.option(
     "--mcp-server", is_flag=True, help="Run as MCP server (stdio, for Claude Desktop etc.)"
 )
 @click.option("--tray", is_flag=True, help="Run as system tray app with global hotkey")
-def main(provider, model, offline, setup, telegram, voice, gui, mcp_server, tray):
+@click.pass_context
+def main(
+    ctx,
+    provider,
+    model,
+    offline,
+    setup,
+    telegram,
+    voice,
+    gui,
+    mcp_server,
+    tray,
+):
     """OpenBro - Tera Apna AI Bro
 
     Open-source personal AI agent. Just run 'openbro' and start chatting!
     """
+    if ctx.invoked_subcommand is not None:
+        return
+
     if setup:
         from openbro.cli.wizard import run_wizard
 
@@ -44,7 +63,7 @@ def main(provider, model, offline, setup, telegram, voice, gui, mcp_server, tray
         if model:
             config["llm"]["model"] = model
         if offline:
-            config["llm"]["provider"] = "ollama"
+            config["llm"]["provider"] = "local"
         save_config(config)
 
     if mcp_server:
@@ -71,7 +90,7 @@ def main(provider, model, offline, setup, telegram, voice, gui, mcp_server, tray
         run_voice_mode()
         return
 
-    # Default surface: browser GUI. Fall back to CLI if user passed --cli or
+    # Default surface: desktop GUI. Fall back to CLI if user passed --cli or
     # if the GUI deps aren't installed.
     if gui is False:
         from openbro.cli.repl import start_repl
@@ -92,6 +111,91 @@ def main(provider, model, offline, setup, telegram, voice, gui, mcp_server, tray
         from openbro.cli.repl import start_repl
 
         start_repl()
+
+
+# ─── `openbro model …` subcommands ────────────────────────────────────
+
+
+@main.group()
+def model():
+    """Manage local LLM models (download / import / list)."""
+    pass
+
+
+@model.command("download")
+@click.argument("name")
+def model_download(name: str):
+    """Download a GGUF model from HuggingFace.
+
+    NAME is one of the registry keys (e.g. llama3.1:8b, mistral:7b, phi3:mini).
+    Run `openbro model list` with no GGUFs yet to see the catalogue.
+    """
+    from openbro.utils.local_llm_setup import (
+        MODELS,
+        download_model,
+        ensure_llama_cpp_python,
+    )
+
+    if name not in MODELS:
+        click.echo(f"Unknown model: {name}", err=True)
+        click.echo(f"Available: {', '.join(MODELS.keys())}", err=True)
+        raise SystemExit(2)
+    if not ensure_llama_cpp_python():
+        raise SystemExit(1)
+    path = download_model(name)
+    if not path:
+        raise SystemExit(1)
+
+
+@model.command("import")
+@click.argument("path", type=click.Path(exists=True, dir_okay=False))
+def model_import(path: str):
+    """Import a GGUF file you already have (e.g. transferred via USB)."""
+    from openbro.utils.local_llm_setup import import_model
+
+    p = import_model(path)
+    if not p:
+        raise SystemExit(1)
+
+
+@model.command("list")
+def model_list():
+    """Show downloaded local models and the catalogue of pullable ones."""
+    from openbro.utils.local_llm_setup import MODELS, list_installed, models_dir
+
+    md = models_dir()
+    click.echo(f"Models directory: {md}")
+    installed = list_installed()
+    if installed:
+        click.echo("\nInstalled:")
+        for f in installed:
+            size_gb = f.stat().st_size / 1e9
+            click.echo(f"  {f.name}  ({size_gb:.1f} GB)")
+    else:
+        click.echo("\nNo local models installed yet.")
+
+    click.echo("\nAvailable to download:")
+    for name, info in MODELS.items():
+        click.echo(f"  {name:<18} {info['size']:<8} {info['desc']}")
+    click.echo("\nDownload with:  openbro model download <name>")
+
+
+@model.command("remove")
+@click.argument("name")
+def model_remove(name: str):
+    """Delete a downloaded GGUF file from the models dir."""
+    from openbro.utils.local_llm_setup import MODELS, models_dir
+
+    info = MODELS.get(name)
+    md = models_dir()
+    target = md / info["file"] if info else md / name
+    if not target.exists():
+        click.echo(f"Not found: {target}", err=True)
+        raise SystemExit(1)
+    if not click.confirm(f"Delete {target.name}?", default=False):
+        return
+    target.unlink()
+    click.echo(f"Removed: {target.name}")
 
 
 if __name__ == "__main__":

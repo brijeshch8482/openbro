@@ -32,13 +32,18 @@ def save_config(config: dict):
 def default_config() -> dict:
     return {
         "llm": {
-            "provider": "ollama",
-            "model": "qwen2.5-coder:7b",
+            "provider": "local",
+            "model": "llama3.1:8b",
             "fallback_provider": None,
         },
         "providers": {
-            "ollama": {
-                "base_url": "http://localhost:11434",
+            "local": {
+                # Optional explicit path to a .gguf file. If unset, the router
+                # resolves the registered model name (e.g. 'llama3.1:8b') to
+                # a path under storage.models_dir.
+                "model_path": None,
+                "n_ctx": 8192,
+                "n_gpu_layers": -1,
             },
             "anthropic": {
                 "api_key": None,

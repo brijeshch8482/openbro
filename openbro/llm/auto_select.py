@@ -1,10 +1,10 @@
 """Latest LLM auto-select — probe what's available, pick the best.
 
 Strategy:
-  1. Probe Ollama (any model 7B+ that supports tool calling)
-  2. Probe Groq (free cloud, fastest)
-  3. Probe Anthropic / OpenAI (if user has keys)
-  4. Score by: capability × tool-calling × user-preference (cloud/local/cost)
+  1. Probe local models (any GGUF on disk in the models dir)
+  2. Probe Groq (free cloud, fastest) — needs api_key
+  3. Probe Anthropic / OpenAI / Google / DeepSeek (if user has keys)
+  4. Score by capability × tool-calling × user-preference (cloud/local/cost)
   5. Return best provider config
 
 The model picker upgrades over time: when llama3.4 / claude-5 / gpt-5
@@ -13,13 +13,9 @@ release, they auto-rank above older versions on the next probe.
 
 from __future__ import annotations
 
-import shutil
-import subprocess
-
-import httpx
-
-# Capability scores (rough approximation; tuned over time via reflection)
+# Capability scores (rough approximation; tuned over time via reflection).
 # Higher = better at agent / tool-calling. Updated via daily online check.
+# Chinese models intentionally omitted (project rule).
 CAPABILITY = {
     # Anthropic
     "claude-opus": 100,
@@ -37,64 +33,54 @@ CAPABILITY = {
     "gemini-2.0-flash": 90,
     "gemini-1.5-pro": 92,
     "gemini-1.5-flash": 85,
-    # DeepSeek
-    "deepseek-chat": 88,
-    "deepseek-reasoner": 92,
     # Groq (open-source via fast cloud)
     "groq-llama-3.3": 92,
     "groq-llama-3.1": 87,
     "groq-mixtral": 80,
     "groq-gemma": 70,
-    # Ollama (offline) — kept for advanced users
+    # Local (offline) — Meta / Mistral / Microsoft / Google only
     "llama3.3": 90,
     "llama3.2": 80,
     "llama3.1": 85,
-    "qwen2.5:32b": 88,
-    "qwen2.5:14b": 82,
-    "qwen2.5:7b": 75,
-    "qwen2.5-coder": 60,  # poor at agent tool calls
     "mistral-nemo": 78,
     "mistral:7b": 72,
+    "codestral": 60,  # poor at agent tool calls (code-only)
     "phi3": 60,
+    "phi3:medium": 75,
+    "gemma2:9b": 70,
     "gemma2": 65,
 }
 
 
-def _ollama_installed_models() -> list[str]:
-    if not shutil.which("ollama"):
+def _local_installed_models() -> list[str]:
+    """Return registry-name keys for local GGUFs found on disk."""
+    try:
+        from openbro.utils.local_llm_setup import MODELS, models_dir
+
+        md = models_dir()
+        if not md.exists():
+            return []
+        files = {f.name for f in md.glob("*.gguf")}
+        return [name for name, info in MODELS.items() if info["file"] in files]
+    except Exception:
         return []
-    try:
-        r = httpx.get("http://localhost:11434/api/tags", timeout=2)
-        if r.status_code == 200:
-            return [m["name"] for m in r.json().get("models", [])]
-    except Exception:
-        pass
-    try:
-        out = subprocess.run(["ollama", "list"], capture_output=True, text=True, timeout=5)
-        if out.returncode == 0:
-            lines = out.stdout.strip().splitlines()[1:]
-            return [line.split()[0] for line in lines if line.strip()]
-    except Exception:
-        pass
-    return []
 
 
 def _capability_for(model: str) -> int:
     """Best-match capability score by prefix.
 
     Coder variants are explicitly downgraded: they're great for IDE
-    autocomplete but poor at agentic tool-calling (we hit this in
-    real-world testing — agent didn't call tools at all).
+    autocomplete but poor at agentic tool-calling.
     """
     model_lower = model.lower()
 
-    # Coder fast-path: any model with 'coder' or 'code' in the name caps low
-    if "coder" in model_lower or "codellama" in model_lower:
-        return CAPABILITY.get("qwen2.5-coder", 60)
+    # Coder fast-path: any model with 'coder', 'code' or 'codestral' in name caps low
+    if "coder" in model_lower or "codellama" in model_lower or "codestral" in model_lower:
+        return CAPABILITY.get("codestral", 60)
 
     best = 0
     for key, score in CAPABILITY.items():
-        if "coder" in key:
+        if "coder" in key or "codestral" in key:
             continue  # don't let coder entries score non-coder models
         key_lower = key.lower()
         # Substring or family-prefix (e.g. 'llama3.1' matches 'llama3.1:8b')
@@ -109,30 +95,28 @@ def probe_available() -> list[dict]:
     """Return [{provider, model, score, available, source}, ...] sorted by score desc."""
     candidates = []
 
-    # Ollama
-    for m in _ollama_installed_models():
+    # Local (offline) — only models actually on disk
+    for m in _local_installed_models():
         candidates.append(
             {
-                "provider": "ollama",
+                "provider": "local",
                 "model": m,
                 "score": _capability_for(m),
                 "available": True,
-                "source": "ollama-local",
+                "source": "local-disk",
             }
         )
 
-    # Groq (we can't probe API without a key; check if config has one later)
+    # Cloud providers — availability depends on api_key (set later)
     candidates.append(
         {
             "provider": "groq",
             "model": "llama-3.3-70b-versatile",
             "score": _capability_for("groq-llama-3.3"),
-            "available": False,  # depends on api_key
+            "available": False,
             "source": "groq-cloud",
         }
     )
-
-    # All cloud providers - availability depends on api_key (set later)
     candidates.append(
         {
             "provider": "anthropic",
@@ -164,7 +148,7 @@ def probe_available() -> list[dict]:
         {
             "provider": "deepseek",
             "model": "deepseek-chat",
-            "score": _capability_for("deepseek-chat"),
+            "score": 88,  # not in CAPABILITY anymore
             "available": False,
             "source": "deepseek-cloud",
         }
@@ -193,8 +177,7 @@ def best_available(config: dict | None = None) -> dict | None:
 def suggest_upgrade(current: tuple[str, str], config: dict | None = None) -> dict | None:
     """If a higher-scoring model is available than 'current', return its config."""
     config = config or {}
-    cur_provider, cur_model = current
-    cur_score = _capability_for(cur_model)
+    cur_score = _capability_for(current[1])
     best = best_available(config)
     if not best:
         return None

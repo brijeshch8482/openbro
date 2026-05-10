@@ -105,9 +105,10 @@ class Agent:
             response = self.provider.chat(self.history, tools=tools)
         except ConnectionError:
             return (
-                "Bro, LLM se connect nahi ho pa raha."
-                " Check kar Ollama chal raha hai ya"
-                " nahi (ollama serve)."
+                "Bro, LLM se connect nahi ho pa raha. "
+                "Cloud provider use kar raha hai to internet check kar; "
+                "local model use kar raha hai to model file check kar "
+                "(openbro model list)."
             )
         except Exception as e:
             error_msg = str(e)

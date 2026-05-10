@@ -13,13 +13,31 @@ def create_provider(provider_name: str | None = None) -> LLMProvider:
 
     providers_config = config.get("providers", {})
 
-    if provider_name == "ollama":
-        from openbro.llm.ollama_provider import OllamaProvider
+    if provider_name in ("local", "ollama"):
+        # 'ollama' kept as alias for back-compat with old configs; both now
+        # route to the in-process llama.cpp engine (no external daemon).
+        from openbro.llm.local_provider import LocalLLMProvider
+        from openbro.utils.local_llm_setup import find_installed_match
 
-        ollama_cfg = providers_config.get("ollama", {})
-        return OllamaProvider(
-            base_url=ollama_cfg.get("base_url", "http://localhost:11434"),
-            model=config["llm"].get("model", "qwen2.5-coder:7b"),
+        local_cfg = providers_config.get("local") or providers_config.get("ollama") or {}
+        model_name = config["llm"].get("model", "llama3.1:8b")
+        model_path = local_cfg.get("model_path")
+        if not model_path:
+            p = find_installed_match(model_name)
+            if not p:
+                raise ValueError(
+                    f"No local model found for '{model_name}'. "
+                    "Download one with:\n"
+                    "  openbro model download llama3.1:8b\n"
+                    "Or import a GGUF file you already have:\n"
+                    "  openbro model import D:/path/to/model.gguf"
+                )
+            model_path = str(p)
+        return LocalLLMProvider(
+            model_path=model_path,
+            model_name=model_name,
+            n_ctx=local_cfg.get("n_ctx", 8192),
+            n_gpu_layers=local_cfg.get("n_gpu_layers", -1),
         )
 
     elif provider_name == "anthropic":
@@ -94,5 +112,5 @@ def create_provider(provider_name: str | None = None) -> LLMProvider:
     else:
         raise ValueError(
             f"Unknown provider: {provider_name}. "
-            "Available: anthropic, openai, groq, google, deepseek, ollama"
+            "Available: local, anthropic, openai, groq, google, deepseek"
         )
