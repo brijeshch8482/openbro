@@ -643,7 +643,7 @@ try {
 
 # ─── Step 5/5: Configure LLM (auto-runs wizard) ──────────────
 Write-Step 5 5 "Setting up your LLM..."
-Write-Host "  Pick offline (free, Ollama) or online (Claude / GPT / Groq)." -ForegroundColor DarkGray
+Write-Host "  Pick offline (free, built-in Llama/Mistral) or online (Claude / GPT / Groq)." -ForegroundColor DarkGray
 Write-Host "  Offline: model auto-downloads. Online: just paste your API key." -ForegroundColor DarkGray
 Write-Host ""
 
@@ -651,8 +651,9 @@ if (-not $NoSetup) {
     $resp = Read-Host "  Configure now? [Y/n]"
     if ($resp -eq "" -or $resp -match "^[yY]") {
         Write-Host ""
-        # --setup runs the wizard which handles: provider pick, Ollama install + model
-        # download, cloud API keys, storage drive, personality, optional Telegram setup.
+        # --setup runs the wizard which handles: provider pick, local model
+        # download from HuggingFace, cloud API keys, storage drive, personality,
+        # optional Telegram setup.
         # Then exits without launching the chat REPL.
         try {
             & openbro --setup
