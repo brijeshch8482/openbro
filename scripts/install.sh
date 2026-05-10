@@ -247,8 +247,9 @@ if "$PYTHON" -m pip install --upgrade "$PKG_SPEC" --quiet 2>/dev/null; then
     :
 else
     info "PyPI install failed, installing from GitHub ($BRANCH)..."
+    # PEP 508 direct-URL form (pip >= 23 rejects the old '#egg=name[extra]')
     "$PYTHON" -m pip install --upgrade \
-        "git+https://github.com/$REPO.git@$BRANCH#egg=openbro[$EXTRAS]"
+        "openbro[$EXTRAS] @ git+https://github.com/$REPO.git@$BRANCH"
 fi
 ok "OpenBro installed"
 
