@@ -59,3 +59,11 @@ htmlcov/
 
 # Docs build
 docs/_build/
+
+# Claude Code (per-user settings, not for repo)
+.claude/
+
+# User-local docs
+*.docx
+*.pdf
+!docs/**/*.pdf
