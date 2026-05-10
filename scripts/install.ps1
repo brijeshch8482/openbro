@@ -516,7 +516,9 @@ if ($finalParts.Count -eq 2) {
 # Install OpenBro from GitHub directly (latest code, including all wizard
 # bug fixes). PyPI lags behind active development and would give the user
 # a stale wizard that doesn't have our voice / install fixes.
-$ghSpec = "git+https://github.com/$REPO.git@$Branch#egg=openbro[$effectiveExtras]"
+# Newer pip (>=23) rejects '#egg=name[extra]' fragments — they only accept
+# extras via the PEP 508 direct-URL form: 'name[extra] @ git+https://...'.
+$ghSpec = "openbro[$effectiveExtras] @ git+https://github.com/$REPO.git@$Branch"
 Write-Info "Installing from GitHub @$Branch (latest code)..."
 $installExit = Invoke-Pip @("install", "--upgrade", $ghSpec)
 
@@ -534,7 +536,7 @@ if ($installExit -ne 0 -and $effectiveExtras -match "voice") {
     if (-not $reduced) { $reduced = "all" }
     $installExit = Invoke-Pip @(
         "install", "--upgrade",
-        "git+https://github.com/$REPO.git@$Branch#egg=openbro[$reduced]"
+        "openbro[$reduced] @ git+https://github.com/$REPO.git@$Branch"
     )
 }
 
