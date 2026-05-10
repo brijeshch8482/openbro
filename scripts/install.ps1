@@ -405,19 +405,20 @@ function Invoke-Pip {
     }
     $ErrorActionPreference = "Continue"
     try {
-        # 2>&1 merges stderr into stdout so pip's progress lines (which go
-        # to stderr) display live to the user. EAP=Continue keeps stderr
-        # from being promoted to a terminating error.
+        # 2>&1 merges stderr into stdout. Out-String -Stream converts each
+        # ErrorRecord (which is what PowerShell wraps pip's stderr output
+        # in) back to a plain string before printing — without that, every
+        # 'Running command git clone...' line from pip gets rendered with
+        # full PowerShell error decoration ('At line:420 char:9 + & $python
+        # @allArgs ... NativeCommandError'), which scares users into
+        # thinking the install failed when it's just normal pip progress.
         #
         # CRITICAL: pipe to Out-Host. Without it, every line pip prints
         # gets accumulated into this function's return value — so the
         # caller's '$exit = Invoke-Pip ...' captures a giant string array
         # of pip output instead of just the int exit code, and any
-        # comparison like '$exit -ne 0' is always true. (We hit exactly
-        # this: a successful install was misreported as "GitHub install
-        # failed (exit ...lots of output... 0)" and the script silently
-        # fell back to PyPI's stale 1.0.0-beta.)
-        & $python @allArgs 2>&1 | Out-Host
+        # comparison like '$exit -ne 0' is always true.
+        & $python @allArgs 2>&1 | Out-String -Stream | Out-Host
         return $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $oldEAP
