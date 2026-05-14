@@ -9,7 +9,7 @@
 [![CI](https://github.com/brijeshch8482/openbro/actions/workflows/ci.yml/badge.svg)](https://github.com/brijeshch8482/openbro/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.0.0--beta-orange)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.0.0b1-orange)](CHANGELOG.md)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 [**Quick Start**](#quick-start) · [**Voice Mode**](#voice-mode) · [**Skills**](#skills-plugin-system) · [**Roadmap**](#roadmap) · [**Contributing**](CONTRIBUTING.md)
@@ -114,12 +114,25 @@ The installer will:
 
 ### Update
 
+The fastest way is to re-run the one-liner installer (idempotent — detects existing install, force-reinstalls openbro itself while keeping cached deps):
+
+**Windows** (PowerShell)
 ```powershell
-# Windows / Linux / macOS — same command
-pip install --upgrade "openbro[all,voice,office]"
+$sha=(iwr -useb 'https://api.github.com/repos/brijeshch8482/openbro/commits/main'|ConvertFrom-Json).sha; iwr -useb "https://raw.githubusercontent.com/brijeshch8482/openbro/$sha/scripts/install.ps1" | iex
 ```
 
-Or re-run the install one-liner (idempotent — it detects an existing install and upgrades).
+**Linux / macOS** (bash)
+```bash
+sha=$(curl -fsSL https://api.github.com/repos/brijeshch8482/openbro/commits/main | python3 -c 'import sys,json; print(json.load(sys.stdin)["sha"])') && curl -fsSL "https://raw.githubusercontent.com/brijeshch8482/openbro/$sha/scripts/install.sh" | bash
+```
+
+Or update via pip directly (`llama-cpp-python` wheels live on a separate index, so the `--extra-index-url` is required):
+
+```powershell
+pip install --upgrade --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu "openbro[all,voice] @ git+https://github.com/brijeshch8482/openbro.git@main"
+```
+
+> ⚠️ Avoid `--no-deps` — it skips GUI / voice deps and leaves you with a broken install ("Desktop UI deps not installed").
 
 ### Reopen the chat
 
@@ -131,7 +144,7 @@ Your config, memory, and chat history are preserved at `~/.openbro/`. Just type 
 
 ### Uninstall
 
-Same one-liner — removes pip package, config, memory, and optionally Ollama models + Whisper cache (asks you each time).
+Same one-liner — removes pip package, config, memory, and optionally local GGUF models + Whisper cache (asks you each time).
 
 **Windows**
 ```powershell
@@ -156,32 +169,31 @@ openbro
 
 ### First Run
 
-On first launch, OpenBro walks you through setup:
+On first launch, OpenBro walks you through a 7-step wizard:
 
-1. **Choose LLM** - Ollama (free/offline), Groq (free cloud), Claude, or GPT
-2. **Auto Model Setup** - Ollama install + model download with progress bar
-3. **Choose Storage Drive** - Pick where data and models are stored (D:, E:, etc.)
-4. **Safety & Personality** - Configure command safety and response style
+1. **Storage location** - Pick which drive holds data + models (e.g. `D:\OpenBro`)
+2. **LLM provider** - Six options: Groq / Google Gemini / OpenAI / Anthropic Claude / DeepSeek / Local (offline)
+3. **Safety** - Confirm dangerous commands? (default: yes)
+4. **Personality** - Hinglish Bro / English Professional / Hindi
+5. **Voice** - Always-on mic + wake word ("Hey bro") + TTS reply
+6. **Telegram** - Optional phone bot (skip if not needed)
+7. **MCP servers** - 5 servers auto-installed silently (filesystem, github, sqlite, time, fetch). Online ones stay dormant when offline.
 
 ```
 $ openbro
 
-Step 1: Choose your LLM provider
-  1. Ollama (offline, free, local) <-- recommended
-  2. Groq (cloud, free tier, ultra-fast)
-  3. Anthropic (Claude API, paid)
-  4. OpenAI (GPT API, paid)
-
-Step 2: Choose storage location
-  Available Drives:
-  #  Drive  Free Space  Total    Used %
-  1  C:     25.3 GB     237 GB   89.3%
-  2  D:     450.1 GB    500 GB   10.0%
-
-  1. Default (~/.openbro)
-  2. Custom path (choose your own drive/folder)
-  3. Cloud folder (Google Drive / OneDrive)
+Step 2: Choose your LLM
+┌─────┬──────────────────────┬────────────┬──────────────────────────┐
+│  1  │ Groq <-- recommended │    FREE    │ llama-3.3-70b-versatile  │
+│  2  │ Google Gemini        │    FREE    │ gemini-1.5-flash         │
+│  3  │ OpenAI               │ FREE-TRIAL │ gpt-4o-mini              │
+│  4  │ Anthropic Claude     │    PAID    │ claude-sonnet-4-20250514 │
+│  5  │ DeepSeek             │   CHEAP    │ deepseek-chat            │
+│  6  │ Local (offline)      │  OFFLINE   │ llama3.2:3b              │
+└─────┴──────────────────────┴────────────┴──────────────────────────┘
 ```
+
+Pick **Local (offline)** and the wizard installs `llama-cpp-python` (~150 MB wheel), downloads `Llama 3.2 3B` (2 GB) from HuggingFace, and you're ready — fully offline forever after that one-time download.
 
 ## CLI Commands
 
@@ -285,47 +297,73 @@ OpenBro is a full personal assistant - tools are categorized by risk level:
 
 | Provider | Type | Cost | Setup |
 |----------|------|------|-------|
-| Ollama | Local/Offline | Free | Auto-installed by OpenBro |
-| Groq | Cloud | Free tier | API key from console.groq.com |
-| Anthropic | Cloud | Paid | API key from console.anthropic.com |
-| OpenAI | Cloud | Paid | API key from platform.openai.com |
+| **Local (offline)** | In-process llama.cpp | Free, forever | Auto: pulls GGUF from HuggingFace |
+| Groq | Cloud | Free tier (30 req/min) | API key from console.groq.com |
+| Google Gemini | Cloud | Free tier (1500 req/day) | Key from aistudio.google.com |
+| OpenAI | Cloud | $5 trial credit | Key from platform.openai.com |
+| Anthropic Claude | Cloud | Paid | Key from console.anthropic.com |
+| DeepSeek | Cloud | Cheap ($0.14/M tok) | Key from platform.deepseek.com |
 
-Switch provider anytime:
+The local backend is **llama-cpp-python** — same `llama.cpp` engine that Ollama / LM Studio wrap under the hood, but in-process (no daemon, no HTTP hop, ~10–20 % faster). GGUF models stream directly from HuggingFace; nothing else runs in the background.
+
+Switch provider any time:
 ```
-You > model groq
-Switched to provider: groq (groq/llama-3.3-70b-versatile)
+You > model switch groq
+✓ Switched to: groq / llama-3.3-70b-versatile
 
-You > model ollama
-Switched to provider: ollama (ollama/qwen2.5-coder:7b)
+You > model switch llama          # alias for local + llama3.2:3b
+✓ Switched to: local / llama3.2:3b
 ```
 
 ## Offline Models
 
-OpenBro auto-downloads models. Available options:
+10 curated GGUF models, non-Chinese vendors (Meta / Mistral / Microsoft / Google) — all Q4_K_M quantization for the best size-vs-quality trade-off on CPU.
 
-| Model | Size | RAM | Best For |
-|-------|------|-----|----------|
-| qwen2.5-coder:7b | 4.7 GB | 8 GB | Coding (recommended) |
-| qwen2.5-coder:3b | 2.0 GB | 4 GB | Coding (lighter) |
-| qwen2.5-coder:1.5b | 1.0 GB | 4 GB | Low-end PCs |
-| llama3.2:3b | 2.0 GB | 4 GB | General purpose |
-| mistral:7b | 4.1 GB | 8 GB | General purpose |
-| gemma2:2b | 1.6 GB | 4 GB | Lightweight |
+| Model | Size | RAM | Speed (CPU) | Best For |
+|-------|------|-----|-------------|----------|
+| **llama3.2:3b** | 2.0 GB | 4 GB | ~6 s reply | Recommended default — fast + capable |
+| llama3.2:1b | 0.8 GB | 2 GB | ~2 s reply | Low-end PCs |
+| llama3.1:8b | 4.9 GB | 8 GB | ~30 s reply | Highest quality (needs GPU for speed) |
+| llama3.3:70b | 40 GB | 48 GB | GPU only | Top-tier (workstation) |
+| mistral:7b | 4.4 GB | 8 GB | ~10 s reply | Reliable all-rounder |
+| mistral-nemo | 7.5 GB | 12 GB | ~15 s reply | 128K context |
+| codestral:22b | 13 GB | 16 GB | ~25 s reply | Code specialist |
+| phi3:mini | 2.4 GB | 4 GB | ~5 s reply | Microsoft tiny |
+| phi3:medium | 8.6 GB | 16 GB | ~25 s reply | Microsoft 14B |
+| gemma2:2b | 1.7 GB | 4 GB | ~3 s reply | Google lightweight |
+| gemma2:9b | 5.8 GB | 8 GB | ~15 s reply | Google strong chat |
 
-Download anytime:
+Manage models from the terminal:
+```bash
+openbro model list                       # show installed + catalogue
+openbro model download llama3.2:3b       # fetch from HuggingFace (direct httpx stream, no XET stall)
+openbro model import D:/x/model.gguf     # USB-transferred file (air-gapped PCs)
+openbro model remove <name>              # free disk
 ```
-You > pull
-# Shows interactive picker with sizes and RAM requirements
 
-You > pull llama3.2:3b
-# Direct download
+In-chat:
 ```
+You > pull                               # interactive picker
+You > pull llama3.2:3b                   # direct
+You > model switch llama-tiny            # llama3.2:1b alias
+```
+
+## Troubleshooting
+
+| Problem | Fix |
+|---------|-----|
+| **"Desktop UI deps not installed"** | The wizard auto-installs them now; on launch say "Y" to the prompt. Manual: `pip install customtkinter pystray pynput pillow` |
+| **GUI stuck on "thinking…"** | First chat on a fresh model = 30-90 s while llama.cpp mmaps the GGUF; activity sidebar shows "Loading … into memory". If still stuck after 2 min, switch to `llama3.2:3b` (`openbro config set llm.model llama3.2:3b`) — 8B on CPU is too slow for daily use. |
+| **Voice doesn't respond to "hey bro"** | Windows: Settings → Privacy → Microphone → "Allow desktop apps" = ON. Speak close to the mic. Every transcript (wake or not) now appears as a `🎤 heard:` activity event so you can verify the mic is picking you up. |
+| **GitHub MCP server has no token** | `openbro mcp creds github` — interactive prompt, hidden input, saves to config. Restart `openbro`. |
+| **Install failed with "egg fragment invalid"** | pip >= 23 needs PEP 508 syntax. Use: `openbro[all,voice] @ git+https://...` instead of `git+https://...#egg=openbro[...]`. The installer scripts use the correct form. |
+| **`llama-cpp-python` source-compile crashed** | PyPI has no binary wheels for this package. Use `--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu` — the installer does this automatically. |
 
 ## Requirements
 
-- Python 3.10+
-- (Optional) Ollama - auto-installed during setup
-- (Optional) API keys for cloud providers
+- Python 3.10–3.13 (3.12 recommended — installer auto-installs it on Windows if missing)
+- (Optional) API keys for cloud providers — get free keys from Groq / Google AI Studio
+- (Optional) Node.js for MCP servers — installer auto-installs via winget / brew / apt
 
 ## CLI Agent Orchestration 🤝
 

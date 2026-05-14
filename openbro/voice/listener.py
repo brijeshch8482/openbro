@@ -30,6 +30,7 @@ class VoiceListener:
         silence_threshold: float = 0.005,
         stt_model: str = "base",
         on_transcript: Callable[[str], str] | None = None,
+        on_heard: Callable[[str, bool], None] | None = None,
         speak_replies: bool = True,
     ):
         self.wake_words = [w.lower() for w in (wake_words or DEFAULT_WAKE_WORDS)]
@@ -37,6 +38,12 @@ class VoiceListener:
         self.chunk_seconds = chunk_seconds
         self.silence_threshold = silence_threshold
         self.on_transcript = on_transcript
+        # Fires for EVERY non-empty transcript, with a flag indicating whether
+        # the wake word was present. Used by the GUI for debug visibility — so
+        # the user can see "I heard: ..." even when the wake word didn't match
+        # (which is the #1 voice complaint: "voice kaam nahi kar rha" usually
+        # means the wake word wasn't detected, not that the mic failed).
+        self.on_heard = on_heard
         self.speak_replies = speak_replies
         self.stt = SpeechToText(model_size=stt_model)
         self.tts = TextToSpeech() if speak_replies else None
@@ -82,7 +89,16 @@ class VoiceListener:
                 text = self.listen_once()
                 if not text:
                     continue
-                if not self.is_wake_word(text):
+                has_wake = self.is_wake_word(text)
+                # Tell the UI what we heard, regardless of wake word. The GUI
+                # surfaces this so the user can debug ("I said X but it heard
+                # Y") and so non-wake-word speech doesn't vanish silently.
+                if self.on_heard:
+                    try:
+                        self.on_heard(text, has_wake)
+                    except Exception:
+                        pass
+                if not has_wake:
                     continue
                 command = self.strip_wake_word(text, self.wake_words)
                 if not command:

@@ -364,6 +364,20 @@ class OpenBroApp:
             return "Voice on."
         return f"Unknown slash command: /{cmd}"
 
+    def _populate_input(self, text: str) -> None:
+        """Drop a voice transcript into the input field without sending.
+
+        Lets the user verify what was heard and hit Enter to submit (or edit
+        first). Triggered for non-wake-word transcripts so a missed wake word
+        doesn't drop the user's command on the floor.
+        """
+        try:
+            self.input.delete(0, "end")
+            self.input.insert(0, text)
+            self.input.focus()
+        except Exception:
+            pass
+
     def _toggle_voice(self):
         if self.voice_running:
             self._stop_voice()
@@ -416,7 +430,21 @@ class OpenBroApp:
                 self.root.after(0, lambda: self._add_message("bro", err))
                 return err
 
+        def on_heard(text: str, has_wake: bool) -> None:
+            # Surface every transcript so the user can verify the mic is
+            # working and tell whether the issue is recognition or wake word.
+            # If wake word matched, on_text() above will render the actual
+            # exchange — we just show a faint debug breadcrumb in activity.
+            label = "🎤 heard" if not has_wake else "🎤 wake"
+            self.root.after(0, lambda: self.bus.emit("system", f"{label}: {text}"))
+            # Non-wake utterances: drop the text into the input box too, so
+            # the user can hit Enter to send if they meant it as a real
+            # command (covers the case where 'hey bro' wasn't recognised).
+            if not has_wake:
+                self.root.after(0, lambda: self._populate_input(text))
+
         self.voice_listener.on_transcript = on_text
+        self.voice_listener.on_heard = on_heard
         threading.Thread(target=self.voice_listener.run, daemon=True).start()
         self.voice_running = True
         self.mic_btn.configure(text="●", fg_color="#f85149")
