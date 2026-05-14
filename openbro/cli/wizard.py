@@ -572,75 +572,56 @@ MCP_CATALOG = [
 
 
 def _step_mcp(config: dict):
-    console.print("\n[bold yellow]Step 7:[/bold yellow] MCP servers (optional)\n")
+    """Silently auto-install every MCP server in the catalogue.
+
+    Per user direction: 'Node.js jaise silently install kar deta, MCP bhi
+    waisa hi ho.' No questions, no picking. Online servers (fetch, github)
+    are auto-installed too — they sit idle when the user is offline and
+    activate when there's connectivity. GitHub needs a token to be useful;
+    we leave it blank and skip it at runtime if unset (no crash).
+    """
+    from pathlib import Path
+
+    console.print("\n[bold yellow]Step 7:[/bold yellow] MCP servers")
     console.print(
-        "[dim]MCP = standardized tool plumbing. Plug filesystem, GitHub, "
-        "SQLite, etc. into OpenBro as if they were built-in tools.[/dim]"
+        "[dim]Auto-installing all servers (offline + online). Online ones "
+        "stay dormant until you're online — no failures.[/dim]\n"
     )
-    console.print("[dim]Most servers run via 'npx' (Node.js auto-installed).[/dim]\n")
-
-    if not Confirm.ask("Configure MCP servers now?", default=False):
-        console.print("[dim]Skipped. Add servers later via 'config set mcp.servers'.[/dim]\n")
-        return
-
-    table = Table(border_style="cyan")
-    table.add_column("#", style="cyan", width=3)
-    table.add_column("Server", style="bold")
-    table.add_column("Net?", justify="center")
-    table.add_column("About")
-    for i, s in enumerate(MCP_CATALOG, 1):
-        net = "[red]online[/]" if s["needs_internet"] else "[green]offline[/]"
-        table.add_row(str(i), s["name"], net, s["blurb"])
-    console.print(table)
-    console.print()
-
-    raw = Prompt.ask(
-        "Pick servers (comma-separated numbers, e.g. 1,3) or 'none'",
-        default="none",
-    )
-    if raw.strip().lower() in {"none", "", "0"}:
-        console.print("[dim]No MCP servers enabled.[/dim]\n")
-        return
-
-    picks = []
-    for tok in raw.split(","):
-        tok = tok.strip()
-        if tok.isdigit():
-            idx = int(tok) - 1
-            if 0 <= idx < len(MCP_CATALOG):
-                picks.append(MCP_CATALOG[idx])
 
     servers = config.setdefault("mcp", {}).setdefault("servers", [])
 
-    for pick in picks:
+    # Filesystem defaults to Documents so the agent has something useful out
+    # of the box. User can change later via 'config set mcp.servers...'.
+    default_fs_root = str(Path.home() / "Documents")
+
+    for pick in MCP_CATALOG:
         entry = {
             "name": pick["id"],
             "command": list(pick["command"]),
             "enabled": True,
         }
-        # Extra runtime args (e.g. filesystem path)
-        if pick.get("extra_args_prompt"):
-            value = Prompt.ask(f"  {pick['name']}: {pick['extra_args_prompt']}")
-            if value:
-                if pick.get("extra_arg_flag"):
-                    entry["command"].extend([pick["extra_arg_flag"], value])
-                else:
-                    entry["command"].append(value)
-        # Env vars (API keys, tokens)
-        if pick.get("env_keys"):
-            env_dict = {}
-            for key in pick["env_keys"]:
-                v = Prompt.ask(f"  {pick['name']}: {key}", password=True, default="")
-                if v:
-                    env_dict[key] = v
-            if env_dict:
-                entry["env"] = env_dict
-        servers.append(entry)
-        console.print(f"  [green]✓ Added MCP server: {pick['name']}[/green]")
+        # Filesystem path arg
+        if pick["id"] == "filesystem":
+            entry["command"].append(default_fs_root)
+        # SQLite needs an explicit DB path — point at an empty one in the
+        # user's storage dir; they can swap it later.
+        elif pick["id"] == "sqlite":
+            sqlite_path = str(Path(config.get("storage", {}).get("base_dir", ".")) / "mcp.db")
+            entry["command"].extend(["--db-path", sqlite_path])
+        # GitHub: token blank for now. Server skips itself silently if env
+        # var is missing — no install error, no startup crash.
+        elif pick.get("env_keys"):
+            entry["env"] = {k: "" for k in pick["env_keys"]}
 
+        servers.append(entry)
+        net = "[red]online[/]" if pick["needs_internet"] else "[green]offline[/]"
+        console.print(f"  [green]✓[/green] {pick['name']:<12} {net}")
+
+    console.print(f"\n[green]MCP: {len(MCP_CATALOG)} servers auto-configured.[/green]")
     console.print(
-        f"\n[green]MCP configured with {len(picks)} server(s). "
-        f"They auto-connect at OpenBro startup.[/green]\n"
+        "[dim]GitHub needs a personal access token to actually work. Set it "
+        "any time with:\n"
+        "  config set mcp.servers.1.env.GITHUB_PERSONAL_ACCESS_TOKEN ghp_xxx[/dim]\n"
     )
 
 

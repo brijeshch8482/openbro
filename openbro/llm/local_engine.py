@@ -60,6 +60,23 @@ class LocalEngine:
         except ImportError as e:
             raise RuntimeError(DEPS_HINT) from e
 
+        # First-time load reads the entire GGUF (4-13 GB) off disk and maps
+        # it into RAM/VRAM — 30-90 sec on a typical NVMe + 8B model. Without
+        # an explicit "I'm loading" event the GUI just shows 'thinking…' the
+        # whole time and looks frozen. Emit a clear status so the user sees
+        # what's happening.
+        try:
+            from openbro.core.activity import get_bus
+
+            size_gb = self.model_path.stat().st_size / 1e9
+            get_bus().emit(
+                "system",
+                f"Loading {self.model_path.name} into memory "
+                f"({size_gb:.1f} GB) — 30-90s on first run...",
+            )
+        except Exception:
+            pass
+
         kwargs: dict = {
             "model_path": str(self.model_path),
             "n_ctx": self.n_ctx,
@@ -69,6 +86,13 @@ class LocalEngine:
         if self.chat_format:
             kwargs["chat_format"] = self.chat_format
         self._llm = Llama(**kwargs)
+
+        try:
+            from openbro.core.activity import get_bus
+
+            get_bus().emit("system", "Model loaded — ready to chat")
+        except Exception:
+            pass
 
     # ─── public API ───────────────────────────────────────────────────
 
