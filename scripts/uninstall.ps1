@@ -1,26 +1,40 @@
-# OpenBro Uninstaller for Windows — nuclear-grade cleanup
+# OpenBro Uninstaller for Windows — safe-by-default cleanup
 #
-# One-line nuclear uninstall (deletes EVERYTHING openbro everywhere):
-#   iwr -useb https://github.com/brijeshch8482/openbro/raw/main/scripts/uninstall.ps1 | iex
+# Lessons learned: an earlier version of this script swept C:/D:/E: for any
+# folder whose name started with 'OpenBro' and prompted-with-default-Yes.
+# That regex matched both the user's data folder (D:\OpenBro-teting) AND the
+# developer's source-code clone (D:\OpenBro). User hit Enter expecting only
+# the data folder to go — and their `git clone` was wiped instead. Painful.
 #
-# Why this script is more aggressive than `pip uninstall`:
-#   - Iterates EVERY installed Python (3.10/3.11/3.12/3.13/3.14) — users often
-#     end up with openbro on multiple Pythons after manual pip experiments.
-#   - Deletes orphan launcher .exe files left behind in Scripts/ when pip
-#     uninstall doesn't clean them up (admin needed for system-wide ones).
-#   - Removes the user-chosen storage drive (where GGUF models, memory DB,
-#     skills, audit logs live) — reads it from config.yaml BEFORE deleting
-#     the config.
-#   - Sweeps the HuggingFace cache for both Whisper STT and GGUF LLM files.
+# This rewrite adds four safety layers:
+#   1. WHITELIST: only delete paths that are explicitly listed in config.yaml
+#      (storage.base_dir / storage.models_dir). No regex sweep over drives.
+#   2. SKIP DEV FOLDERS: if a target contains `.git/`, `pyproject.toml`, or
+#      `setup.py`, it's treated as a source-code clone and SKIPPED without
+#      prompting. You can't accidentally nuke a checkout.
+#   3. DEFAULT NO: every destructive prompt defaults to N. User must type Y
+#      explicitly. Blank Enter = keep.
+#   4. DRY RUN BY DEFAULT: lists exactly what WOULD be deleted, then exits.
+#      Re-run with -Commit to actually delete. Use -Force to bypass prompts
+#      after you've reviewed the dry-run output.
+#
+# Usage:
+#   iwr -useb .../uninstall.ps1 | iex           # dry-run (default)
+#   .\uninstall.ps1 -Commit                     # actually delete (with prompts)
+#   .\uninstall.ps1 -Commit -Force              # delete without prompts
+#   .\uninstall.ps1 -Commit -KeepData           # keep user storage drive
+#   .\uninstall.ps1 -Commit -KeepWhisper        # keep HF cache
 
 [CmdletBinding()]
 param(
+    [switch]$Commit,
     [switch]$Force,
     [switch]$KeepData,
     [switch]$KeepWhisper
 )
 
 $ErrorActionPreference = "Continue"
+$DryRun = -not $Commit
 
 function Write-Step($num, $total, $msg) {
     Write-Host ""
@@ -29,76 +43,76 @@ function Write-Step($num, $total, $msg) {
 function Write-OK($msg)   { Write-Host "  [OK] $msg" -ForegroundColor Green }
 function Write-Info($msg) { Write-Host "  $msg" -ForegroundColor DarkGray }
 function Write-Warn($msg) { Write-Host "  ! $msg" -ForegroundColor Yellow }
+function Write-Skip($msg) { Write-Host "  [skip] $msg" -ForegroundColor Yellow }
 
 Write-Host ""
 Write-Host "  +-------------------------------------------+" -ForegroundColor Yellow
-Write-Host "  |       OpenBro Nuclear Uninstaller         |" -ForegroundColor Yellow
+if ($DryRun) {
+    Write-Host "  |   OpenBro Uninstaller (DRY RUN mode)      |" -ForegroundColor Yellow
+} else {
+    Write-Host "  |   OpenBro Uninstaller (WILL DELETE)       |" -ForegroundColor Red
+}
 Write-Host "  +-------------------------------------------+" -ForegroundColor Yellow
 Write-Host ""
-
-if (-not $Force) {
-    Write-Host "  This will remove:" -ForegroundColor White
-    Write-Host "    - openbro Python package from EVERY Python on this PC" -ForegroundColor DarkGray
-    Write-Host "    - Orphan openbro.exe launchers in Scripts/ dirs" -ForegroundColor DarkGray
-    Write-Host "    - Config / memory / audit log at ~/.openbro/" -ForegroundColor DarkGray
-    Write-Host "    - Your chosen storage drive (GGUF models, memory DB)" -ForegroundColor DarkGray
-    Write-Host "    - HuggingFace cache (Whisper + GGUF models)" -ForegroundColor DarkGray
+if ($DryRun) {
+    Write-Host "  No files will be deleted. This is a preview." -ForegroundColor Green
+    Write-Host "  To actually delete, re-run with -Commit." -ForegroundColor DarkGray
     Write-Host ""
-    $confirm = Read-Host "  Sure? [y/N]"
-    if ($confirm -notmatch "^[yY]") {
-        Write-Host "  Cancelled." -ForegroundColor DarkGray
-        exit 0
-    }
 }
 
-# ─── Step 0: kill any running openbro / python processes ──────────────
-Write-Step 0 6 "Stopping running openbro processes..."
-$killed = 0
+# A target is "protected" if it looks like a source-code checkout. We refuse
+# to delete these no matter what — saves users from accidentally nuking a
+# git clone that happens to be named `OpenBro`.
+function Test-IsDevFolder($path) {
+    if (-not (Test-Path $path)) { return $false }
+    foreach ($marker in @(".git", "pyproject.toml", "setup.py", ".github", "CHANGELOG.md")) {
+        if (Test-Path (Join-Path $path $marker)) {
+            return $true
+        }
+    }
+    return $false
+}
+
+# ─── Step 0: stop running openbro processes ────────────────────────────
+Write-Step 0 5 "Checking for running openbro processes..."
+$running = @()
 try {
     $procs = Get-CimInstance Win32_Process -Filter "Name LIKE 'python%'" -ErrorAction SilentlyContinue
     foreach ($p in $procs) {
         if ($p.CommandLine -and ($p.CommandLine -match "openbro|OpenBro")) {
-            try {
-                Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop
-                $killed++
-            } catch {}
+            $running += $p
         }
     }
-    Get-Process -Name openbro -ErrorAction SilentlyContinue | ForEach-Object {
-        try { Stop-Process -Id $_.Id -Force -ErrorAction Stop; $killed++ } catch {}
-    }
+    Get-Process -Name openbro -ErrorAction SilentlyContinue | ForEach-Object { $running += $_ }
 } catch {}
-if ($killed -gt 0) {
-    Write-OK "Stopped $killed process(es)"
-    Start-Sleep -Seconds 1
+if ($running.Count -gt 0) {
+    Write-Info "$($running.Count) openbro process(es) running."
+    if (-not $DryRun) {
+        foreach ($p in $running) {
+            try { Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop } catch {}
+            try { Stop-Process -Id $p.Id -Force -ErrorAction Stop } catch {}
+        }
+        Start-Sleep -Seconds 1
+        Write-OK "Stopped"
+    } else {
+        Write-Host "  WOULD STOP: $($running.Count) process(es)" -ForegroundColor Yellow
+    }
 } else {
-    Write-Info "No running openbro processes"
+    Write-Info "No openbro processes running"
 }
 
-# ─── Discover ALL Python interpreters on the system ──────────────────
-$pythons = New-Object System.Collections.ArrayList
+# ─── Discover Pythons (no regex sweep — use `py -X.Y` launcher only) ──
+$pythons = @()
 foreach ($ver in @("3.10","3.11","3.12","3.13","3.14")) {
     try {
         $p = & py "-$ver" -c "import sys; print(sys.executable)" 2>$null
         if ($LASTEXITCODE -eq 0 -and $p) {
-            [void]$pythons.Add(@{ Version=$ver; Exe=$p.Trim() })
-        }
-    } catch {}
-}
-# Also catch any `python` / `python3` on PATH not surfaced via `py`
-foreach ($cmd in @("python","python3")) {
-    try {
-        $p = & $cmd -c "import sys; print(sys.executable)" 2>$null
-        if ($LASTEXITCODE -eq 0 -and $p) {
-            $exe = $p.Trim()
-            if (-not ($pythons.Exe -contains $exe)) {
-                [void]$pythons.Add(@{ Version="?"; Exe=$exe })
-            }
+            $pythons += @{ Version=$ver; Exe=$p.Trim() }
         }
     } catch {}
 }
 
-# ─── Read storage path from config BEFORE uninstalling pkg ─────────────
+# Read storage paths from config BEFORE pip uninstall (config disappears with the pkg)
 $customBase = $null
 $customModels = $null
 foreach ($py in $pythons) {
@@ -122,23 +136,32 @@ except Exception:
     } catch {}
 }
 
-# ─── Step 1/6: pip uninstall from EVERY Python ─────────────────────────
-Write-Step 1 6 "Uninstalling openbro from $($pythons.Count) Python install(s)..."
+# ─── Step 1/5: pip uninstall from each Python that has openbro ─────────
+Write-Step 1 5 "Pip-uninstall openbro from every Python that has it..."
 foreach ($py in $pythons) {
     try {
+        $probe = & $py.Exe -c "import openbro; print('yes')" 2>$null
+    } catch {
+        $probe = $null
+    }
+    if ($probe -notmatch "yes") {
+        Write-Info "Python $($py.Version): openbro not installed"
+        continue
+    }
+    if ($DryRun) {
+        Write-Host "  WOULD RUN: $($py.Exe) -m pip uninstall openbro -y" -ForegroundColor Yellow
+    } else {
         $out = & $py.Exe -m pip uninstall openbro -y 2>&1
         if ($out -match "Successfully uninstalled") {
-            Write-OK "Python $($py.Version) ($($py.Exe)): removed"
+            Write-OK "Python $($py.Version): removed"
         } else {
-            Write-Info "Python $($py.Version) ($($py.Exe)): not installed"
+            Write-Warn "Python $($py.Version): uninstall reported issues"
         }
-    } catch {
-        Write-Info "Python $($py.Version): probe failed (skipping)"
     }
 }
 
-# ─── Step 2/6: delete orphan launcher .exe files ──────────────────────
-Write-Step 2 6 "Removing orphan openbro.exe launchers..."
+# ─── Step 2/5: orphan .exe launchers (never delete dev folders) ───────
+Write-Step 2 5 "Looking for orphan openbro.exe launchers..."
 $exeLocations = @(
     "C:\Python310\Scripts\openbro.exe",
     "C:\Python311\Scripts\openbro.exe",
@@ -158,144 +181,158 @@ $exeLocations = @(
 )
 $adminNeeded = @()
 foreach ($exe in $exeLocations) {
-    if (Test-Path $exe) {
-        try {
-            Remove-Item $exe -Force -ErrorAction Stop
-            Write-OK "Removed $exe"
-        } catch {
-            $adminNeeded += $exe
-        }
+    if (-not (Test-Path $exe)) { continue }
+    if ($DryRun) {
+        Write-Host "  WOULD DELETE: $exe" -ForegroundColor Yellow
+        continue
+    }
+    try {
+        Remove-Item $exe -Force -ErrorAction Stop
+        Write-OK "Removed $exe"
+    } catch {
+        $adminNeeded += $exe
     }
 }
 if ($adminNeeded.Count -gt 0) {
-    Write-Warn "Need admin to delete these:"
-    foreach ($p in $adminNeeded) { Write-Host "    $p" -ForegroundColor Yellow }
-    Write-Info "Run this in an ADMIN PowerShell to finish cleanup:"
+    Write-Warn "These need admin to delete:"
     foreach ($p in $adminNeeded) {
         Write-Host "    Remove-Item '$p' -Force" -ForegroundColor White
     }
 }
 
-# ─── Step 3/6: config dir ──────────────────────────────────────────────
-Write-Step 3 6 "Cleaning config dir..."
+# ─── Step 3/5: config dir (~/.openbro) ────────────────────────────────
+Write-Step 3 5 "Config dir..."
 $configDir = Join-Path $env:USERPROFILE ".openbro"
-if (Test-Path $configDir) {
-    $size = 0
-    try {
-        $size = (Get-ChildItem $configDir -Recurse -File -ErrorAction SilentlyContinue |
-                 Measure-Object -Property Length -Sum).Sum
-    } catch {}
+if (-not (Test-Path $configDir)) {
+    Write-Info "No config dir at $configDir"
+} elseif (Test-IsDevFolder $configDir) {
+    Write-Skip "$configDir - looks like a dev folder. Skipping."
+} else {
+    $size = (Get-ChildItem $configDir -Recurse -File -ErrorAction SilentlyContinue |
+             Measure-Object -Property Length -Sum).Sum
     $sizeMB = [math]::Round($size / 1MB, 2)
     Write-Info "$configDir ($sizeMB MB)"
+    $shouldDelete = $false
     if ($KeepData) {
         Write-Info "Kept (-KeepData)"
+    } elseif ($DryRun) {
+        Write-Host "  WOULD DELETE: $configDir" -ForegroundColor Yellow
+    } elseif ($Force) {
+        $shouldDelete = $true
     } else {
+        $r = Read-Host "  Delete config dir? [y/N]"
+        $shouldDelete = ($r -match "^[yY]")
+    }
+    if ($shouldDelete) {
         Remove-Item -Path $configDir -Recurse -Force -ErrorAction SilentlyContinue
         Write-OK "Removed $configDir"
+    } elseif (-not $DryRun -and -not $KeepData) {
+        Write-Info "Kept (user declined)"
     }
-} else {
-    Write-Info "No config dir"
 }
 
-# ─── Step 4/6: storage paths (user's chosen drive) ────────────────────
-Write-Step 4 6 "Cleaning storage drives..."
-$pathsToCheck = New-Object System.Collections.ArrayList
+# ─── Step 4/5: WHITELISTED storage paths only (from config) ───────────
+# Critical: only paths the user EXPLICITLY chose in the wizard. No regex
+# scan over drives. If they custom-named their data folder something we
+# don't know about, that's fine — we leave it alone.
+Write-Step 4 5 "User-chosen storage paths (from config)..."
+$storagePaths = @()
 foreach ($p in @($customBase, $customModels)) {
-    if ($p -and (Test-Path $p) -and ($p -ne $configDir) -and -not ($pathsToCheck -contains $p)) {
-        [void]$pathsToCheck.Add($p)
+    if ($p -and (Test-Path $p) -and ($p -ne $configDir) -and -not ($storagePaths -contains $p)) {
+        $storagePaths += $p
     }
 }
-# Also catch any D:\OpenBro* / E:\OpenBro* folders (common pattern)
-foreach ($drive in (Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue)) {
-    if ($drive.Root -match "^[CDEFGH]:\\$") {
-        try {
-            Get-ChildItem -Path $drive.Root -Directory -ErrorAction SilentlyContinue |
-                Where-Object { $_.Name -match "^OpenBro" } |
-                ForEach-Object {
-                    if (-not ($pathsToCheck -contains $_.FullName)) {
-                        [void]$pathsToCheck.Add($_.FullName)
-                    }
-                }
-        } catch {}
-    }
-}
-
-if ($pathsToCheck.Count -eq 0) {
-    Write-Info "No storage paths found"
+if ($storagePaths.Count -eq 0) {
+    Write-Info "No custom storage paths in config (or config already gone)"
 } else {
-    foreach ($p in $pathsToCheck) {
-        $size = 0
-        try {
-            $size = (Get-ChildItem $p -Recurse -File -ErrorAction SilentlyContinue |
-                     Measure-Object -Property Length -Sum).Sum
-        } catch {}
+    foreach ($p in $storagePaths) {
+        if (Test-IsDevFolder $p) {
+            Write-Skip "$p - has .git/pyproject.toml; treating as source clone. Skipping."
+            continue
+        }
+        $size = (Get-ChildItem $p -Recurse -File -ErrorAction SilentlyContinue |
+                 Measure-Object -Property Length -Sum).Sum
         $sizeGB = [math]::Round($size / 1GB, 2)
         Write-Info "$p ($sizeGB GB)"
-        $del = $true
-        if ($KeepData) { $del = $false }
-        elseif (-not $Force) {
-            $r = Read-Host "  Delete this folder? [Y/n]"
-            $del = ($r -eq "" -or $r -match "^[yY]")
+        $shouldDelete = $false
+        if ($KeepData) {
+            Write-Info "Kept (-KeepData)"
+        } elseif ($DryRun) {
+            Write-Host "  WOULD DELETE: $p" -ForegroundColor Yellow
+        } elseif ($Force) {
+            $shouldDelete = $true
+        } else {
+            $r = Read-Host "  Delete this storage folder? [y/N]"
+            $shouldDelete = ($r -match "^[yY]")
         }
-        if ($del) {
+        if ($shouldDelete) {
             Remove-Item -Path $p -Recurse -Force -ErrorAction SilentlyContinue
             if (Test-Path $p) {
-                Write-Warn "Couldn't fully delete $p (some files in use)"
+                Write-Warn "Partial delete (some files in use): $p"
             } else {
                 Write-OK "Removed $p"
             }
-        } else {
-            Write-Info "Kept $p"
+        } elseif (-not $DryRun -and -not $KeepData) {
+            Write-Info "Kept (user declined)"
         }
     }
 }
 
-# ─── Step 5/6: HuggingFace cache (Whisper + GGUF) ─────────────────────
-Write-Step 5 6 "HuggingFace cache (Whisper + GGUF)..."
+# ─── Step 5/5: HuggingFace cache (Whisper STT + GGUF LLM) ─────────────
+Write-Step 5 5 "HuggingFace cache (Whisper STT + GGUF models)..."
 $hfCache = Join-Path $env:USERPROFILE ".cache\huggingface"
-if (Test-Path $hfCache) {
-    $size = 0
-    try {
-        $size = (Get-ChildItem $hfCache -Recurse -File -ErrorAction SilentlyContinue |
-                 Measure-Object -Property Length -Sum).Sum
-    } catch {}
+if (-not (Test-Path $hfCache)) {
+    Write-Info "No HF cache at $hfCache"
+} elseif (Test-IsDevFolder $hfCache) {
+    Write-Skip "$hfCache - looks like a dev folder. Skipping."
+} else {
+    $size = (Get-ChildItem $hfCache -Recurse -File -ErrorAction SilentlyContinue |
+             Measure-Object -Property Length -Sum).Sum
     $sizeMB = [math]::Round($size / 1MB, 2)
     Write-Info "$hfCache ($sizeMB MB)"
-    $del = $true
-    if ($KeepWhisper) { $del = $false }
-    elseif (-not $Force) {
-        $r = Read-Host "  Delete HuggingFace cache (Whisper + GGUF)? [Y/n]"
-        $del = ($r -eq "" -or $r -match "^[yY]")
+    $shouldDelete = $false
+    if ($KeepWhisper) {
+        Write-Info "Kept (-KeepWhisper)"
+    } elseif ($DryRun) {
+        Write-Host "  WOULD DELETE: $hfCache" -ForegroundColor Yellow
+    } elseif ($Force) {
+        $shouldDelete = $true
+    } else {
+        $r = Read-Host "  Delete HuggingFace cache? [y/N]"
+        $shouldDelete = ($r -match "^[yY]")
     }
-    if ($del) {
+    if ($shouldDelete) {
         Remove-Item -Path $hfCache -Recurse -Force -ErrorAction SilentlyContinue
         Write-OK "Removed $hfCache"
-    } else {
-        Write-Info "Kept $hfCache"
+    } elseif (-not $DryRun -and -not $KeepWhisper) {
+        Write-Info "Kept (user declined)"
     }
-} else {
-    Write-Info "No HF cache"
 }
 
-# ─── Step 6/6: verify nothing left on PATH ────────────────────────────
-Write-Step 6 6 "Final verification..."
-$leftover = $null
-try {
-    $leftover = (Get-Command openbro -ErrorAction SilentlyContinue).Source
-} catch {}
-if ($leftover) {
-    Write-Warn "openbro still on PATH: $leftover"
-    Write-Info "Run admin PowerShell and: Remove-Item '$leftover' -Force"
+# ─── Final ───────────────────────────────────────────────────────────
+Write-Host ""
+if ($DryRun) {
+    Write-Host "  +-------------------------------------------+" -ForegroundColor Green
+    Write-Host "  |   DRY RUN complete. Nothing was deleted.  |" -ForegroundColor Green
+    Write-Host "  +-------------------------------------------+" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "  Review the 'WOULD DELETE' lines above." -ForegroundColor Cyan
+    Write-Host "  When ready, run with -Commit to actually delete:" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "    .\uninstall.ps1 -Commit                  # prompts for each item" -ForegroundColor White
+    Write-Host "    .\uninstall.ps1 -Commit -Force           # no prompts" -ForegroundColor White
+    Write-Host "    .\uninstall.ps1 -Commit -KeepData        # keep storage drive" -ForegroundColor White
+    Write-Host ""
 } else {
-    Write-OK "openbro is gone from PATH"
+    $leftover = $null
+    try {
+        $leftover = (Get-Command openbro -ErrorAction SilentlyContinue).Source
+    } catch {}
+    if ($leftover) {
+        Write-Warn "openbro still on PATH: $leftover (may need admin to remove)"
+    }
+    Write-Host "  +-------------------------------------------+" -ForegroundColor Green
+    Write-Host "  |   OpenBro uninstalled.                    |" -ForegroundColor Green
+    Write-Host "  +-------------------------------------------+" -ForegroundColor Green
 }
-
-Write-Host ""
-Write-Host "  +-------------------------------------------+" -ForegroundColor Green
-Write-Host "  |     OpenBro fully uninstalled.            |" -ForegroundColor Green
-Write-Host "  +-------------------------------------------+" -ForegroundColor Green
-Write-Host ""
-Write-Host "  Re-install when ready:" -ForegroundColor Cyan
-Write-Host "    `$sha=(iwr -useb 'https://api.github.com/repos/brijeshch8482/openbro/commits/main'|ConvertFrom-Json).sha" -ForegroundColor DarkGray
-Write-Host "    iwr -useb `"https://raw.githubusercontent.com/brijeshch8482/openbro/`$sha/scripts/install.ps1`" | iex" -ForegroundColor DarkGray
 Write-Host ""
