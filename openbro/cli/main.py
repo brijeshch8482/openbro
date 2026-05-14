@@ -198,6 +198,85 @@ def model_remove(name: str):
     click.echo(f"Removed: {target.name}")
 
 
+# ─── `openbro config …` subcommands ───────────────────────────────────
+
+
+@main.group("config")
+def config_group():
+    """View or update OpenBro configuration."""
+    pass
+
+
+@config_group.command("show")
+def config_show():
+    """Print the full config.yaml."""
+    import yaml
+
+    from openbro.utils.config import get_config_path, load_config
+
+    cfg = load_config()
+    click.echo(f"# {get_config_path()}")
+    click.echo(yaml.dump(cfg, default_flow_style=False, sort_keys=False))
+
+
+@config_group.command("get")
+@click.argument("key_path")
+def config_get(key_path: str):
+    """Read one value by dotted path (e.g. llm.model)."""
+    from openbro.utils.config import load_config
+
+    cfg = load_config()
+    obj = cfg
+    for k in key_path.split("."):
+        if not isinstance(obj, dict) or k not in obj:
+            click.echo(f"Not set: {key_path}", err=True)
+            raise SystemExit(1)
+        obj = obj[k]
+    if isinstance(obj, (dict, list)):
+        import yaml
+
+        click.echo(yaml.dump(obj, default_flow_style=False, sort_keys=False).rstrip())
+    else:
+        click.echo(obj)
+
+
+@config_group.command("set")
+@click.argument("key_path")
+@click.argument("value")
+def config_set(key_path: str, value: str):
+    """Update one value by dotted path (e.g. llm.model llama3.2:3b)."""
+    from openbro.utils.config import load_config, save_config
+
+    cfg = load_config()
+    keys = key_path.split(".")
+    obj = cfg
+    for k in keys[:-1]:
+        if not isinstance(obj.get(k), dict):
+            obj[k] = {}
+        obj = obj[k]
+
+    # Type coerce common cases
+    coerced: object = value
+    low = value.strip().lower()
+    if low in ("true", "yes", "on"):
+        coerced = True
+    elif low in ("false", "no", "off"):
+        coerced = False
+    elif low in ("none", "null", "~"):
+        coerced = None
+    elif value.lstrip("-").isdigit():
+        coerced = int(value)
+    else:
+        try:
+            coerced = float(value)
+        except ValueError:
+            pass  # keep as string
+
+    obj[keys[-1]] = coerced
+    save_config(cfg)
+    click.echo(f"Set {key_path} = {coerced}")
+
+
 # ─── `openbro mcp …` subcommands ──────────────────────────────────────
 
 
