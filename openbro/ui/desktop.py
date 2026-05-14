@@ -28,13 +28,80 @@ UI_DEPS_HINT = (
 )
 
 
+def _ensure_gui_deps() -> bool:
+    """Auto-install GUI deps the first time `openbro` is launched without them.
+
+    The installer ships [all] which already includes these, but a partial /
+    --no-deps install (or Python-version drift between 3.12 and 3.14 site-
+    packages) can leave the user with a working openbro CLI but missing
+    customtkinter / pystray / pynput / pillow. Instead of just printing a hint
+    and bailing, we offer to install them right here — same pattern we use for
+    llama-cpp-python in the wizard."""
+    try:
+        import customtkinter  # noqa: F401
+        import PIL  # noqa: F401
+        import pynput  # noqa: F401
+        import pystray  # noqa: F401
+
+        return True
+    except ImportError:
+        pass
+
+    print("Desktop UI deps not installed (customtkinter, pystray, pynput, pillow).")
+    try:
+        ans = input("Install now? [Y/n]: ").strip().lower()
+    except EOFError:
+        ans = "n"
+    if ans and ans not in ("y", "yes", ""):
+        print(UI_DEPS_HINT)
+        return False
+
+    import subprocess
+    import sys
+
+    print("Installing GUI deps (~30 sec, wheel-only)...")
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--no-cache-dir",
+                "--disable-pip-version-check",
+                "--no-warn-script-location",
+                "--only-binary=:all:",
+                "customtkinter>=5.2",
+                "pystray>=0.19",
+                "pynput>=1.7",
+                "pillow>=10.0",
+            ],
+            check=False,
+            timeout=300,
+        )
+        if result.returncode != 0:
+            print(f"GUI deps install failed (exit {result.returncode}). {UI_DEPS_HINT}")
+            return False
+    except (subprocess.TimeoutExpired, OSError) as e:
+        print(f"GUI deps install error: {e}\n{UI_DEPS_HINT}")
+        return False
+
+    # Verify it actually imports now
+    try:
+        import customtkinter  # noqa: F401
+
+        print("GUI deps installed.")
+        return True
+    except ImportError:
+        print(f"Install reported success but customtkinter still not importable. {UI_DEPS_HINT}")
+        return False
+
+
 def run_desktop():
     """Launch the OpenBro desktop window. Blocks until user closes it."""
-    try:
-        import customtkinter as ctk
-    except ImportError:
-        print(UI_DEPS_HINT)
+    if not _ensure_gui_deps():
         return
+    import customtkinter as ctk
 
     from openbro.brain import Brain
     from openbro.brain.memory import SemanticMemory

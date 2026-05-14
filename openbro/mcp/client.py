@@ -235,11 +235,28 @@ class _MCPTool(BaseTool):
 
 def register_mcp_tools(servers: list[MCPServerConfig], registry) -> dict:
     """Connect to every configured MCP server and inject its tools into
-    the OpenBro tool registry. Returns a summary dict for diagnostics."""
-    summary = {"connected": [], "failed": [], "tools_added": 0}
+    the OpenBro tool registry. Returns a summary dict for diagnostics.
+
+    Servers with declared-but-empty env vars (e.g. github with no token) are
+    silently deferred — they show up in summary['pending_creds'] so the UI
+    can surface a hint. The user can populate the missing value later via
+    `openbro mcp creds <server>` and a subsequent restart picks it up; the
+    server never crashes on startup just because a credential is missing.
+    """
+    summary = {
+        "connected": [],
+        "failed": [],
+        "pending_creds": [],
+        "tools_added": 0,
+    }
     for cfg in servers:
         if not cfg.enabled:
             continue
+        if cfg.env:
+            missing = [k for k, v in cfg.env.items() if not v]
+            if missing:
+                summary["pending_creds"].append({"server": cfg.name, "missing": missing})
+                continue
         client = MCPClient(cfg)
         if not client.connect(timeout=5.0):
             summary["failed"].append(cfg.name)

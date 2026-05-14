@@ -198,5 +198,75 @@ def model_remove(name: str):
     click.echo(f"Removed: {target.name}")
 
 
+# ─── `openbro mcp …` subcommands ──────────────────────────────────────
+
+
+@main.group()
+def mcp():
+    """Manage MCP servers (status, set credentials)."""
+    pass
+
+
+@mcp.command("status")
+def mcp_status():
+    """Show all configured MCP servers and whether they have what they need."""
+    from openbro.utils.config import load_config
+
+    cfg = load_config()
+    servers = cfg.get("mcp", {}).get("servers", []) or []
+    if not servers:
+        click.echo("No MCP servers configured. Run: openbro --setup")
+        return
+    click.echo(f"{len(servers)} MCP server(s) configured:")
+    for s in servers:
+        name = s.get("name", "?")
+        enabled = "on" if s.get("enabled", True) else "off"
+        env = s.get("env") or {}
+        missing = [k for k, v in env.items() if not v]
+        status = f"  {name:<14} [{enabled}]"
+        if missing:
+            status += f"  needs creds: {', '.join(missing)}"
+        else:
+            status += "  ready"
+        click.echo(status)
+
+
+@mcp.command("creds")
+@click.argument("server_name")
+def mcp_creds(server_name: str):
+    """Set credentials for an MCP server interactively.
+
+    Example: openbro mcp creds github   →  prompts for the token, saves it
+    to config.mcp.servers[<idx>].env.GITHUB_PERSONAL_ACCESS_TOKEN.
+    """
+    from openbro.utils.config import load_config, save_config
+
+    cfg = load_config()
+    servers = cfg.get("mcp", {}).get("servers", []) or []
+    match = next(
+        (i for i, s in enumerate(servers) if s.get("name") == server_name),
+        None,
+    )
+    if match is None:
+        click.echo(f"No MCP server named '{server_name}'. Try: openbro mcp status", err=True)
+        raise SystemExit(1)
+    server = servers[match]
+    env = server.setdefault("env", {})
+    if not env:
+        click.echo(f"'{server_name}' doesn't need any credentials. Already ready.")
+        return
+    for key in list(env.keys()):
+        current = env.get(key) or ""
+        prompt = f"{key}"
+        if current:
+            prompt += " (leave empty to keep existing)"
+        prompt += ": "
+        value = click.prompt(prompt, hide_input=True, default="", show_default=False)
+        if value.strip():
+            env[key] = value.strip()
+    save_config(cfg)
+    click.echo(f"Updated credentials for '{server_name}'. Restart openbro to activate.")
+
+
 if __name__ == "__main__":
     main()
