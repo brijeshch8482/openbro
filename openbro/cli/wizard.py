@@ -129,11 +129,11 @@ PROVIDER_CATALOG = [
         "id": "local",
         "name": "Local (offline)",
         "tier": "OFFLINE",
-        "default_model": "llama3.1:8b",
+        "default_model": "llama3.2:3b",
         "signup": "https://huggingface.co",
         "blurb": (
             "Built-in offline LLM via llama.cpp. Runs on YOUR hardware. "
-            "Models from HuggingFace (one-time download), then forever offline."
+            "Default is Llama 3.2 3B — fast on CPU. Bigger models also available."
         ),
         "tags": [],
     },

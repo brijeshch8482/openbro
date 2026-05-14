@@ -31,26 +31,26 @@ console = Console()
 # bartowski/* = community-standard quantizations on HuggingFace; Q4_K_M is
 # the best size/quality trade-off for most users.
 MODELS: dict[str, dict] = {
-    "llama3.1:8b": {
-        "repo": "bartowski/Meta-Llama-3.1-8B-Instruct-GGUF",
-        "file": "Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
-        "size": "4.9 GB",
-        "ram": "8 GB",
-        "desc": "Best agent / tool-calling (Meta, recommended)",
-    },
     "llama3.2:3b": {
         "repo": "bartowski/Llama-3.2-3B-Instruct-GGUF",
         "file": "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
         "size": "2.0 GB",
         "ram": "4 GB",
-        "desc": "Smaller Llama agent, solid tool calling (Meta)",
+        "desc": "Fast offline agent — best speed/quality on CPU (recommended)",
     },
     "llama3.2:1b": {
         "repo": "bartowski/Llama-3.2-1B-Instruct-GGUF",
         "file": "Llama-3.2-1B-Instruct-Q4_K_M.gguf",
         "size": "0.8 GB",
         "ram": "2 GB",
-        "desc": "Tiny Llama for low-end PCs (Meta)",
+        "desc": "Tiny + very fast, lower quality (Meta)",
+    },
+    "llama3.1:8b": {
+        "repo": "bartowski/Meta-Llama-3.1-8B-Instruct-GGUF",
+        "file": "Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
+        "size": "4.9 GB",
+        "ram": "8 GB",
+        "desc": "Highest quality agent — slow on CPU (needs GPU for speed)",
     },
     "mistral:7b": {
         "repo": "bartowski/Mistral-7B-Instruct-v0.3-GGUF",
@@ -103,7 +103,7 @@ MODELS: dict[str, dict] = {
     },
 }
 
-DEFAULT_MODEL = "llama3.1:8b"
+DEFAULT_MODEL = "llama3.2:3b"
 
 
 def models_dir() -> Path:

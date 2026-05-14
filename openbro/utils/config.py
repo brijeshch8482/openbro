@@ -33,7 +33,7 @@ def default_config() -> dict:
     return {
         "llm": {
             "provider": "local",
-            "model": "llama3.1:8b",
+            "model": "llama3.2:3b",
             "fallback_provider": None,
         },
         "providers": {
