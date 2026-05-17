@@ -13,6 +13,7 @@ from openbro.tools.memory_tool import MemoryTool
 from openbro.tools.network_tool import NetworkTool
 from openbro.tools.notification_tool import NotificationTool
 from openbro.tools.process_tool import ProcessTool
+from openbro.tools.python_tool import PythonTool
 from openbro.tools.screenshot_tool import ScreenshotTool
 from openbro.tools.shell_tool import ShellTool
 from openbro.tools.system_control_tool import SystemControlTool
@@ -34,6 +35,7 @@ BUILTIN_TOOLS = [
     NetworkTool,
     NotificationTool,
     ProcessTool,
+    PythonTool,
     ScreenshotTool,
     ShellTool,
     SystemControlTool,

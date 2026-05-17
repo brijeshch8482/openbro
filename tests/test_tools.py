@@ -237,13 +237,14 @@ def test_tool_registry():
 
 
 def test_tool_registry_count():
-    assert len(BUILTIN_TOOLS) == 18
+    # 19 tools: added python_tool for Claude-Code-style ad-hoc code execution
+    assert len(BUILTIN_TOOLS) == 19
 
 
 def test_tool_registry_schema():
     registry = ToolRegistry()
     schemas = registry.get_tools_schema()
-    assert len(schemas) == 18
+    assert len(schemas) == 19
     for s in schemas:
         assert "name" in s
         assert "parameters" in s
@@ -265,14 +266,32 @@ def test_tool_registry_get_risk():
     registry = ToolRegistry()
     assert registry.get_risk("system_info") == "safe"
     assert registry.get_risk("file_ops") == "moderate"
-    assert registry.get_risk("shell") == "dangerous"
+    # shell + python are MODERATE so the LLM uses them freely for ad-hoc
+    # queries (BLOCKED_PATTERNS still guards rm -rf / format / etc.).
+    assert registry.get_risk("shell") == "moderate"
+    assert registry.get_risk("python") == "moderate"
     assert registry.get_risk("system_control") == "dangerous"
 
 
 def test_tool_registry_list_by_risk():
     registry = ToolRegistry()
     by_risk = registry.list_tools_by_risk()
-    assert "shell" in by_risk["dangerous"]
     assert "system_control" in by_risk["dangerous"]
+    assert "shell" in by_risk["moderate"]
+    assert "python" in by_risk["moderate"]
     assert "file_ops" in by_risk["moderate"]
     assert "system_info" in by_risk["safe"]
+
+
+def test_python_tool_runs_simple_script():
+    registry = ToolRegistry()
+    result = registry.execute("python", {"code": "print(2 + 2)"}, confirmed=True)
+    assert "4" in result
+
+
+def test_python_tool_blocks_destructive_patterns():
+    registry = ToolRegistry()
+    result = registry.execute(
+        "python", {"code": "import os; os.system('rm -rf /')"}, confirmed=True
+    )
+    assert "BLOCKED" in result

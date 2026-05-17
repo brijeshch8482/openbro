@@ -16,8 +16,20 @@ BLOCKED_PATTERNS = [
 
 class ShellTool(BaseTool):
     name = "shell"
-    description = "Execute shell commands on the system"
-    risk = RiskLevel.DANGEROUS
+    description = (
+        "Run a shell / PowerShell / bash command on the user's machine. "
+        "Use when no specific tool fits: list files with custom filter, "
+        "check disk/process/network state, run a CLI utility. Truly "
+        "destructive patterns (rm -rf /, format c:) are blocked. Prefer "
+        "the `python` tool for compute/parsing — `shell` is for native "
+        "OS commands."
+    )
+    # Was DANGEROUS, which made the LLM refuse to reach for it in
+    # normal queries. Most shell commands a chat agent runs (Get-PSDrive,
+    # dir, df, ps, ipconfig) are read-only — the real teeth are the
+    # BLOCKED_PATTERNS list above, not the risk tier. Boss mode still
+    # gates every moderate tool if the user wants stricter policy.
+    risk = RiskLevel.MODERATE
 
     def run(self, command: str) -> str:
         # Safety check
