@@ -445,6 +445,85 @@ try {
     $ErrorActionPreference = $_oldEAP
 }
 
+# Detect openbro installed in OTHER Pythons too — and remove them. Without
+# this step, a user who first installed under Python 3.14, then re-ran the
+# installer (which switches to 3.12 for voice wheels), ends up with TWO
+# openbro launchers on PATH. Windows resolves the older one first because
+# of PATH ordering, and new subcommands (like `openbro config set`) appear
+# to be missing. The user thinks the install is broken; really it's a
+# leftover-launcher problem. Sweeping other Pythons here prevents that.
+$otherPythons = @()
+foreach ($ver in @("3.10", "3.11", "3.12", "3.13", "3.14")) {
+    try {
+        $exeOut = & py "-$ver" -c "import sys; print(sys.executable)" 2>$null
+        if ($LASTEXITCODE -eq 0 -and $exeOut) {
+            $exePath = $exeOut.Trim()
+            if ($exePath -and $exePath -ne $python) {
+                $otherPythons += @{ Version = $ver; Exe = $exePath }
+            }
+        }
+    } catch {}
+}
+
+if ($otherPythons.Count -gt 0) {
+    $cleaned = 0
+    foreach ($py in $otherPythons) {
+        $oldEAP2 = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $hasIt = & $py.Exe -c "import openbro" 2>$null
+        } catch {
+            $hasIt = $null
+        } finally {
+            $ErrorActionPreference = $oldEAP2
+        }
+        if ($LASTEXITCODE -eq 0) {
+            Write-Info "Found openbro in Python $($py.Version) ($($py.Exe)) - removing to avoid PATH conflict..."
+            & $py.Exe -m pip uninstall openbro -y 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                Write-OK "Removed openbro from Python $($py.Version)"
+                $cleaned++
+            } else {
+                Write-Warn "Couldn't uninstall from Python $($py.Version) (continuing)"
+            }
+        }
+    }
+    if ($cleaned -gt 0) {
+        Write-Info "Cleaned $cleaned old install(s) — fresh launcher will own the PATH"
+    }
+}
+
+# Also sweep orphan .exe launchers in known Scripts/ dirs (left behind
+# when a previous pip uninstall didn't clean them up). Never touch the
+# Scripts dir we're about to install into.
+$orphanCandidates = @(
+    "C:\Python310\Scripts\openbro.exe",
+    "C:\Python311\Scripts\openbro.exe",
+    "C:\Python312\Scripts\openbro.exe",
+    "C:\Python313\Scripts\openbro.exe",
+    "C:\Python314\Scripts\openbro.exe",
+    "$env:USERPROFILE\AppData\Local\Programs\Python\Python310\Scripts\openbro.exe",
+    "$env:USERPROFILE\AppData\Local\Programs\Python\Python311\Scripts\openbro.exe",
+    "$env:USERPROFILE\AppData\Local\Programs\Python\Python313\Scripts\openbro.exe",
+    "$env:USERPROFILE\AppData\Local\Programs\Python\Python314\Scripts\openbro.exe"
+)
+$adminOrphans = @()
+foreach ($exe in $orphanCandidates) {
+    if (-not (Test-Path $exe)) { continue }
+    try {
+        Remove-Item $exe -Force -ErrorAction Stop
+        Write-OK "Removed orphan: $exe"
+    } catch {
+        $adminOrphans += $exe
+    }
+}
+if ($adminOrphans.Count -gt 0) {
+    Write-Warn "These orphan .exe files need admin to delete (won't block install):"
+    foreach ($p in $adminOrphans) {
+        Write-Host "    Remove-Item '$p' -Force    # (admin PowerShell)" -ForegroundColor DarkGray
+    }
+}
+
 $pipExit = Invoke-Pip @("install", "--upgrade", "pip", "--quiet")
 if ($pipExit -ne 0) {
     Write-Info "pip self-upgrade returned $pipExit (continuing)"
