@@ -771,6 +771,17 @@ def _start_voice(agent: Agent):
 
     _voice_listener.on_transcript = _handle
 
+    # on_heard fires for EVERY transcript (wake-word matched or not). Wire
+    # it so the user sees what the mic + STT actually captured — without
+    # this they get no feedback on a missed wake word and assume voice is
+    # broken when really the STT just heard "hello bro" instead of "hey
+    # openbro". Print on a fresh line so it doesn't trample the prompt.
+    def _on_heard(text: str, has_wake: bool) -> None:
+        label = "[cyan]wake[/cyan]" if has_wake else "[dim]heard[/dim]"
+        console.print(f"\n[dim]🎤 {label}:[/dim] {text}", highlight=False)
+
+    _voice_listener.on_heard = _on_heard
+
     import threading
 
     _voice_thread = threading.Thread(target=_voice_listener.run, daemon=True)

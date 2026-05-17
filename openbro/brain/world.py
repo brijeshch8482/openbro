@@ -48,17 +48,42 @@ COMMON_APPS = [
 
 
 def detect_paths() -> dict:
-    """Return common user-folder paths if they exist."""
+    """Return common user-folder paths if they exist.
+
+    OneDrive on Windows often redirects Desktop / Documents / Pictures
+    out from under %USERPROFILE% (so `~/Desktop` simply doesn't exist;
+    the real Desktop lives at `~/OneDrive/Desktop`). When that happens
+    every agent query about "files on my desktop" misses. We probe both
+    locations and report whichever actually exists — and we record the
+    OneDrive root separately so the LLM knows about it.
+    """
+    import os
+
     home = Path.home()
-    candidates = {
-        "home": home,
-        "desktop": home / "Desktop",
-        "documents": home / "Documents",
-        "downloads": home / "Downloads",
-        "pictures": home / "Pictures",
-        "videos": home / "Videos",
-    }
-    return {k: str(v) for k, v in candidates.items() if v.exists()}
+    onedrive_roots = []
+    for env in ("OneDrive", "OneDriveCommercial", "OneDriveConsumer"):
+        v = os.environ.get(env)
+        if v and Path(v).exists() and v not in onedrive_roots:
+            onedrive_roots.append(v)
+
+    # Common shells redirect these to OneDrive when sync is on; prefer the
+    # OneDrive copy when both exist (that's where the user's stuff really is).
+    def _resolve(name: str) -> Path | None:
+        for od in onedrive_roots:
+            cand = Path(od) / name
+            if cand.exists():
+                return cand
+        cand = home / name
+        return cand if cand.exists() else None
+
+    paths: dict[str, str] = {"home": str(home)}
+    for folder in ("Desktop", "Documents", "Downloads", "Pictures", "Videos"):
+        resolved = _resolve(folder)
+        if resolved is not None:
+            paths[folder.lower()] = str(resolved)
+    if onedrive_roots:
+        paths["onedrive"] = onedrive_roots[0]
+    return paths
 
 
 def detect_apps() -> dict:
