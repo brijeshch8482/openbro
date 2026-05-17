@@ -603,21 +603,29 @@ function Invoke-PyOneliner {
     }
 }
 
-# Add Python's user Scripts dir to PATH (current session + persistent)
-# so `openbro` command works without restarting shell.
+# Make the chosen Python's Scripts dir the FIRST entry on PATH (current
+# session + persistent). The previous version only checked "is this dir
+# anywhere on PATH" — if the user had another Python's Scripts (e.g.
+# C:\Python314\Scripts) at the front, the OLD openbro.exe kept winning
+# the lookup. The user would install fresh, run `openbro config set ...`,
+# and get 'No such command config' because PATH resolution found the
+# stale launcher first. Always-prepend (and dedupe) fixes this.
 try {
     $r = Invoke-PyOneliner "import sysconfig; print(sysconfig.get_path('scripts', 'nt_user'))"
     $userScripts = $r.out
     if ($userScripts -and (Test-Path $userScripts)) {
-        if ($env:Path -notlike "*$userScripts*") {
-            $env:Path = "$userScripts;$env:Path"
-        }
+        # Current session
+        $sessionParts = ($env:Path -split ';' | Where-Object { $_ -and $_ -ne $userScripts })
+        $env:Path = (@($userScripts) + $sessionParts) -join ';'
+
+        # Persistent user PATH — dedupe + prepend
         $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
         if (-not $userPath) { $userPath = "" }
-        if ($userPath -notlike "*$userScripts*") {
-            $newUserPath = if ($userPath) { "$userScripts;$userPath" } else { $userScripts }
+        $userParts = ($userPath -split ';' | Where-Object { $_ -and $_ -ne $userScripts })
+        $newUserPath = (@($userScripts) + $userParts) -join ';'
+        if ($newUserPath -ne $userPath) {
             [Environment]::SetEnvironmentVariable("Path", $newUserPath, "User")
-            Write-Info "Added $userScripts to user PATH"
+            Write-Info "Prepended $userScripts to user PATH (was: $userPath ...)"
         }
     }
 } catch {}
