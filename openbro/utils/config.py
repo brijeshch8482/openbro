@@ -162,7 +162,13 @@ def default_config() -> dict:
             # small is noticeably better than base for Indian English / Hinglish
             # while still staying usable on normal laptops.
             "stt_model": "small",
-            "stt_language": None,
+            # Force English by default — Whisper with language=None will
+            # randomly decide a quiet ambient chunk is Japanese / Chinese /
+            # Korean and emit garbage transcripts (real user report: 'レブロ
+            # how are you?' when speaking English). Setting language=en
+            # locks the decoder to English and stops the drift. Users who
+            # want Hindi can set voice.stt_language: hi in config.
+            "stt_language": "en",
             "stt_device": "cpu",
             "stt_compute_type": "int8",
             "stt_beam_size": 5,

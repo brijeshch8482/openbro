@@ -17,10 +17,28 @@ from collections.abc import Callable
 from openbro.voice.stt import VOICE_DEPS_HINT, SpeechToText
 from openbro.voice.tts import TextToSpeech
 
+# Whisper hears 'hey openbro' as 'Hebron', 'hebro', 'ai bro', or even
+# random Japanese ('レブロー') depending on the audio. We expand the
+# default wake list to include common mishearings so a user saying
+# 'hey openbro' isn't silently ignored just because STT spelt it
+# differently. All substring-matched lowercase.
 DEFAULT_WAKE_WORDS = [
     "hey openbro",
     "hi openbro",
     "ok openbro",
+    "hello openbro",
+    # Common Whisper mishearings of 'openbro'
+    "hebron",
+    "hebro",
+    "ai bro",
+    "open bro",
+    "openborough",
+    "openborg",
+    # Generic fallbacks the model picks up cleanly
+    "hey bro",
+    "ok bro",
+    "hi bro",
+    "hello bro",
     "openbro suno",
 ]
 

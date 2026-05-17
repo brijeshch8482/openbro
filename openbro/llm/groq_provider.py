@@ -27,7 +27,18 @@ class GroqProvider(LLMProvider):
             payload["tools"] = [{"type": "function", "function": t} for t in tools]
 
         resp = httpx.post(GROQ_API_URL, json=payload, headers=headers, timeout=30)
-        resp.raise_for_status()
+        if resp.status_code != 200:
+            # raise_for_status drops the response body — Groq puts the real
+            # reason ('model not found', 'messages[0].content too short',
+            # tool-call validation failure) there. Surface it so the user
+            # can actually see what went wrong.
+            body = ""
+            try:
+                err = resp.json()
+                body = err.get("error", {}).get("message") or json.dumps(err)
+            except (ValueError, KeyError):
+                body = resp.text[:500]
+            raise RuntimeError(f"Groq {resp.status_code}: {body}")
         data = resp.json()
 
         choice = data["choices"][0]["message"]
