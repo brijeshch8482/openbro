@@ -211,9 +211,34 @@ def _step_provider(config: dict):
             console.print(f"[dim]Download later with: openbro model download {model}[/dim]\n")
         return
 
-    # Cloud providers: ask for API key, configure
+    # Cloud providers: open the signup/key page in the user's browser, ask
+    # for the API key, configure.
+    #
+    # Why auto-open the browser? Wizards live in a terminal; the user has to
+    # context-switch out to read a URL, type/paste it into a browser, sign in,
+    # create a key, copy, switch back, paste. Auto-opening collapses that to:
+    # tab pops up → sign in (one-click 'Continue with Google' on most
+    # providers) → create key → paste. ~2-3 min becomes ~30 sec on the very
+    # first run.
+    #
+    # webbrowser is stdlib, no new deps. It uses the user's default browser
+    # and the provider's existing login session (Google / GitHub / etc.) —
+    # we don't touch the credential flow ourselves, just open the page.
     config["llm"]["provider"] = pid
-    console.print(f"\n[cyan]Sign up / get key:[/cyan] {chosen['signup']}\n")
+    console.print(f"\n[cyan]Sign up / get key:[/cyan] {chosen['signup']}")
+    try:
+        import webbrowser
+
+        if webbrowser.open(chosen["signup"]):
+            console.print(
+                "[dim]Opened in your default browser. Sign in, create a key, paste below.[/dim]\n"
+            )
+        else:
+            console.print("[dim](Couldn't open a browser — open the URL above manually.)[/dim]\n")
+    except Exception:
+        # Headless / no-browser environments: just print the URL and move on.
+        console.print()
+
     api_key = Prompt.ask(f"{chosen['name']} API key", password=True)
     if not api_key:
         console.print(
@@ -534,8 +559,7 @@ def _step_voice(config: dict):
             console.print("[dim]Will download on first wake-word instead.[/dim]\n")
 
     console.print(
-        "[green]Voice mode enabled.[/green] "
-        "[dim]Say 'Hey OpenBro' anytime in chat.[/dim]\n"
+        "[green]Voice mode enabled.[/green] [dim]Say 'Hey OpenBro' anytime in chat.[/dim]\n"
     )
 
 
