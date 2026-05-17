@@ -10,14 +10,22 @@ from openbro.llm.base import LLMProvider, LLMResponse, Message
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 
-# Llama 3.3 70B on Groq has a known function-call serialization quirk:
-# instead of emitting {"name": "web", "arguments": "{\"action\":\"search\"}"},
-# it sometimes emits {"name": "web={\"action\":\"search\"}", "arguments": "{}"}
-# — the args get glued INTO the name field. Groq's tool-call validator then
-# rejects the next request because 'web={...}' isn't in the tools list,
-# returning a 400. We salvage the call by detecting `<name>={<json>}` and
-# splitting it back out before the agent loop sees the response.
-_GLUED_NAME = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(\{.*\})$", re.DOTALL)
+# Llama 3.3 70B on Groq has a known function-call serialization quirk: the
+# arguments get glued INTO the name field with all sorts of separators:
+#   web={"action":"search"}             <- equals
+#   browser={"action":"search"}         <- equals
+#   browser{"action":"search"}          <- no separator
+#   word,{"action":"append"}            <- comma
+#   word {"action":"append"}            <- space
+# Groq's tool-call validator then rejects the call because none of those
+# garbled names match a registered tool — the request comes back as a 400.
+# We salvage the call by detecting `<name><sep?>{<json>}` and splitting it
+# back out before the agent loop sees the response. Separator is optional;
+# only the leading identifier and the trailing JSON object are required.
+_GLUED_NAME = re.compile(
+    r"^([A-Za-z_][A-Za-z0-9_]*)\s*[=,:;\-]?\s*(\{.*\})\s*$",
+    re.DOTALL,
+)
 
 
 def _sanitize_tool_call(name: str, arguments: str | dict) -> tuple[str, dict]:
