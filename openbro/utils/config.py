@@ -1,5 +1,6 @@
 """Configuration management for OpenBro."""
 
+from copy import deepcopy
 from pathlib import Path
 
 import yaml
@@ -19,7 +20,8 @@ def load_config() -> dict:
     config_path = get_config_path()
     if config_path.exists():
         with open(config_path) as f:
-            return yaml.safe_load(f) or {}
+            config = yaml.safe_load(f) or {}
+        return _migrate_config(_merge_defaults(default_config(), config))
     return default_config()
 
 
@@ -27,6 +29,42 @@ def save_config(config: dict):
     config_path = get_config_path()
     with open(config_path, "w") as f:
         yaml.dump(config, f, default_flow_style=False)
+
+
+def _merge_defaults(defaults: dict, config: dict) -> dict:
+    """Return config with any newly added default keys filled in."""
+    merged = deepcopy(defaults)
+
+    def apply(base: dict, override: dict) -> dict:
+        for key, value in override.items():
+            if isinstance(value, dict) and isinstance(base.get(key), dict):
+                apply(base[key], value)
+            else:
+                base[key] = value
+        return base
+
+    return apply(merged, config)
+
+
+def _migrate_config(config: dict) -> dict:
+    """Lightweight migrations for old stock OpenBro configs."""
+    defaults = default_config()
+    agent = config.setdefault("agent", {})
+    prompt = str(agent.get("system_prompt") or "")
+    legacy_prompt_markers = (
+        "ek helpful AI bro",
+        "a helpful AI assistant",
+        "ek helpful AI assistant",
+    )
+    if "terminal-first" not in prompt and any(m in prompt for m in legacy_prompt_markers):
+        agent["system_prompt"] = defaults["agent"]["system_prompt"]
+
+    voice = config.setdefault("voice", {})
+    wake_words = [str(w).lower() for w in (voice.get("wake_words") or [])]
+    if wake_words and all("openbro" not in w for w in wake_words):
+        voice["wake_words"] = defaults["voice"]["wake_words"]
+
+    return config
 
 
 def default_config() -> dict:
@@ -68,9 +106,14 @@ def default_config() -> dict:
         },
         "agent": {
             "system_prompt": (
-                "Tu OpenBro hai - ek helpful AI bro."
-                " Friendly aur casual reh, Hindi-English"
-                " mix me baat kar. User ki help kar."
+                "Tu OpenBro hai - ek fast, practical personal AI agent. "
+                "User ka kaam terminal-first tareeke se complete kar: browsing, "
+                "desktop/app control, mail, files, storage, coding, memory, aur "
+                "system tasks ke liye available tools use kar. Tone personal aur "
+                "bro wali feeling rakho: kabhi-kabhi 'yes bro', 'yes boss', "
+                "'ji sir' jaise short acknowledgements use kar sakta hai. "
+                "Fir bhi professional, concise, aur precise reh. Risky ya "
+                "destructive actions ke liye permission/sandbox rules follow kar."
             ),
             "max_history": 50,
         },
@@ -116,8 +159,30 @@ def default_config() -> dict:
         "voice": {
             "enabled": True,
             "auto_start": False,  # if true, voice listens by default in REPL
-            "stt_model": "base",
-            "wake_words": ["hey bro", "hi bro", "ok bro", "bro suno"],
+            # small is noticeably better than base for Indian English / Hinglish
+            # while still staying usable on normal laptops.
+            "stt_model": "small",
+            "stt_language": None,
+            "stt_device": "cpu",
+            "stt_compute_type": "int8",
+            "stt_beam_size": 5,
+            "stt_vad_filter": True,
+            "chunk_seconds": 8.0,
+            "silence_threshold": 0.003,
+            "silence_seconds": 0.8,
+            "use_cloud_stt": False,
+            "cloud_stt_model": "whisper-large-v3-turbo",
+            "wake_words": [
+                "hey openbro",
+                "hi openbro",
+                "ok openbro",
+                "openbro suno",
+            ],
+            "ack_phrases": [
+                "Yes bro, bolo.",
+                "Yes boss, boliye.",
+                "Ji sir, main sun raha hoon.",
+            ],
             "tts_voice": "en-IN-NeerjaNeural",
             "speak_replies": True,
         },

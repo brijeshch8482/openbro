@@ -90,7 +90,7 @@ function Write-Err($msg)  { Write-Host "  [X] $msg" -ForegroundColor Red }
 Write-Host ""
 Write-Host "  +-------------------------------------------+" -ForegroundColor Cyan
 Write-Host "  |          OpenBro Installer v1.0          |" -ForegroundColor Cyan
-Write-Host "  |      Tera Apna AI Bro - Open Source      |" -ForegroundColor Cyan
+Write-Host "  |      OpenBro - Open Source AI Agent      |" -ForegroundColor Cyan
 Write-Host "  +-------------------------------------------+" -ForegroundColor Cyan
 Write-Host ""
 

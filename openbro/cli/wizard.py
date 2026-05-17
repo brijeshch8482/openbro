@@ -38,7 +38,7 @@ def run_wizard():
             border_style="cyan",
         )
     )
-    console.print("[bold]Tera Apna AI Bro - Open-Source Personal AI Agent[/bold]")
+    console.print("[bold]OpenBro - Open-Source Personal AI Agent[/bold]")
     console.print("[dim]Let's set you up in under 2 minutes.\n[/dim]")
 
     config = default_config()
@@ -74,7 +74,7 @@ def run_wizard():
 
     storage_base = config.get("storage", {}).get("base_dir", str(get_config_dir()))
     console.print(f"[dim]Data stored at: {storage_base}[/dim]")
-    console.print("\n[bold cyan]Type anything to start chatting with your AI Bro![/bold cyan]\n")
+    console.print("\n[bold cyan]Type anything to start chatting with OpenBro![/bold cyan]\n")
 
 
 # Comprehensive provider catalogue. Order = display order in the wizard.
@@ -357,7 +357,7 @@ def _step_safety(config: dict):
 
 def _step_personality(config: dict):
     console.print("\n[bold yellow]Step 4:[/bold yellow] Personality\n")
-    console.print("  [cyan]1.[/cyan] Hinglish Bro (default - Hindi+English mix)")
+    console.print("  [cyan]1.[/cyan] Hinglish OpenBro (default - Hindi+English mix)")
     console.print("  [cyan]2.[/cyan] English Professional")
     console.print("  [cyan]3.[/cyan] Hindi")
     console.print()
@@ -366,19 +366,30 @@ def _step_personality(config: dict):
 
     prompts = {
         "1": (
-            "Tu OpenBro hai - ek helpful AI bro. Friendly aur"
-            " casual reh, Hindi-English mix me baat kar. User"
-            " ki help kar. Short aur to-the-point answers de."
+            "Tu OpenBro hai - ek fast, practical personal AI agent. "
+            "User ka kaam terminal-first tareeke se complete kar: browsing, "
+            "desktop/app control, mail, files, storage, coding, memory, aur "
+            "system tasks ke liye available tools use kar. Tone personal aur "
+            "bro wali feeling rakho: kabhi-kabhi 'yes bro', 'yes boss', "
+            "'ji sir' jaise short acknowledgements use kar sakta hai. "
+            "Fir bhi professional, concise, aur precise reh. Risky ya "
+            "destructive actions ke liye permission/sandbox rules follow kar."
         ),
         "2": (
-            "You are OpenBro, a helpful AI assistant. Be"
-            " professional, clear, and concise. Help the"
-            " user with their tasks efficiently."
+            "You are OpenBro, a fast, practical personal AI agent. Operate "
+            "terminal-first, use available tools for browsing, desktop/app "
+            "control, mail, files, storage, coding, memory, and system tasks, "
+            "and follow permission/sandbox rules for risky actions. Keep a "
+            "personal assistant feel with occasional short acknowledgements "
+            "like 'yes boss' or 'sir', while staying professional."
         ),
         "3": (
-            "Tu OpenBro hai - ek helpful AI assistant."
-            " Hindi me baat kar. User ki help kar."
-            " Short aur clear answers de."
+            "Tu OpenBro hai - ek tez, practical personal AI agent. "
+            "Terminal-first tareeke se kaam complete kar, zaroorat par tools "
+            "use kar, aur risky/destructive actions ke liye permission/sandbox "
+            "rules follow kar. Personal assistant wali feeling rakho: kabhi "
+            "'ji sir' ya 'yes boss' bol sakta hai. Hindi me short aur clear "
+            "jawab de."
         ),
     }
     config["agent"]["system_prompt"] = prompts[personality]
@@ -386,7 +397,7 @@ def _step_personality(config: dict):
 
 def _step_voice(config: dict):
     console.print("\n[bold yellow]Step 5:[/bold yellow] Voice mode (hands-free)\n")
-    console.print("[dim]Always-on mic + wake word ('Hey bro') + TTS reply.[/dim]")
+    console.print("[dim]Always-on mic + wake word ('Hey OpenBro') + TTS reply.[/dim]")
     console.print("[dim]You can type AND speak — both work simultaneously.[/dim]\n")
 
     import sys
@@ -509,20 +520,23 @@ def _step_voice(config: dict):
 
     # Optional: pre-download Whisper model so first wake-word doesn't lag
     if Confirm.ask(
-        "Pre-download Whisper STT model now? (~140 MB, avoids lag on first use)",
+        "Pre-download Whisper STT model now? (~460 MB, avoids lag on first use)",
         default=True,
     ):
         try:
-            console.print("[dim]Downloading Whisper 'base' model...[/dim]")
+            console.print("[dim]Downloading Whisper 'small' model...[/dim]")
             from faster_whisper import WhisperModel
 
-            WhisperModel("base", device="cpu", compute_type="int8")
+            WhisperModel("small", device="cpu", compute_type="int8")
             console.print("[green]Model ready.[/green]\n")
         except Exception as e:
             console.print(f"[yellow]Pre-download failed: {e}[/yellow]")
             console.print("[dim]Will download on first wake-word instead.[/dim]\n")
 
-    console.print("[green]Voice mode enabled.[/green] [dim]Say 'Hey bro' anytime in chat.[/dim]\n")
+    console.print(
+        "[green]Voice mode enabled.[/green] "
+        "[dim]Say 'Hey OpenBro' anytime in chat.[/dim]\n"
+    )
 
 
 # ─── Step 7: MCP servers (curated catalogue) ─────────────────────────

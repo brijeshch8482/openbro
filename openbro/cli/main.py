@@ -1,6 +1,6 @@
 """OpenBro CLI - Terminal entry point.
 
-Top-level command runs the agent (GUI by default, REPL via --cli).
+Top-level command runs the terminal agent.
 Subcommands manage local LLM models (download / import / list).
 """
 
@@ -22,11 +22,9 @@ from openbro import __version__
 @click.option("--setup", is_flag=True, help="Re-run first-time setup wizard")
 @click.option("--telegram", is_flag=True, help="Run as Telegram bot instead of CLI")
 @click.option("--voice", is_flag=True, help="Run in voice mode (mic + TTS)")
-@click.option("--gui/--cli", default=None, help="Launch desktop UI (default) or terminal REPL")
 @click.option(
     "--mcp-server", is_flag=True, help="Run as MCP server (stdio, for Claude Desktop etc.)"
 )
-@click.option("--tray", is_flag=True, help="Run as system tray app with global hotkey")
 @click.pass_context
 def main(
     ctx,
@@ -36,13 +34,11 @@ def main(
     setup,
     telegram,
     voice,
-    gui,
     mcp_server,
-    tray,
 ):
-    """OpenBro - Tera Apna AI Bro
+    """OpenBro - terminal-first personal AI agent.
 
-    Open-source personal AI agent. Just run 'openbro' and start chatting!
+    Just run 'openbro' and start chatting.
     """
     if ctx.invoked_subcommand is not None:
         return
@@ -72,12 +68,6 @@ def main(
         run_mcp_server()
         return
 
-    if tray:
-        from openbro.ui.tray import run_tray
-
-        run_tray()
-        return
-
     if telegram:
         from openbro.channels.telegram_bot import run_telegram_from_config
 
@@ -90,27 +80,9 @@ def main(
         run_voice_mode()
         return
 
-    # Default surface: desktop GUI. Fall back to CLI if user passed --cli or
-    # if the GUI deps aren't installed.
-    if gui is False:
-        from openbro.cli.repl import start_repl
+    from openbro.cli.repl import start_repl
 
-        start_repl()
-        return
-
-    try:
-        from openbro.ui.desktop import run_desktop
-
-        run_desktop()
-        return
-    except ImportError:
-        if gui is True:
-            print("GUI deps missing. Run: pip install 'openbro[gui]'")
-            return
-        # gui=None (default): silently fall back to CLI
-        from openbro.cli.repl import start_repl
-
-        start_repl()
+    start_repl()
 
 
 # ─── `openbro model …` subcommands ────────────────────────────────────

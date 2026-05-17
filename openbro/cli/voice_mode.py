@@ -22,8 +22,12 @@ def run_voice_mode():
         return
 
     try:
-        from openbro.voice.listener import VoiceListener
-        from openbro.voice.tts import TextToSpeech
+        voice_listener_cls = globals().get("VoiceListener")
+        text_to_speech_cls = globals().get("TextToSpeech")
+        if voice_listener_cls is None:
+            from openbro.voice.listener import VoiceListener as voice_listener_cls
+        if text_to_speech_cls is None:
+            from openbro.voice.tts import TextToSpeech as text_to_speech_cls
     except Exception as e:
         console.print(f"[red]Voice deps not available: {e}[/red]")
         console.print(
@@ -32,15 +36,25 @@ def run_voice_mode():
         )
         return
 
-    tts = TextToSpeech(voice=voice_cfg.get("tts_voice", "en-IN-NeerjaNeural"))
+    tts = text_to_speech_cls(voice=voice_cfg.get("tts_voice", "en-IN-NeerjaNeural"))
 
     # Build listener first (without callback) so we can pass it to the gate
     try:
-        listener = VoiceListener(
+        listener = voice_listener_cls(
             wake_words=voice_cfg.get("wake_words"),
-            stt_model=voice_cfg.get("stt_model", "base"),
+            stt_model=voice_cfg.get("stt_model", "small"),
+            stt_language=voice_cfg.get("stt_language"),
+            stt_device=voice_cfg.get("stt_device", "cpu"),
+            stt_compute_type=voice_cfg.get("stt_compute_type", "int8"),
+            stt_beam_size=int(voice_cfg.get("stt_beam_size", 5)),
+            stt_vad_filter=bool(voice_cfg.get("stt_vad_filter", True)),
+            chunk_seconds=float(voice_cfg.get("chunk_seconds", 8.0)),
+            silence_threshold=float(voice_cfg.get("silence_threshold", 0.003)),
+            silence_seconds=float(voice_cfg.get("silence_seconds", 0.8)),
             speak_replies=voice_cfg.get("speak_replies", True),
             on_transcript=None,
+            assistant_name="OpenBro",
+            ack_phrases=voice_cfg.get("ack_phrases"),
         )
     except Exception as e:
         console.print(f"[red]Voice listener init failed: {e}[/red]")
@@ -56,9 +70,9 @@ def run_voice_mode():
     )
 
     agent = Agent(permission_gate=gate)
-    console.print("[bold cyan]🎙️  Voice mode active.[/bold cyan]")
+    console.print("[bold cyan]Voice mode active.[/bold cyan]")
     console.print(
-        "[dim]Wake words: hey bro, hi bro, ok bro. "
+        "[dim]Wake words: hey openbro, hi openbro, ok openbro. "
         f"Permission mode: {gate.mode}. Ctrl+C to exit.[/dim]\n"
     )
 

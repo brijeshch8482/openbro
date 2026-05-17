@@ -1,6 +1,6 @@
 """Tests for configuration system."""
 
-from openbro.utils.config import default_config
+from openbro.utils.config import _merge_defaults, _migrate_config, default_config
 
 
 def test_default_config_structure():
@@ -39,3 +39,19 @@ def test_safety_defaults():
     config = default_config()
     assert config["safety"]["confirm_dangerous"] is True
     assert len(config["safety"]["blocked_commands"]) > 0
+
+
+def test_config_migration_updates_legacy_voice_and_prompt():
+    legacy = {
+        "agent": {
+            "system_prompt": (
+                "Tu OpenBro hai - ek helpful AI bro. Friendly aur casual reh, "
+                "Hindi-English mix me baat kar. User ki help kar."
+            )
+        },
+        "voice": {"wake_words": ["hey bro", "ok bro"]},
+    }
+    migrated = _migrate_config(_merge_defaults(default_config(), legacy))
+    assert "terminal-first" in migrated["agent"]["system_prompt"]
+    assert "hey openbro" in migrated["voice"]["wake_words"]
+    assert "ack_phrases" in migrated["voice"]

@@ -33,33 +33,33 @@ def test_tts_speak_empty_noop():
 def test_listener_wake_word_detect():
     listener = VoiceListener.__new__(VoiceListener)
     listener.wake_words = [w.lower() for w in DEFAULT_WAKE_WORDS]
-    assert listener.is_wake_word("Hey bro, what's up") is True
-    assert listener.is_wake_word("HI BRO") is True
+    assert listener.is_wake_word("Hey OpenBro, what's up") is True
+    assert listener.is_wake_word("HI OPENBRO") is True
     assert listener.is_wake_word("just talking to myself") is False
 
 
 def test_listener_strip_wake_word():
-    out = VoiceListener.strip_wake_word("Hey bro, open chrome", ["hey bro"])
+    out = VoiceListener.strip_wake_word("Hey OpenBro, open chrome", ["hey openbro"])
     assert out == "open chrome"
-    out2 = VoiceListener.strip_wake_word("ok bro suno", ["ok bro"])
+    out2 = VoiceListener.strip_wake_word("ok openbro suno", ["ok openbro"])
     assert out2 == "suno"
 
 
 def test_listener_strip_wake_word_no_match():
-    out = VoiceListener.strip_wake_word("just chatting", ["hey bro"])
+    out = VoiceListener.strip_wake_word("just chatting", ["hey openbro"])
     assert out == "just chatting"
 
 
 def test_listener_default_wake_words():
-    assert "hey bro" in DEFAULT_WAKE_WORDS
-    assert "ok bro" in DEFAULT_WAKE_WORDS
+    assert "hey openbro" in DEFAULT_WAKE_WORDS
+    assert "ok openbro" in DEFAULT_WAKE_WORDS
 
 
 def test_listener_custom_wake_words():
     listener = VoiceListener.__new__(VoiceListener)
     listener.wake_words = ["yo bro"]
     assert listener.is_wake_word("yo bro hello") is True
-    assert listener.is_wake_word("hey bro hello") is False
+    assert listener.is_wake_word("hey openbro hello") is False
 
 
 def test_tts_speak_falls_back_on_edge_failure():

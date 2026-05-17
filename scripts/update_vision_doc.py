@@ -34,22 +34,21 @@ STATUS_BLOCKS: list[tuple[str, str]] = [
         "Status snapshot: OpenBro v1.0.0b1 — built, installed, running on developer machine. "
         "Major architectural pivot is complete: agent runs its own local LLM in-process via "
         "llama.cpp (no external Ollama daemon). Six LLM providers wired up with hybrid "
-        "online/offline routing. Brain modules, MCP, custom desktop GUI, voice — all in.",
+        "online/offline routing. Brain modules, MCP, terminal CLI, voice — all in.",
     ),
     # ─── Architecture summary ────────────────────────────────────────
     ("h2", "1. As-Built Architecture"),
     (
         "p",
         "OpenBro = full personal agent. The LLM is just the brain (text in, text out). "
-        "Everything else — GUI, voice, memory, tools, automation, system control — is "
+        "Everything else — CLI, voice, memory, tools, automation, system control — is "
         "OpenBro's own code. No external runtimes (no Ollama daemon, no LM Studio, "
         "nothing to install separately).",
     ),
     ("h3", "Layer stack"),
     (
         "bullet",
-        "Surfaces: customtkinter desktop GUI (default), terminal REPL (--cli), system tray "
-        "with global hotkey Ctrl+Shift+B, Telegram bot, voice (mic + wake-word), MCP server.",
+        "Surfaces: terminal REPL (default), Telegram bot, voice (mic + wake-word), MCP server.",
     ),
     (
         "bullet",
@@ -119,10 +118,9 @@ STATUS_BLOCKS: list[tuple[str, str]] = [
     ),
     (
         "p",
-        "User reaction during the migration captured this clearly: 'hamare agent ka khud "
-        "ka GUI hona chahiye, llm ko handle krna ye sab khud krega — hame bs llm chahiye "
-        "(brain). LLM only brain, uske aage GUI, handling, thinking, memory all things "
-        "hamara agent karega.' That's the architecture now.",
+        "User direction is now explicit: OpenBro must run terminal-first like Codex or "
+        "Claude CLI. LLM is only the brain; CLI, voice, handling, thinking, memory, and "
+        "tools are OpenBro's own code.",
     ),
     # ─── Local model catalogue ────────────────────────────────────────
     ("h2", "3. Local Model Catalogue (GGUF, non-Chinese vendors only)"),
@@ -151,11 +149,9 @@ STATUS_BLOCKS: list[tuple[str, str]] = [
     ),
     # ─── CLI commands ─────────────────────────────────────────────────
     ("h2", "4. CLI Commands (current surface)"),
-    ("code", "openbro                       # default: launches desktop GUI"),
-    ("code", "openbro --cli                 # terminal REPL instead"),
+    ("code", "openbro                       # default: launches terminal REPL"),
     ("code", "openbro --setup               # re-run first-run wizard"),
     ("code", "openbro --voice               # voice-only mode (mic + TTS)"),
-    ("code", "openbro --tray                # system tray + global hotkey"),
     ("code", "openbro --telegram            # run as Telegram bot"),
     ("code", "openbro --mcp-server          # expose self as MCP server (stdio)"),
     ("code", "openbro --offline             # force provider = local"),
@@ -289,7 +285,7 @@ STATUS_BLOCKS: list[tuple[str, str]] = [
     ),
     (
         "bullet",
-        "v0.1 Foundation — DONE: agent core, six providers, REPL, GUI, system tools.",
+        "v0.1 Foundation — DONE: agent core, six providers, terminal REPL, system tools.",
     ),
     (
         "bullet",
@@ -318,13 +314,11 @@ STATUS_BLOCKS: list[tuple[str, str]] = [
     ),
     (
         "bullet",
-        "System tray + global hotkey — DONE (was v1.5 in original plan): pystray + "
-        "pynput, Ctrl+Shift+B opens main window.",
+        "System tray + global hotkey — REMOVED: OpenBro is terminal-only by direction.",
     ),
     (
         "bullet",
-        "Custom desktop GUI — DONE (was post-v1.0 in original plan): customtkinter, "
-        "voice button, slash commands, CLI streaming.",
+        "Custom desktop GUI — REMOVED: custom CLI is the only UI surface.",
     ),
     (
         "bullet",

@@ -1,4 +1,4 @@
-"""Interactive REPL for OpenBro."""
+"""Interactive terminal REPL for OpenBro."""
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import WordCompleter
@@ -36,6 +36,7 @@ COMMANDS = [
     "boss",
     "activity",
     "voice",
+    "cloud",
     "brain",
     "clear",
     "reset",
@@ -44,9 +45,9 @@ completer = WordCompleter(COMMANDS, ignore_case=True)
 
 
 def print_banner():
-    banner = f"[bold cyan]OpenBro v{__version__}[/bold cyan] - Tera Apna AI Bro"
+    banner = f"[bold cyan]OpenBro v{__version__}[/bold cyan] - Terminal-first AI agent"
     console.print(Panel(banner, border_style="cyan"))
-    console.print("[dim]Type 'help' for commands. Just type naturally to chat![/dim]\n")
+    console.print("[dim]Type 'help' for commands. Type naturally to chat or act.[/dim]\n")
 
 
 def start_repl():
@@ -96,29 +97,38 @@ def start_repl():
                     continue
 
                 if user_input.lower() in ("exit", "quit", "bye"):
-                    console.print("[bold cyan]Chal bhai, phir milte hai![/bold cyan]")
+                    console.print("[bold cyan]OpenBro shutting down.[/bold cyan]")
                     break
 
                 # Handle built-in commands
                 if _handle_command(user_input, agent):
                     continue
 
-                # Chat with agent - use streaming for real-time output
-                console.print("\n[bold green]Bro:[/bold green] ", end="")
+                # Tool-capable providers need the full agent loop. The streaming
+                # path cannot currently surface structured tool calls reliably.
+                console.print("\n[bold green]OpenBro:[/bold green] ", end="")
                 response = ""
                 try:
-                    for token in agent.stream_chat(user_input):
-                        console.print(token, end="", highlight=False)
-                        response += token
+                    if agent.provider.supports_tools():
+                        with console.status(
+                            "[dim]OpenBro kaam kar raha hai...[/dim]",
+                            spinner="dots",
+                        ):
+                            response = agent.chat(user_input)
+                        console.print(response, highlight=False)
+                    else:
+                        for token in agent.stream_chat(user_input):
+                            console.print(token, end="", highlight=False)
+                            response += token
                 except Exception:
                     # Fallback to non-streaming
-                    with console.status("[dim]Bro soch raha hai...[/dim]", spinner="dots"):
+                    with console.status("[dim]OpenBro soch raha hai...[/dim]", spinner="dots"):
                         response = agent.chat(user_input)
                     console.print(response, highlight=False)
                 console.print("\n")
 
             except KeyboardInterrupt:
-                console.print("\n[bold cyan]Ctrl+C? Chal theek hai, phir milte hai![/bold cyan]")
+                console.print("\n[bold cyan]OpenBro interrupted.[/bold cyan]")
                 break
             except EOFError:
                 break
@@ -228,6 +238,18 @@ def _handle_command(cmd: str, agent: Agent) -> bool:
 
     if cmd_lower in ("voice", "voice on"):
         _start_voice(agent)
+        return True
+
+    if cmd_lower in ("voice config", "voice status"):
+        _show_voice_config()
+        return True
+
+    if cmd_lower == "voice cloud on":
+        _set_voice_cloud(True)
+        return True
+
+    if cmd_lower == "voice cloud off":
+        _set_voice_cloud(False)
         return True
 
     if cmd_lower == "brain" or cmd_lower == "brain stats":
@@ -342,7 +364,9 @@ def _show_help():
     table.add_row("activity", "Print last 30 activity events (one-shot)")
     table.add_row("boss / boss off", "Toggle Boss mode — agent asks permission for every tool")
     table.add_row("voice / voice off", "Toggle voice listener (mic always-on inside REPL)")
-    table.add_row("voice test", "Quick 5-sec mic test - records + transcribes + prints")
+    table.add_row("voice config", "Show STT model, wake words, and cloud STT status")
+    table.add_row("voice cloud on/off", "Use Groq cloud STT first, offline Whisper as fallback")
+    table.add_row("voice test", "Quick mic test - records + transcribes + prints")
     table.add_row("brain / brain stats", "Show brain stats (skills, memory, profile)")
     table.add_row("brain skills", "List learned skills with usage + success rate")
     table.add_row("brain learnings", "Recent reflection events (signal + delta)")
@@ -360,7 +384,7 @@ def _show_help():
     table.add_row("exit / quit", "Exit OpenBro")
 
     console.print(table)
-    console.print("\n[dim]Or just type naturally to chat with your AI Bro![/dim]\n")
+    console.print("\n[dim]Or just type naturally and OpenBro will use tools when needed.[/dim]\n")
 
 
 def _show_config():
@@ -716,8 +740,18 @@ def _start_voice(agent: Agent):
     try:
         _voice_listener = VoiceListener(
             wake_words=voice_cfg.get("wake_words"),
-            stt_model=voice_cfg.get("stt_model", "base"),
+            stt_model=voice_cfg.get("stt_model", "small"),
+            stt_language=voice_cfg.get("stt_language"),
+            stt_device=voice_cfg.get("stt_device", "cpu"),
+            stt_compute_type=voice_cfg.get("stt_compute_type", "int8"),
+            stt_beam_size=int(voice_cfg.get("stt_beam_size", 5)),
+            stt_vad_filter=bool(voice_cfg.get("stt_vad_filter", True)),
+            chunk_seconds=float(voice_cfg.get("chunk_seconds", 8.0)),
+            silence_threshold=float(voice_cfg.get("silence_threshold", 0.003)),
+            silence_seconds=float(voice_cfg.get("silence_seconds", 0.8)),
             speak_replies=voice_cfg.get("speak_replies", True),
+            assistant_name="OpenBro",
+            ack_phrases=voice_cfg.get("ack_phrases"),
         )
     except Exception as e:
         console.print(f"[red]Voice listener init failed: {e}[/red]")
@@ -742,8 +776,8 @@ def _start_voice(agent: Agent):
     _voice_thread = threading.Thread(target=_voice_listener.run, daemon=True)
     _voice_thread.start()
     console.print(
-        "[green]🎙️  Voice listening.[/green] "
-        "[dim]Wake words: hey bro, ok bro. Type 'voice off' to stop.[/dim]"
+        "[green]Voice listening.[/green] "
+        "[dim]Wake words: hey openbro, ok openbro. Type 'voice off' to stop.[/dim]"
     )
 
 
@@ -758,8 +792,50 @@ def _stop_voice():
     console.print("[yellow]Voice listening stopped.[/yellow]")
 
 
+def _show_voice_config():
+    cfg = load_config()
+    voice_cfg = cfg.get("voice", {}) or {}
+    groq_key = bool((cfg.get("providers", {}).get("groq", {}) or {}).get("api_key"))
+    table = Table(title="Voice Config", border_style="cyan")
+    table.add_column("Setting", style="bold")
+    table.add_column("Value")
+    table.add_row("enabled", str(voice_cfg.get("enabled", True)))
+    table.add_row("auto_start", str(voice_cfg.get("auto_start", False)))
+    table.add_row("wake_words", ", ".join(voice_cfg.get("wake_words") or []))
+    table.add_row("ack_phrases", " | ".join(voice_cfg.get("ack_phrases") or []))
+    table.add_row("stt_model", str(voice_cfg.get("stt_model", "small")))
+    table.add_row("stt_language", str(voice_cfg.get("stt_language")))
+    table.add_row("stt_beam_size", str(voice_cfg.get("stt_beam_size", 5)))
+    table.add_row("chunk_seconds", str(voice_cfg.get("chunk_seconds", 8.0)))
+    table.add_row("silence_threshold", str(voice_cfg.get("silence_threshold", 0.003)))
+    table.add_row("use_cloud_stt", str(voice_cfg.get("use_cloud_stt", False)))
+    table.add_row("cloud_stt_model", str(voice_cfg.get("cloud_stt_model", "")))
+    table.add_row("groq_api_key", "set" if groq_key else "missing")
+    console.print(table)
+    console.print(
+        "\n[dim]If local Whisper hears badly, set a Groq key and run "
+        "'voice cloud on'. Offline Whisper remains fallback.[/dim]\n"
+    )
+
+
+def _set_voice_cloud(enabled: bool):
+    cfg = load_config()
+    cfg.setdefault("voice", {})["use_cloud_stt"] = enabled
+    save_config(cfg)
+    if enabled:
+        has_key = bool((cfg.get("providers", {}).get("groq", {}) or {}).get("api_key"))
+        console.print("[green]Cloud STT enabled.[/green] Offline Whisper remains fallback.")
+        if not has_key:
+            console.print(
+                "[yellow]Groq API key missing.[/yellow] "
+                "Set it with: config set providers.groq.api_key YOUR_KEY"
+            )
+    else:
+        console.print("[green]Cloud STT disabled. Using local Whisper only.[/green]")
+
+
 def _voice_test():
-    """Quick mic + STT sanity check: record 5 seconds, transcribe, print."""
+    """Quick mic + STT sanity check: record a phrase, transcribe, print."""
     try:
         from openbro.voice.listener import VoiceListener
     except Exception as e:
@@ -772,16 +848,28 @@ def _voice_test():
     try:
         v = VoiceListener(
             wake_words=voice_cfg.get("wake_words"),
-            stt_model=voice_cfg.get("stt_model", "base"),
-            chunk_seconds=5.0,
+            stt_model=voice_cfg.get("stt_model", "small"),
+            stt_language=voice_cfg.get("stt_language"),
+            stt_device=voice_cfg.get("stt_device", "cpu"),
+            stt_compute_type=voice_cfg.get("stt_compute_type", "int8"),
+            stt_beam_size=int(voice_cfg.get("stt_beam_size", 5)),
+            stt_vad_filter=bool(voice_cfg.get("stt_vad_filter", True)),
+            chunk_seconds=float(
+                voice_cfg.get("test_seconds", voice_cfg.get("chunk_seconds", 8.0))
+            ),
+            silence_threshold=float(voice_cfg.get("silence_threshold", 0.003)),
+            silence_seconds=float(voice_cfg.get("silence_seconds", 0.8)),
             speak_replies=False,
+            assistant_name="OpenBro",
+            ack_phrases=voice_cfg.get("ack_phrases"),
         )
     except Exception as e:
         console.print(f"[red]Voice init failed: {e}[/red]")
         return
 
     console.print(
-        "[bold cyan]Voice test:[/bold cyan] [dim]speak now - recording for 5 seconds...[/dim]"
+        "[bold cyan]Voice test:[/bold cyan] "
+        "[dim]speak now - recording until silence or timeout...[/dim]"
     )
     try:
         text = v.listen_once()
@@ -799,7 +887,8 @@ def _voice_test():
     console.print(f"[green]Heard:[/green] {text}")
     console.print(
         "[dim]If that looks right, voice mode will work. "
-        "Say 'hey bro <command>' (e.g. 'hey bro notepad open kar') to use it.[/dim]"
+        "Say 'hey openbro <command>' "
+        "(e.g. 'hey openbro notepad open kar') to use it.[/dim]"
     )
 
 

@@ -62,7 +62,7 @@ class LocalEngine:
 
         # First-time load reads the entire GGUF (4-13 GB) off disk and maps
         # it into RAM/VRAM — 30-90 sec on a typical NVMe + 8B model. Without
-        # an explicit "I'm loading" event the GUI just shows 'thinking…' the
+        # an explicit "I'm loading" event the terminal just shows 'thinking…' the
         # whole time and looks frozen. Emit a clear status so the user sees
         # what's happening.
         try:

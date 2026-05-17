@@ -93,11 +93,12 @@ def best_available_llm():
 
 When new models drop (e.g. `llama3.4:8b`), OpenBro notices on next `brain update` and offers: *"Naya model available, switch karu? Better at tool calling."*
 
-### 5. Custom UI — not a CLI
+### 5. Terminal-First Interface
 
-OpenBro ships a **dedicated graphical interface** — not a terminal prompt.
+OpenBro ships as a **terminal-first agent**, like Claude Code / Codex CLI, with
+voice support inside the terminal flow. There is no separate desktop/browser UI.
 
-**Default UI**: lightweight web app served at `http://localhost:8765`, auto-opens in the user's browser.
+**Default UI**: terminal REPL launched by `openbro`.
 
 ```
 +----------------------------------------------------------+
@@ -117,14 +118,14 @@ OpenBro ships a **dedicated graphical interface** — not a terminal prompt.
 +----------------------------------------------------------+
 ```
 
-**Why a browser UI**:
-- Cross-platform without bundling Electron (no 100 MB overhead)
-- Native voice via Web Audio API (no PortAudio install issues)
-- Beautiful by default — Tailwind / clean dark theme
-- Activity panel + chat in one place
-- Hotkey to summon (system tray app to toggle visibility)
+**Why terminal-first**:
+- Fast startup and low overhead.
+- Works naturally with coding-agent workflows.
+- Easy audit/debug via command history and activity logs.
+- Voice can run alongside typed commands in the same process.
 
-**Stack**: FastAPI backend + WebSocket streaming + vanilla JS frontend (no framework dependency, fast load).
+**No separate GUI**: OpenBro must operate from the terminal. Rich panels,
+prompt-toolkit input, voice status, and activity logs are the UI.
 
 ### 6. Sandbox-on-Demand
 
@@ -172,27 +173,22 @@ openbro/
 ├── core/
 │   ├── reasoning.py          # Pipeline orchestrator
 │   └── agent.py              # Agent integration with Brain
-├── ui/                       # Custom GUI (replaces CLI as default surface)
-│   ├── server.py             # FastAPI + WebSocket
-│   ├── frontend/             # Static HTML/CSS/JS
-│   │   ├── index.html
-│   │   ├── style.css
-│   │   └── app.js
-│   └── tray.py               # System tray app (hotkey + show/hide)
+├── cli/                      # Terminal REPL, commands, voice mode
+│   ├── main.py               # Entry point
+│   ├── repl.py               # Custom CLI surface
+│   └── voice_mode.py         # Voice-only terminal flow
 └── ...                       # rest unchanged
 ```
 
-## CLI commands (still available, just not the primary surface)
+## CLI commands
 
 ```
-openbro                       # Launch GUI (default)
-openbro --cli                 # Launch terminal REPL (legacy)
-openbro --tray                # Background tray app + GUI on hotkey
+openbro                       # Launch terminal REPL (default)
 openbro --voice               # Voice-only mode
 openbro --setup               # Re-run setup wizard
 ```
 
-Inside any UI:
+Inside the terminal:
 ```
 brain                         # Show brain stats
 brain export                  # Backup
@@ -226,6 +222,6 @@ brain reset                   # Wipe (with confirmation)
 | Reasoning pipeline | ⬜ Next |
 | Reflection loop | ⬜ Next |
 | Brain updater | ⬜ Next |
-| Custom GUI | ⬜ Next |
+| Terminal CLI polish | ⬜ Next |
 | Sandbox-on-demand | ⬜ Next |
 | Agent integration | ⬜ Next |

@@ -2,7 +2,7 @@
 
 # OpenBro
 
-### **Tera Apna AI Bro** — Open-Source Personal AI Agent
+### **OpenBro** — Open-Source Personal AI Agent
 
 *Terminal pe ek command. Voice se bolo. Phone se chalao. Sab kuch on your laptop.*
 
@@ -132,7 +132,7 @@ Or update via pip directly (`llama-cpp-python` wheels live on a separate index, 
 pip install --upgrade --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu "openbro[all,voice] @ git+https://github.com/brijeshch8482/openbro.git@main"
 ```
 
-> ⚠️ Avoid `--no-deps` — it skips GUI / voice deps and leaves you with a broken install ("Desktop UI deps not installed").
+> ⚠️ Avoid `--no-deps` — it skips voice / provider deps and leaves optional features unavailable.
 
 ### Reopen the chat
 
@@ -352,9 +352,8 @@ You > model switch llama-tiny            # llama3.2:1b alias
 
 | Problem | Fix |
 |---------|-----|
-| **"Desktop UI deps not installed"** | The wizard auto-installs them now; on launch say "Y" to the prompt. Manual: `pip install customtkinter pystray pynput pillow` |
-| **GUI stuck on "thinking…"** | First chat on a fresh model = 30-90 s while llama.cpp mmaps the GGUF; activity sidebar shows "Loading … into memory". If still stuck after 2 min, switch to `llama3.2:3b` (`openbro config set llm.model llama3.2:3b`) — 8B on CPU is too slow for daily use. |
-| **Voice doesn't respond to "hey bro"** | Windows: Settings → Privacy → Microphone → "Allow desktop apps" = ON. Speak close to the mic. Every transcript (wake or not) now appears as a `🎤 heard:` activity event so you can verify the mic is picking you up. |
+| **First local reply is slow** | First chat on a fresh model = 30-90 s while llama.cpp mmaps the GGUF. If still stuck after 2 min, switch to `llama3.2:3b` (`openbro config set llm.model llama3.2:3b`) — 8B on CPU is too slow for daily use. |
+| **Voice doesn't respond to "hey openbro"** | Windows: Settings → Privacy → Microphone → "Allow desktop apps" = ON. Speak close to the mic. Run `voice test` inside OpenBro to verify mic + STT. |
 | **GitHub MCP server has no token** | `openbro mcp creds github` — interactive prompt, hidden input, saves to config. Restart `openbro`. |
 | **Install failed with "egg fragment invalid"** | pip >= 23 needs PEP 508 syntax. Use: `openbro[all,voice] @ git+https://...` instead of `git+https://...#egg=openbro[...]`. The installer scripts use the correct form. |
 | **`llama-cpp-python` source-compile crashed** | PyPI has no binary wheels for this package. Use `--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu` — the installer does this automatically. |
@@ -517,16 +516,16 @@ Drop custom skills in `~/.openbro/skills/<name>/skill.py` - they auto-load.
 
 ## Voice Mode
 
-Talk to your bro with your voice:
+Talk to OpenBro with your voice:
 
 ```bash
 pip install openbro[voice]   # installs whisper, edge-tts, sounddevice
 openbro --voice
 ```
 
-- **STT**: faster-whisper (offline, runs locally)
+- **STT**: faster-whisper `small` by default (offline), with opt-in Groq cloud STT via `voice cloud on`
 - **TTS**: Microsoft Edge voices via edge-tts (free, natural Indian English voice)
-- **Wake words**: "hey bro", "hi bro", "ok bro", "bro suno" (configurable)
+- **Wake words**: "hey openbro", "hi openbro", "ok openbro", "openbro suno" (configurable)
 
 ## Project Status
 

@@ -29,7 +29,7 @@ err()   { echo -e "  ${R}✗${N} $1"; }
 echo ""
 echo -e "${C}  ╔═══════════════════════════════════════════╗${N}"
 echo -e "${C}  ║          OpenBro Installer v1.0          ║${N}"
-echo -e "${C}  ║      Tera Apna AI Bro - Open Source      ║${N}"
+echo -e "${C}  ║      OpenBro - Open Source AI Agent      ║${N}"
 echo -e "${C}  ╚═══════════════════════════════════════════╝${N}"
 
 # ─── Step 1/5: Python (robust detect + install) ──────────────

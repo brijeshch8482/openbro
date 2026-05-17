@@ -1,4 +1,4 @@
-"""OpenBro - Tera Apna AI Bro"""
+"""OpenBro - terminal-first personal AI agent."""
 
 # Read version from package metadata so it always matches what pip installed.
 # Hardcoding here drifts: pyproject.toml said 1.0.0b1 but this said 1.0.0-beta,
