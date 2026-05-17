@@ -854,9 +854,7 @@ def _voice_test():
             stt_compute_type=voice_cfg.get("stt_compute_type", "int8"),
             stt_beam_size=int(voice_cfg.get("stt_beam_size", 5)),
             stt_vad_filter=bool(voice_cfg.get("stt_vad_filter", True)),
-            chunk_seconds=float(
-                voice_cfg.get("test_seconds", voice_cfg.get("chunk_seconds", 8.0))
-            ),
+            chunk_seconds=float(voice_cfg.get("test_seconds", voice_cfg.get("chunk_seconds", 8.0))),
             silence_threshold=float(voice_cfg.get("silence_threshold", 0.003)),
             silence_seconds=float(voice_cfg.get("silence_seconds", 0.8)),
             speak_replies=False,
