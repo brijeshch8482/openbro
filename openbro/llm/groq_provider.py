@@ -67,19 +67,47 @@ class GroqProvider(LLMProvider):
 
         resp = httpx.post(GROQ_API_URL, json=payload, headers=headers, timeout=30)
         if resp.status_code != 200:
-            # raise_for_status drops the response body — Groq puts the real
-            # reason ('model not found', 'messages[0].content too short',
-            # tool-call validation failure) there. Surface it so the user
-            # can actually see what went wrong.
+            # Groq puts the real reason in body.error.message AND, for
+            # tool-call failures, the model's malformed output in
+            # body.error.failed_generation. Surface both so the user can
+            # see what the model tried to emit (otherwise 'Failed to call
+            # a function. Please adjust your prompt.' is useless — we
+            # don't see WHAT got generated).
             body = ""
             try:
                 err = resp.json()
-                body = err.get("error", {}).get("message") or json.dumps(err)
+                error_obj = err.get("error", {}) if isinstance(err, dict) else {}
+                message = error_obj.get("message") or ""
+                failed = error_obj.get("failed_generation") or ""
+                if message and failed:
+                    body = f"{message}\n  failed_generation: {failed[:600]}"
+                else:
+                    body = message or json.dumps(err)
             except (ValueError, KeyError):
-                body = resp.text[:500]
+                body = resp.text[:600]
+
+            # 400 on a tool-call request is usually the model emitting bad
+            # function-call syntax (Llama 3.3 70B is known for this on Groq
+            # when there are many tools). Retry once WITHOUT tools so the
+            # user still gets a text reply rather than 'try again later'.
+            if resp.status_code == 400 and tools:
+                fallback_payload = dict(payload)
+                fallback_payload.pop("tools", None)
+                try:
+                    retry = httpx.post(
+                        GROQ_API_URL, json=fallback_payload, headers=headers, timeout=30
+                    )
+                    if retry.status_code == 200:
+                        return self._parse_response(retry.json())
+                except httpx.HTTPError:
+                    pass
+
             raise RuntimeError(f"Groq {resp.status_code}: {body}")
         data = resp.json()
 
+        return self._parse_response(data)
+
+    def _parse_response(self, data: dict) -> LLMResponse:
         choice = data["choices"][0]["message"]
         tool_calls = []
         if choice.get("tool_calls"):
