@@ -1,12 +1,51 @@
 """Groq LLM provider - ultra-fast inference, free tier available."""
 
 import json
+import re
 
 import httpx
 
 from openbro.llm.base import LLMProvider, LLMResponse, Message
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+
+# Llama 3.3 70B on Groq has a known function-call serialization quirk:
+# instead of emitting {"name": "web", "arguments": "{\"action\":\"search\"}"},
+# it sometimes emits {"name": "web={\"action\":\"search\"}", "arguments": "{}"}
+# — the args get glued INTO the name field. Groq's tool-call validator then
+# rejects the next request because 'web={...}' isn't in the tools list,
+# returning a 400. We salvage the call by detecting `<name>={<json>}` and
+# splitting it back out before the agent loop sees the response.
+_GLUED_NAME = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(\{.*\})$", re.DOTALL)
+
+
+def _sanitize_tool_call(name: str, arguments: str | dict) -> tuple[str, dict]:
+    """Recover (name, args dict) from Llama-on-Groq glued tool calls."""
+    if isinstance(arguments, dict):
+        args = arguments
+    else:
+        try:
+            args = json.loads(arguments) if arguments else {}
+        except (TypeError, ValueError):
+            args = {}
+
+    if isinstance(name, str):
+        m = _GLUED_NAME.match(name.strip())
+        if m:
+            real_name, glued_args = m.group(1), m.group(2)
+            try:
+                parsed = json.loads(glued_args)
+                if isinstance(parsed, dict):
+                    # Glued args win — they're what the model meant to send.
+                    args = parsed
+                    name = real_name
+            except (TypeError, ValueError):
+                # Glob looked like name={...} but the {...} isn't valid JSON.
+                # Keep the original name; the agent will report 'unknown tool'
+                # and the LLM gets a chance to retry.
+                pass
+    return name, args
 
 
 class GroqProvider(LLMProvider):
@@ -45,12 +84,15 @@ class GroqProvider(LLMProvider):
         tool_calls = []
         if choice.get("tool_calls"):
             for tc in choice["tool_calls"]:
+                raw_name = tc["function"]["name"]
+                raw_args = tc["function"]["arguments"]
+                clean_name, clean_args = _sanitize_tool_call(raw_name, raw_args)
                 tool_calls.append(
                     {
                         "id": tc["id"],
                         "function": {
-                            "name": tc["function"]["name"],
-                            "arguments": json.loads(tc["function"]["arguments"]),
+                            "name": clean_name,
+                            "arguments": clean_args,
                         },
                     }
                 )
