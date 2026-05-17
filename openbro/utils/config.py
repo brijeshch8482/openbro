@@ -63,6 +63,27 @@ def _migrate_config(config: dict) -> dict:
     wake_words = [str(w).lower() for w in (voice.get("wake_words") or [])]
     if wake_words and all("openbro" not in w for w in wake_words):
         voice["wake_words"] = defaults["voice"]["wake_words"]
+    else:
+        # Merge in any new defaults the user is missing — covers the case where
+        # the user already had a short ['hey openbro', 'ok openbro'] list saved
+        # before we added Whisper-mishearing variants like 'hebron'/'hebro'.
+        # Without this, an existing user keeps the old narrow list forever and
+        # voice silently ignores their 'hey bro' that Whisper transcribed as
+        # 'hebron'. New ones are appended, user-customized ones preserved.
+        default_words = defaults["voice"]["wake_words"]
+        existing = set(wake_words)
+        merged = list(wake_words)
+        for w in default_words:
+            if w.lower() not in existing:
+                merged.append(w)
+        if merged != wake_words:
+            voice["wake_words"] = merged
+
+    # Force English STT default if the user's config has language=None and
+    # they haven't explicitly chosen another. None makes Whisper guess and
+    # routinely emits Japanese/Arabic for quiet English audio.
+    if voice.get("stt_language") is None and "stt_language" not in (voice.get("_explicit") or {}):
+        voice["stt_language"] = defaults["voice"].get("stt_language", "en")
 
     return config
 
