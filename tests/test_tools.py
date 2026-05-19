@@ -283,6 +283,39 @@ def test_tool_registry_list_by_risk():
     assert "system_info" in by_risk["safe"]
 
 
+def test_word_tool_create(tmp_path):
+    from openbro.tools.word_tool import WordTool
+
+    target = tmp_path / "subdir" / "note.docx"
+    tool = WordTool()
+    result = tool.run(action="create", file=str(target), text="kal mai office nahi jaunga")
+    assert "Created" in result
+    assert target.exists()
+    # Verify text round-trips
+    read_back = tool.run(action="read", file=str(target))
+    assert "kal mai office" in read_back
+
+
+def test_word_tool_create_existing_blocked(tmp_path):
+    from openbro.tools.word_tool import WordTool
+
+    target = tmp_path / "exists.docx"
+    target.write_bytes(b"")
+    tool = WordTool()
+    result = tool.run(action="create", file=str(target))
+    assert "already exists" in result
+
+
+def test_excel_tool_create(tmp_path):
+    from openbro.tools.excel_tool import ExcelTool
+
+    target = tmp_path / "subdir" / "data.xlsx"
+    tool = ExcelTool()
+    result = tool.run(action="create", file=str(target), row="Name,Age,City")
+    assert "Created" in result
+    assert target.exists()
+
+
 def test_python_tool_runs_simple_script():
     registry = ToolRegistry()
     result = registry.execute("python", {"code": "print(2 + 2)"}, confirmed=True)

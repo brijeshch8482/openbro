@@ -1,8 +1,9 @@
-"""Excel spreadsheet tool — read, edit, and open .xlsx files.
+"""Excel spreadsheet tool — create, read, edit, and open .xlsx files.
 
 Uses openpyxl (install via openbro[office]).
 
 Supports:
+- create: NEW .xlsx (optionally with a header row). Parent dirs auto-created.
 - open: launch in Excel
 - read: read a sheet as a CSV-like grid (text)
 - info: workbook stats (sheets, rows, cols)
@@ -67,8 +68,9 @@ def _coerce_value(s: str):
 class ExcelTool(BaseTool):
     name = "excel"
     description = (
-        "Read, edit, and open Microsoft Excel (.xlsx) workbooks. "
-        "Use 'open' to launch in Excel, 'read' for sheet contents, "
+        "Create, read, edit, and open Microsoft Excel (.xlsx) workbooks. "
+        "Use 'create' to make a NEW workbook (with optional header row), "
+        "'open' to launch in Excel, 'read' for sheet contents, "
         "'get_cell'/'set_cell'/'append_row'/'find_replace' to edit, "
         "'sheets' to list tabs, 'list' to find files."
     )
@@ -84,6 +86,7 @@ class ExcelTool(BaseTool):
                     "action": {
                         "type": "string",
                         "enum": [
+                            "create",
                             "open",
                             "read",
                             "info",
@@ -95,7 +98,8 @@ class ExcelTool(BaseTool):
                             "list",
                         ],
                         "description": (
-                            "Action: open=launch, read=sheet grid, info=stats, "
+                            "Action: create=new .xlsx (with optional header row), "
+                            "open=launch, read=sheet grid, info=stats, "
                             "sheets=tab names, get_cell/set_cell=A1 cell ops, "
                             "append_row=add row, find_replace=text replace, "
                             "list=find .xlsx in folder."
@@ -161,6 +165,8 @@ class ExcelTool(BaseTool):
         except ImportError:
             return OFFICE_DEPS_HINT
 
+        if action == "create":
+            return self._create(kwargs.get("file", ""), kwargs.get("row", ""))
         if action == "read":
             return self._read(
                 kwargs.get("file", ""),
@@ -211,6 +217,32 @@ class ExcelTool(BaseTool):
             return f"No .xlsx files in {p}"
         lines = [f"{f.relative_to(p)}  ({f.stat().st_size // 1024} KB)" for f in files[:50]]
         return "\n".join(lines) + (f"\n(+{len(files) - 50} more)" if len(files) > 50 else "")
+
+    def _create(self, file_path: str, header_row: str = "") -> str:
+        from openpyxl import Workbook
+
+        if not file_path:
+            return "'file' is required (path for the new .xlsx)."
+        p = _resolve(file_path)
+        if p.suffix.lower() != ".xlsx":
+            p = p.with_suffix(".xlsx")
+        if p.exists():
+            return (
+                f"File already exists: {p}. Use action='append_row' to add data, "
+                "or pass a different 'file' path, or delete it first."
+            )
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            wb = Workbook()
+            if header_row:
+                ws = wb.active
+                ws.append([_coerce_value(c.strip()) for c in header_row.split(",")])
+            wb.save(str(p))
+        except PermissionError:
+            return f"Permission denied creating {p}. Try a different folder."
+        except Exception as e:
+            return f"Create failed: {e}"
+        return f"Created: {p}" + (f" (header: {header_row})" if header_row else " (empty)")
 
     def _open(self, file_path: str) -> str:
         if not file_path:

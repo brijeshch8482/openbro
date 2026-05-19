@@ -1,8 +1,9 @@
-"""Word document tool — read, edit, and open .docx files.
+"""Word document tool — create, read, edit, and open .docx files.
 
 Uses python-docx (install via openbro[office]).
 
 Supports:
+- create: NEW .docx (optionally with initial text). Parent dirs auto-created.
 - read: extract all text
 - info: paragraph / word / table counts
 - find_replace: replace text across the document (returns replacement count)
@@ -51,9 +52,11 @@ def _ensure_docx(path: Path) -> str | None:
 class WordTool(BaseTool):
     name = "word"
     description = (
-        "Read, edit, and open Microsoft Word (.docx) documents. "
-        "Use 'open' to launch in Word, 'read' for text, "
-        "'find_replace'/'append'/'insert_after' to edit, 'list' to find files."
+        "Create, read, edit, and open Microsoft Word (.docx) documents. "
+        "Use 'create' to make a NEW file (with optional initial text), "
+        "'open' to launch in Word, 'read' for text, "
+        "'find_replace'/'append'/'insert_after' to edit existing, "
+        "'list' to find files."
     )
     risk = RiskLevel.MODERATE
 
@@ -67,6 +70,7 @@ class WordTool(BaseTool):
                     "action": {
                         "type": "string",
                         "enum": [
+                            "create",
                             "open",
                             "read",
                             "info",
@@ -76,7 +80,8 @@ class WordTool(BaseTool):
                             "list",
                         ],
                         "description": (
-                            "Action: open=launch in Word, read=extract text, "
+                            "Action: create=new .docx (with optional text), "
+                            "open=launch in Word, read=extract text, "
                             "info=stats, find_replace/append/insert_after=edit, "
                             "list=find .docx files in a folder."
                         ),
@@ -130,6 +135,8 @@ class WordTool(BaseTool):
         except ImportError:
             return OFFICE_DEPS_HINT
 
+        if action == "create":
+            return self._create(kwargs.get("file", ""), kwargs.get("text", ""))
         if action == "read":
             return self._read(kwargs.get("file", ""), kwargs.get("limit", 0))
         if action == "info":
@@ -165,6 +172,31 @@ class WordTool(BaseTool):
             return f"No .docx files in {p}"
         lines = [f"{f.relative_to(p)}  ({f.stat().st_size // 1024} KB)" for f in files[:50]]
         return "\n".join(lines) + (f"\n(+{len(files) - 50} more)" if len(files) > 50 else "")
+
+    def _create(self, file_path: str, text: str = "") -> str:
+        from docx import Document
+
+        if not file_path:
+            return "'file' is required (path for the new .docx)."
+        p = _resolve(file_path)
+        if p.suffix.lower() != ".docx":
+            p = p.with_suffix(".docx")
+        if p.exists():
+            return (
+                f"File already exists: {p}. Use action='append' to add to it, "
+                "or pass a different 'file' path, or delete it first."
+            )
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            doc = Document()
+            if text:
+                doc.add_paragraph(text)
+            doc.save(str(p))
+        except PermissionError:
+            return f"Permission denied creating {p}. Try a different folder."
+        except Exception as e:
+            return f"Create failed: {e}"
+        return f"Created: {p}" + (f' (with text: "{text[:60]}")' if text else " (empty)")
 
     def _open(self, file_path: str) -> str:
         if not file_path:
