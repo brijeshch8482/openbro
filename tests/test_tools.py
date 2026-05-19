@@ -284,6 +284,9 @@ def test_tool_registry_list_by_risk():
 
 
 def test_word_tool_create(tmp_path):
+    import pytest
+
+    pytest.importorskip("docx", reason="python-docx not installed (openbro[office])")
     from openbro.tools.word_tool import WordTool
 
     target = tmp_path / "subdir" / "note.docx"
@@ -297,6 +300,9 @@ def test_word_tool_create(tmp_path):
 
 
 def test_word_tool_create_existing_blocked(tmp_path):
+    import pytest
+
+    pytest.importorskip("docx", reason="python-docx not installed (openbro[office])")
     from openbro.tools.word_tool import WordTool
 
     target = tmp_path / "exists.docx"
@@ -307,6 +313,9 @@ def test_word_tool_create_existing_blocked(tmp_path):
 
 
 def test_excel_tool_create(tmp_path):
+    import pytest
+
+    pytest.importorskip("openpyxl", reason="openpyxl not installed (openbro[office])")
     from openbro.tools.excel_tool import ExcelTool
 
     target = tmp_path / "subdir" / "data.xlsx"
