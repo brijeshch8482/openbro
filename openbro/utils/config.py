@@ -114,7 +114,10 @@ def default_config() -> dict:
             },
             "groq": {
                 "api_key": None,
-                "model": "llama-3.3-70b-versatile",
+                # Llama 4 Scout: clean tool_calls + 128K context + fast.
+                # Avoid llama-3.3-70b-versatile (glued-argument bug) and
+                # llama-3.1-70b-versatile (decommissioned May 2026).
+                "model": "meta-llama/llama-4-scout-17b-16e-instruct",
             },
             "google": {
                 "api_key": None,

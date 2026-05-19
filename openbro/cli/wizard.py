@@ -84,9 +84,16 @@ PROVIDER_CATALOG = [
         "id": "groq",
         "name": "Groq",
         "tier": "FREE",
-        "default_model": "llama-3.3-70b-versatile",
+        # Llama 4 Scout > Llama 3.3 70B for tool calling on Groq.
+        # 3.3-70b has a known glued-argument serialization bug
+        # (web={...}, word,{...}, etc.) that the sanitizer in
+        # groq_provider.py recovers from but the validator still
+        # 400s on a fraction of requests. Scout emits clean
+        # tool_calls and runs at similar speed. 3.1-70b was
+        # decommissioned May 2026; do not default to it.
+        "default_model": "meta-llama/llama-4-scout-17b-16e-instruct",
         "signup": "https://console.groq.com",
-        "blurb": "Ultra-fast (<1s), free tier 30 req/min, hosts Llama 3.3, Mixtral, Gemma",
+        "blurb": "Ultra-fast (<1s), free tier 30 req/min, Llama 4 Scout for reliable tool calls",
         "tags": ["recommended"],
     },
     {

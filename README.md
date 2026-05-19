@@ -184,7 +184,7 @@ $ openbro
 
 Step 2: Choose your LLM
 ┌─────┬──────────────────────┬────────────┬──────────────────────────┐
-│  1  │ Groq <-- recommended │    FREE    │ llama-3.3-70b-versatile  │
+│  1  │ Groq <-- recommended │    FREE    │ llama-4-scout-17b        │
 │  2  │ Google Gemini        │    FREE    │ gemini-1.5-flash         │
 │  3  │ OpenAI               │ FREE-TRIAL │ gpt-4o-mini              │
 │  4  │ Anthropic Claude     │    PAID    │ claude-sonnet-4-20250514 │
@@ -309,7 +309,7 @@ The local backend is **llama-cpp-python** — same `llama.cpp` engine that Ollam
 Switch provider any time:
 ```
 You > model switch groq
-✓ Switched to: groq / llama-3.3-70b-versatile
+✓ Switched to: groq / llama-4-scout-17b-16e-instruct
 
 You > model switch llama          # alias for local + llama3.2:3b
 ✓ Switched to: local / llama3.2:3b

@@ -34,8 +34,9 @@ CAPABILITY = {
     "gemini-1.5-pro": 92,
     "gemini-1.5-flash": 85,
     # Groq (open-source via fast cloud)
-    "groq-llama-3.3": 92,
-    "groq-llama-3.1": 87,
+    "groq-llama-4-scout": 94,  # cleanest tool calls on Groq
+    "groq-llama-3.3": 92,  # works but glued-arg bug, needs sanitizer
+    "groq-llama-3.1": 0,  # DECOMMISSIONED May 2026 — don't rank
     "groq-mixtral": 80,
     "groq-gemma": 70,
     # Local (offline) — Meta / Mistral / Microsoft / Google only
@@ -111,8 +112,8 @@ def probe_available() -> list[dict]:
     candidates.append(
         {
             "provider": "groq",
-            "model": "llama-3.3-70b-versatile",
-            "score": _capability_for("groq-llama-3.3"),
+            "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+            "score": _capability_for("groq-llama-4-scout"),
             "available": False,
             "source": "groq-cloud",
         }

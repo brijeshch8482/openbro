@@ -57,7 +57,7 @@ def _sanitize_tool_call(name: str, arguments: str | dict) -> tuple[str, dict]:
 
 
 class GroqProvider(LLMProvider):
-    def __init__(self, api_key: str, model: str = "llama-3.3-70b-versatile"):
+    def __init__(self, api_key: str, model: str = "meta-llama/llama-4-scout-17b-16e-instruct"):
         self.api_key = api_key
         self.model = model
 

@@ -102,7 +102,7 @@ STATUS_BLOCKS: list[tuple[str, str]] = [
         "for newer model releases.",
     ),
     ("h3", "Wizard step 2 — provider catalogue"),
-    ("code", "1. Groq (FREE)            — llama-3.3-70b-versatile (recommended)"),
+    ("code", "1. Groq (FREE)            — llama-4-scout-17b-16e-instruct (recommended)"),
     ("code", "2. Google Gemini (FREE)   — gemini-1.5-flash"),
     ("code", "3. OpenAI (FREE-TRIAL)    — gpt-4o-mini"),
     ("code", "4. Anthropic Claude (PAID) — claude-sonnet-4-20250514"),
@@ -206,11 +206,15 @@ STATUS_BLOCKS: list[tuple[str, str]] = [
         "code",
         "$sha=(iwr -useb 'https://api.github.com/repos/brijeshch8482/openbro/commits/main"
         "'|ConvertFrom-Json).sha; iwr -useb \"https://raw.githubusercontent.com/brijeshch"
-        "8482/openbro/$sha/scripts/install.ps1\" | iex",
+        '8482/openbro/$sha/scripts/install.ps1" | iex',
     ),
     ("code", ""),
     ("code", "# Mac / Linux:"),
-    ("code", "curl -fsSL https://raw.githubusercontent.com/brijeshch8482/openbro/main/scripts/install.sh | bash"),
+    (
+        "code",
+        "curl -fsSL https://raw.githubusercontent.com/brijeshch8482/openbro"
+        "/main/scripts/install.sh | bash",
+    ),
     (
         "p",
         "What it does: detects Python (auto-installs 3.12 if current is too new for voice "

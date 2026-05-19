@@ -25,7 +25,7 @@ ALIASES = {
     "gpt": ("openai", "gpt-4o"),
     "gpt-4o": ("openai", "gpt-4o"),
     "gpt-mini": ("openai", "gpt-4o-mini"),
-    "groq": ("groq", "llama-3.3-70b-versatile"),
+    "groq": ("groq", "meta-llama/llama-4-scout-17b-16e-instruct"),
     "gemini": ("google", "gemini-1.5-flash"),
     "deepseek": ("deepseek", "deepseek-chat"),
     "llama": ("local", "llama3.1:8b"),

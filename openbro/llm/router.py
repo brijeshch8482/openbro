@@ -80,7 +80,7 @@ def create_provider(provider_name: str | None = None) -> LLMProvider:
             )
         return GroqProvider(
             api_key=api_key,
-            model=groq_cfg.get("model", "llama-3.3-70b-versatile"),
+            model=groq_cfg.get("model", "meta-llama/llama-4-scout-17b-16e-instruct"),
         )
 
     elif provider_name == "google":
