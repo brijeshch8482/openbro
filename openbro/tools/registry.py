@@ -16,6 +16,7 @@ from openbro.tools.process_tool import ProcessTool
 from openbro.tools.python_tool import PythonTool
 from openbro.tools.screenshot_tool import ScreenshotTool
 from openbro.tools.shell_tool import ShellTool
+from openbro.tools.sticky_notes_tool import StickyNotesTool
 from openbro.tools.system_control_tool import SystemControlTool
 from openbro.tools.system_tool import SystemTool
 from openbro.tools.web_tool import WebTool
@@ -38,6 +39,7 @@ BUILTIN_TOOLS = [
     PythonTool,
     ScreenshotTool,
     ShellTool,
+    StickyNotesTool,
     SystemControlTool,
     SystemTool,
     WebTool,

@@ -7,8 +7,13 @@ from openbro.tools.base import BaseTool, RiskLevel
 class MemoryTool(BaseTool):
     name = "memory"
     description = (
-        "Remember facts about the user (name, preferences, custom info), "
-        "recall them later, or search past conversations and stored facts."
+        "OpenBro's INTERNAL memory of user facts — name, preferences, "
+        "long-term info that should persist across chats. "
+        "Actions: remember/recall/forget/list/search. "
+        "NOT for Windows Sticky Notes (use `sticky_notes` tool for that), "
+        "NOT for creating files (use `file_ops` / `word` / `excel`). "
+        "Use only when the user explicitly wants you to remember a fact "
+        "(e.g. 'yaad rakh ki mera birthday X hai')."
     )
     risk = RiskLevel.SAFE
 

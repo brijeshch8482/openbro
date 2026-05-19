@@ -70,12 +70,25 @@ class PythonTool(BaseTool):
                 encoding="utf-8",
                 errors="replace",
             )
-            output = result.stdout or ""
-            if result.stderr:
-                output += f"\nSTDERR:\n{result.stderr}"
-            if result.returncode != 0:
-                output += f"\n(exit {result.returncode})"
-            return (output or "(no output)")[:5000]
+            stdout = result.stdout or ""
+            stderr = result.stderr or ""
+            # ─── Forceful framing when the snippet errored.
+            # Real-user incident: model wrote `print(len())` (no arg),
+            # got a TypeError on stderr, then reported '0 files mili'
+            # to the user. The plain stdout+stderr dump wasn't loud
+            # enough to stop the hallucination. The "ERROR — DO NOT
+            # use this as a result" prefix is meant to force the
+            # model to retry with corrected code on the next loop
+            # iteration instead of inventing an answer.
+            if result.returncode != 0 or stderr.strip():
+                return (
+                    "ERROR — snippet did NOT produce a usable answer. "
+                    "Fix the code and retry; DO NOT report a result yet.\n"
+                    f"exit_code: {result.returncode}\n"
+                    f"stdout: {stdout.strip() or '(empty)'}\n"
+                    f"stderr: {stderr.strip()[:1500]}"
+                )[:5000]
+            return (stdout or "(no output)")[:5000]
         except subprocess.TimeoutExpired:
             return "Python snippet timed out (30s limit)"
         except OSError as e:

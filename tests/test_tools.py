@@ -237,14 +237,18 @@ def test_tool_registry():
 
 
 def test_tool_registry_count():
-    # 19 tools: added python_tool for Claude-Code-style ad-hoc code execution
-    assert len(BUILTIN_TOOLS) == 19
+    # 20 tools: + sticky_notes for Windows Sticky Notes (memory tool got
+    # confused with it). Most platform-specific integrations should be
+    # done via python/shell tools — sticky_notes is the exception because
+    # it sits in user-facing app territory where the agent needs an
+    # unambiguous mapping.
+    assert len(BUILTIN_TOOLS) == 20
 
 
 def test_tool_registry_schema():
     registry = ToolRegistry()
     schemas = registry.get_tools_schema()
-    assert len(schemas) == 19
+    assert len(schemas) == 20
     for s in schemas:
         assert "name" in s
         assert "parameters" in s
