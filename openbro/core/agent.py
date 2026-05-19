@@ -89,6 +89,11 @@ class Agent:
         with self._lock:
             return self._chat_impl(user_input)
 
+    # Max LLM round-trips per user message. Real Claude Code loops 5-20+
+    # times for non-trivial requests. Cap protects against runaway loops
+    # but is loose enough that legit multi-step work completes.
+    MAX_TOOL_ITERATIONS = 10
+
     def _chat_impl(self, user_input: str) -> str:
         self.last_language = detect_language(user_input)
         self._refresh_system_prompt(self.last_language)
@@ -101,27 +106,46 @@ class Agent:
         tools = self.tool_registry.get_tools_schema() if self.provider.supports_tools() else None
         self.bus.emit("thinking", "agent thinking…")
 
+        # ─── Agent loop (was single-shot, which forced LLM to hallucinate
+        # answers after one tool returned nothing). Loop till LLM stops
+        # calling tools and emits a final text response — same shape as
+        # Claude Code / OpenAI Assistants API ReAct loop.
+        for _iteration in range(self.MAX_TOOL_ITERATIONS):
+            try:
+                response = self.provider.chat(self.history, tools=tools)
+            except ConnectionError:
+                return (
+                    "Bro, LLM se connect nahi ho pa raha. "
+                    "Cloud provider use kar raha hai to internet check kar; "
+                    "local model use kar raha hai to model file check kar "
+                    "(openbro model list)."
+                )
+            except Exception as e:
+                error_msg = str(e)
+                if "401" in error_msg or "Unauthorized" in error_msg:
+                    return "API key galat ya expired hai bhai. 'config set' se update kar."
+                if "429" in error_msg or "rate" in error_msg.lower():
+                    return "Rate limit hit ho gaya bro. Thoda ruk ke try kar."
+                return f"Error: {e}"
+
+            if not response.tool_calls:
+                # Final answer — model decided no more tools needed.
+                self.history.append(Message(role="assistant", content=response.content))
+                self.memory.add("assistant", response.content)
+                self.bus.emit("assistant", response.content)
+                return response.content
+
+            # Execute the tool calls, append results to history, LOOP.
+            # On next iteration the LLM sees the results AND still has
+            # tools= available — so it can call another tool (different
+            # pattern, different approach) or finalize with text.
+            self._execute_tool_batch(response)
+
+        # Safety net — model is stuck looping. Force one final no-tools call.
         try:
-            response = self.provider.chat(self.history, tools=tools)
-        except ConnectionError:
-            return (
-                "Bro, LLM se connect nahi ho pa raha. "
-                "Cloud provider use kar raha hai to internet check kar; "
-                "local model use kar raha hai to model file check kar "
-                "(openbro model list)."
-            )
+            response = self.provider.chat(self.history)
         except Exception as e:
-            error_msg = str(e)
-            if "401" in error_msg or "Unauthorized" in error_msg:
-                return "API key galat ya expired hai bhai. 'config set' se update kar."
-            if "429" in error_msg or "rate" in error_msg.lower():
-                return "Rate limit hit ho gaya bro. Thoda ruk ke try kar."
-            return f"Error: {e}"
-
-        # Handle tool calls
-        if response.tool_calls:
-            return self._handle_tool_calls(response)
-
+            return f"Max iterations hit, fallback failed: {e}"
         self.history.append(Message(role="assistant", content=response.content))
         self.memory.add("assistant", response.content)
         self.bus.emit("assistant", response.content)
@@ -158,7 +182,30 @@ class Agent:
         self.memory.add("assistant", full_response)
         self.bus.emit("assistant", full_response)
 
-    def _handle_tool_calls(self, response: LLMResponse) -> str:
+    def _execute_tool_batch(self, response: LLMResponse) -> None:
+        """Run every tool call in `response`, append results to history.
+
+        Does NOT call the LLM — the outer loop in _chat_impl does that
+        on the next iteration, with tools= still available. That's the
+        whole point: if the model wants to try another approach (different
+        glob, different tool, retry with sanitized args) after seeing the
+        results, it can.
+        """
+        # First, record the assistant's tool-calling turn so the LLM has
+        # context for what it just asked. We use a plain text summary —
+        # not the strict OpenAI tool_calls schema — because Groq/local
+        # providers serialize history as role/content only. The model
+        # still understands 'I called X with args Y, got result Z'.
+        call_summaries = []
+        for tc in response.tool_calls:
+            func = tc.get("function", {})
+            call_summaries.append(f"  {func.get('name', '?')}({func.get('arguments', {})})")
+        if response.content:
+            self.history.append(Message(role="assistant", content=response.content))
+        self.history.append(
+            Message(role="assistant", content="Tools called:\n" + "\n".join(call_summaries))
+        )
+
         results = []
         for tool_call in response.tool_calls:
             func = tool_call.get("function", {})
@@ -193,21 +240,11 @@ class Agent:
             results.append(f"[{name}]: {result}")
             self.bus.emit("tool_end", f"{name} done", tool=name, ok=True, preview=result[:200])
 
-        # Send tool results back to LLM for final response
-        tool_output = "\n".join(results)
-        self.history.append(Message(role="assistant", content=f"Tool results:\n{tool_output}"))
-        self.history.append(
-            Message(role="user", content="Above tool results dekh ke user ko response de.")
-        )
-
-        try:
-            final = self.provider.chat(self.history)
-            self.history.append(Message(role="assistant", content=final.content))
-            self.memory.add("assistant", final.content)
-            self.bus.emit("assistant", final.content)
-            return final.content
-        except Exception as e:
-            return f"Tools ran but error in final response: {e}\nRaw:\n{tool_output}"
+        # Tool results go back as a user message so the LLM treats them
+        # as fresh input to react to. No 'now respond' instruction —
+        # the model decides on the next iteration whether to call more
+        # tools or finalize with text.
+        self.history.append(Message(role="user", content="Tool results:\n" + "\n".join(results)))
 
     def _trim_history(self):
         if len(self.history) > self.max_history + 1:
