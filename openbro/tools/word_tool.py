@@ -24,6 +24,7 @@ import subprocess
 from pathlib import Path
 
 from openbro.tools.base import BaseTool, RiskLevel
+from openbro.utils.paths import resolve_user_path
 
 OFFICE_DEPS_HINT = (
     "Word/Excel deps not installed. Run: pip install 'openbro[office]' "
@@ -32,10 +33,9 @@ OFFICE_DEPS_HINT = (
 
 
 def _resolve(path: str) -> Path:
-    p = Path(path).expanduser()
-    if not p.is_absolute():
-        p = Path.cwd() / p
-    return p.resolve()
+    # OneDrive-aware: '~/Desktop/x.docx' goes to the real Desktop the user
+    # sees in Explorer, not a stale system-folder copy.
+    return resolve_user_path(path)
 
 
 def _ensure_docx(path: Path) -> str | None:

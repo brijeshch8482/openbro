@@ -283,6 +283,43 @@ def test_tool_registry_list_by_risk():
     assert "system_info" in by_risk["safe"]
 
 
+def test_resolve_user_path_prefers_onedrive_desktop(monkeypatch, tmp_path):
+    """When a path under home/Desktop is asked and OneDrive Desktop exists, redirect."""
+    import platform
+
+    from openbro.utils import paths as paths_mod
+    from openbro.utils.paths import resolve_user_path
+
+    if platform.system() != "Windows":
+        import pytest
+
+        pytest.skip("OneDrive redirect only applies on Windows")
+
+    # Build a fake home + OneDrive layout
+    fake_home = tmp_path / "Users" / "test"
+    fake_home.mkdir(parents=True)
+    (fake_home / "Desktop").mkdir()  # system Desktop (legacy, empty)
+    fake_onedrive = fake_home / "OneDrive"
+    (fake_onedrive / "Desktop").mkdir(parents=True)  # real Desktop
+
+    # Patch BOTH the home() reference inside paths.py and the onedrive
+    # detector. We don't rely on expanduser() because it reads USERPROFILE
+    # from the real env at C-level.
+    monkeypatch.setattr(paths_mod.Path, "home", classmethod(lambda cls: fake_home))
+    monkeypatch.setattr(paths_mod, "_onedrive_roots", lambda: [fake_onedrive])
+
+    resolved = resolve_user_path(str(fake_home / "Desktop" / "new.docx"))
+    assert "OneDrive" in str(resolved), f"expected OneDrive Desktop, got {resolved}"
+
+
+def test_resolve_user_path_absolute_unchanged(tmp_path):
+    from openbro.utils.paths import resolve_user_path
+
+    abs_path = tmp_path / "some.docx"
+    resolved = resolve_user_path(str(abs_path))
+    assert resolved == abs_path.resolve()
+
+
 def test_word_tool_create(tmp_path):
     import pytest
 

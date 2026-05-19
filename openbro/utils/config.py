@@ -60,7 +60,13 @@ def _migrate_config(config: dict) -> dict:
         # ruthless version that forbids code-in-chat.
         "first try writing the smallest correct code",
     )
-    if "HARD RULES" not in prompt and any(m in prompt for m in legacy_prompt_markers):
+    # Force-upgrade if missing the latest rules (path disclosure, no
+    # generic lecture). Match on the latest rule marker so older HARD
+    # RULES prompts also get pulled forward.
+    needs_upgrade = "FILE PATHS = ALWAYS DISCLOSE" not in prompt and (
+        "HARD RULES" in prompt or any(m in prompt for m in legacy_prompt_markers)
+    )
+    if needs_upgrade:
         agent["system_prompt"] = defaults["agent"]["system_prompt"]
 
     voice = config.setdefault("voice", {})
@@ -151,7 +157,16 @@ def default_config() -> dict:
                 "  `word` tool ko `action='create', file=..., text=...` se call kar.\n"
                 "4. **NUMBERS = COUNT FROM CODE.** 'kitne X hain' — answer ek number "
                 "  hona chahiye, tool se nikla hua. 'Depend karta hai' / 'shayad' = "
-                "  fail. Always run code, always give the actual count.\n\n"
+                "  fail. Always run code, always give the actual count.\n"
+                "5. **FILE PATHS = ALWAYS DISCLOSE.** Jab tool 'Created: <path>' "
+                "  return kare, response me FULL path user ko bata. 'File ban gayi' "
+                "  bina path ke = fail (user ko dhundna padega). Default location "
+                "  for new files when user doesn't specify: `~/Desktop/<name>` "
+                "  (Windows OneDrive Desktop auto-handled by path resolver).\n"
+                "6. **NO GENERIC LECTURE.** User ne tools available hain to use kar — "
+                "  'agent kaise banaye' jaise question pe rasa/dialogflow ki list "
+                "  dena fail hai. Tool call kar (web search, file create, etc.) ya "
+                "  specific concrete answer de — Wikipedia-style overview NAHI.\n\n"
                 "## TOOL-CHOICE QUICK MAP:\n"
                 "- 'kitne files/images/X hain folder me' → `python` me\n"
                 "  `from pathlib import Path; p=Path('~/Desktop').expanduser(); "

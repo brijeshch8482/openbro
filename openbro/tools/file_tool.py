@@ -1,8 +1,7 @@
 """File operations tool."""
 
-from pathlib import Path
-
 from openbro.tools.base import BaseTool, RiskLevel
+from openbro.utils.paths import resolve_user_path
 
 
 class FileTool(BaseTool):
@@ -11,7 +10,10 @@ class FileTool(BaseTool):
     risk = RiskLevel.MODERATE
 
     def run(self, action: str, path: str = ".", content: str = "", pattern: str = "") -> str:
-        path = Path(path).expanduser()
+        # OneDrive-aware: '~/Desktop' resolves to the real Desktop the user
+        # sees in Explorer (which is under OneDrive on most Windows installs
+        # with sync enabled).
+        path = resolve_user_path(path)
 
         if action == "read":
             if not path.exists():
