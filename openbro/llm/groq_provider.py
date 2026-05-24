@@ -56,6 +56,104 @@ def _sanitize_tool_call(name: str, arguments: str | dict) -> tuple[str, dict]:
     return name, args
 
 
+def _extract_inline_tool_calls(content: str) -> list[dict]:
+    """Recover tool calls that the model dumped as JSON in content.
+
+    Some models (notably llama-3.3-70b-versatile, llama-3.1-8b-instant
+    on Groq) ignore the structured tool_calls slot and instead emit
+    payloads like:
+
+        [ { "name": "file_ops", "parameters": {"action": "open", ...} } ]
+        { "name": "word", "arguments": {"action": "read", "file": "..."} }
+        ```json\n[ ... ]\n```
+
+    The agent treats this as plain text, so the call never runs and the
+    user sees raw JSON as the reply. Strip code fences, parse, normalize
+    'parameters' -> 'arguments', return a list shaped like the proper
+    tool_calls field so _execute_tool_batch handles it uniformly.
+    Returns [] if nothing recognizable is found.
+    """
+    if not content or not content.strip():
+        return []
+    text = content.strip()
+    # Strip ```json ... ``` or ``` ... ``` wrappers.
+    if text.startswith("```"):
+        first_nl = text.find("\n")
+        if first_nl > 0:
+            text = text[first_nl + 1 :]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+    # Look for the first JSON value (array or object) in the text.
+    # If the model wrapped it with prose, find the bracket span.
+    start = -1
+    end = -1
+    for i, ch in enumerate(text):
+        if ch in "[{":
+            start = i
+            break
+    if start < 0:
+        return []
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if esc:
+            esc = False
+            continue
+        if ch == "\\":
+            esc = True
+            continue
+        if ch == '"':
+            in_str = not in_str
+            continue
+        if in_str:
+            continue
+        if ch in "[{":
+            depth += 1
+        elif ch in "]}":
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+    if end < 0:
+        return []
+    blob = text[start:end]
+    try:
+        parsed = json.loads(blob)
+    except (TypeError, ValueError):
+        return []
+
+    candidates = parsed if isinstance(parsed, list) else [parsed]
+    out: list[dict] = []
+    for i, item in enumerate(candidates):
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name") or item.get("tool")
+        if not name or not isinstance(name, str):
+            continue
+        args = item.get("arguments")
+        if args is None:
+            args = item.get("parameters")  # some models say 'parameters'
+        if args is None:
+            args = item.get("args")
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except (TypeError, ValueError):
+                args = {}
+        if not isinstance(args, dict):
+            args = {}
+        out.append(
+            {
+                "id": item.get("id") or f"inline_{i}",
+                "function": {"name": name, "arguments": args},
+            }
+        )
+    return out
+
+
 def _serialize_message(m: Message) -> dict:
     """Render a Message in OpenAI/Groq wire format, preserving tool_calls.
 
@@ -227,6 +325,7 @@ class GroqProvider(LLMProvider):
     def _parse_response(self, data: dict) -> LLMResponse:
         choice = data["choices"][0]["message"]
         tool_calls = []
+        content = choice.get("content", "") or ""
         if choice.get("tool_calls"):
             for tc in choice["tool_calls"]:
                 raw_name = tc["function"]["name"]
@@ -241,9 +340,25 @@ class GroqProvider(LLMProvider):
                         },
                     }
                 )
+        # Fallback: model dumped tool call as JSON in content instead
+        # of using the tool_calls field. llama-3.3-70b-versatile does
+        # this routinely with payloads like
+        #   [ { "name": "file_ops", "parameters": {"action":"open",...} } ]
+        # or
+        #   { "name": "word", "arguments": {"action":"read","file":"..."} }
+        # Real user incident (2026-05-25): user asked agent to open a
+        # PDF, agent printed the literal JSON as its reply (with a ◆
+        # bullet prefix) and the tool never ran. Detect → extract →
+        # convert to proper tool_calls; clear content so the user
+        # doesn't see the raw JSON.
+        if not tool_calls and content:
+            extracted = _extract_inline_tool_calls(content)
+            if extracted:
+                tool_calls = extracted
+                content = ""
 
         return LLMResponse(
-            content=choice.get("content", "") or "",
+            content=content,  # may have been cleared by inline-tool-call extraction
             tool_calls=tool_calls,
             usage={
                 "input": data.get("usage", {}).get("prompt_tokens", 0),
