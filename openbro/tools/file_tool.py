@@ -1,12 +1,20 @@
 """File operations tool."""
 
+import os
+import platform
+import subprocess
+
 from openbro.tools.base import BaseTool, RiskLevel
 from openbro.utils.paths import resolve_user_path
 
 
 class FileTool(BaseTool):
     name = "file_ops"
-    description = "Read, write, list, and search files on the system"
+    description = (
+        "Read, write, list, search, or open files on the system. "
+        "Use 'open' to launch a file (PDF, image, video, anything) in the "
+        "user's default app — works for any extension. 'read' is text-only."
+    )
     risk = RiskLevel.MODERATE
 
     def run(self, action: str, path: str = ".", content: str = "", pattern: str = "") -> str:
@@ -42,8 +50,28 @@ class FileTool(BaseTool):
                 return f"No files matching '{pattern}' in {path}"
             return "\n".join(str(r) for r in results)
 
+        elif action == "open":
+            # Launch in default app. Real-user gap: 'open aadhar.pdf' would
+            # crash with 'Unknown action: open' because file_ops only had
+            # read/write/list/search. The model could call word.open but
+            # that only works for .docx — for arbitrary files we need a
+            # generic launcher. PDF/image/video/zip etc. all work via
+            # os.startfile on Windows.
+            if not path.exists():
+                return f"File not found: {path}"
+            try:
+                if platform.system() == "Windows":
+                    os.startfile(str(path))  # type: ignore[attr-defined]
+                elif platform.system() == "Darwin":
+                    subprocess.run(["open", str(path)], check=False)
+                else:
+                    subprocess.run(["xdg-open", str(path)], check=False)
+                return f"Opened {path} in default app"
+            except Exception as e:
+                return f"Failed to open: {e}"
+
         else:
-            return f"Unknown action: {action}. Available: read, write, list, search"
+            return f"Unknown action: {action}. Available: read, write, list, search, open"
 
     def schema(self) -> dict:
         return {
@@ -54,8 +82,12 @@ class FileTool(BaseTool):
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["read", "write", "list", "search"],
-                        "description": "Action to perform",
+                        "enum": ["read", "write", "list", "search", "open"],
+                        "description": (
+                            "read=text contents, write=create/overwrite, "
+                            "list=directory entries, search=glob pattern, "
+                            "open=launch in default app (PDF/image/video/anything)."
+                        ),
                     },
                     "path": {"type": "string", "description": "File or directory path"},
                     "content": {
