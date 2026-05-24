@@ -148,6 +148,13 @@ class GroqProvider(LLMProvider):
                     or "413" in msg  # request too large / TPM throttling
                     or "tokens per minute" in msg
                     or "request too large" in msg
+                    # Llama 3.3 tool-call serialization bugs — different
+                    # models in the chain generate cleaner output. The
+                    # 'failed to call a function' phrasing covers the
+                    # <function=name [args]</function> variant; 'failed
+                    # to parse tool call arguments' covers raw-code-in-
+                    # arguments. Both warrant trying a different model.
+                    or ("400" in msg and "failed to call a function" in msg)
                     or ("400" in msg and "failed to parse tool call arguments" in msg)
                 )
                 if not failover:

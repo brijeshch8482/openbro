@@ -44,6 +44,25 @@ COMMANDS = [
 completer = WordCompleter(COMMANDS, ignore_case=True)
 
 
+def _render_response(con: Console, text: str) -> None:
+    """Render an assistant response with Markdown formatting.
+
+    Falls back to plain print if Markdown rendering fails (e.g. very
+    long output that the parser chokes on). Claude Code parity:
+    code fences become syntax-highlighted blocks, lists / tables /
+    headings render properly instead of as raw backticks.
+    """
+    from rich.markdown import Markdown
+
+    if not text:
+        return
+    try:
+        # Markdown() takes care of code blocks, lists, headings.
+        con.print(Markdown(text, code_theme="monokai"))
+    except Exception:
+        con.print(text, highlight=False)
+
+
 def print_banner():
     # Claude-Code-inspired multi-line banner — diamond icon, name,
     # tagline, and a one-line "what you can do" hint. Keeps the info
@@ -104,13 +123,17 @@ def start_repl():
     try:
         while True:
             try:
-                user_input = session.prompt("You > ").strip()
+                # Claude-Code-style prompt: cyan glyph + space, minimal noise.
+                # Was "You > " — too much chrome on every line.
+                from prompt_toolkit.formatted_text import ANSI
+
+                user_input = session.prompt(ANSI("\x1b[36m›\x1b[0m ")).strip()
 
                 if not user_input:
                     continue
 
                 if user_input.lower() in ("exit", "quit", "bye"):
-                    console.print("[bold cyan]OpenBro shutting down.[/bold cyan]")
+                    console.print("[dim cyan]◆ session ended.[/dim cyan]")
                     break
 
                 # Handle built-in commands
@@ -119,7 +142,11 @@ def start_repl():
 
                 # Tool-capable providers need the full agent loop. The streaming
                 # path cannot currently surface structured tool calls reliably.
-                console.print("\n[bold green]OpenBro:[/bold green] ", end="")
+                #
+                # Render the assistant response as Markdown so code blocks, lists,
+                # tables, etc. format correctly — Claude Code does the same. A
+                # plain console.print() leaves '```python\n...' as raw backticks.
+                # (_render_response handles the Markdown import — see helper.)
                 response = ""
                 try:
                     if agent.provider.supports_tools():
@@ -128,17 +155,19 @@ def start_repl():
                             spinner="dots",
                         ):
                             response = agent.chat(user_input)
-                        console.print(response, highlight=False)
+                        console.print("\n[bold cyan]◆[/bold cyan] ", end="")
+                        _render_response(console, response)
                     else:
+                        console.print("\n[bold cyan]◆[/bold cyan] ", end="")
                         for token in agent.stream_chat(user_input):
                             console.print(token, end="", highlight=False)
                             response += token
                 except Exception:
-                    # Fallback to non-streaming
                     with console.status("[dim]OpenBro soch raha hai...[/dim]", spinner="dots"):
                         response = agent.chat(user_input)
-                    console.print(response, highlight=False)
-                console.print("\n")
+                    console.print("\n[bold cyan]◆[/bold cyan] ", end="")
+                    _render_response(console, response)
+                console.print("")
 
             except KeyboardInterrupt:
                 console.print("\n[bold cyan]OpenBro interrupted.[/bold cyan]")

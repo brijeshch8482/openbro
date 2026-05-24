@@ -296,11 +296,30 @@ def default_config() -> dict:
             "silence_seconds": 0.8,
             "use_cloud_stt": False,
             "cloud_stt_model": "whisper-large-v3-turbo",
+            # Single source of truth for wake words. listener.py's
+            # DEFAULT_WAKE_WORDS imports from here — diverged previously
+            # (config had 4, listener had 15) so Whisper-mishearing
+            # variants like 'hey bro' / 'open bro' never made it to the
+            # listener because config's smaller list won the merge.
             "wake_words": [
+                # Canonical
                 "hey openbro",
                 "hi openbro",
                 "ok openbro",
+                "hello openbro",
                 "openbro suno",
+                # Whisper mishearings of 'openbro' (real captured)
+                "hebron",
+                "hebro",
+                "ai bro",
+                "open bro",
+                "openborough",
+                "openborg",
+                # Generic 'bro' fallbacks Whisper transcribes cleanly
+                "hey bro",
+                "ok bro",
+                "hi bro",
+                "hello bro",
             ],
             "ack_phrases": [
                 "Yes bro, bolo.",
