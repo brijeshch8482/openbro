@@ -45,9 +45,22 @@ completer = WordCompleter(COMMANDS, ignore_case=True)
 
 
 def print_banner():
-    banner = f"[bold cyan]OpenBro v{__version__}[/bold cyan] - Terminal-first AI agent"
-    console.print(Panel(banner, border_style="cyan"))
-    console.print("[dim]Type 'help' for commands. Type naturally to chat or act.[/dim]\n")
+    # Claude-Code-inspired multi-line banner — diamond icon, name,
+    # tagline, and a one-line "what you can do" hint. Keeps the info
+    # density low so the user sees a clean fresh slate every launch.
+    title = f"[bold cyan]◆ OpenBro[/bold cyan] [dim]v{__version__}[/dim]"
+    tagline = "[white]Tera apna AI bro — terminal-first, voice-ready, full machine access.[/white]"
+    hint = (
+        "[dim]Type your question / command. "
+        "Slash-commands: [bold]/help /tools /voice /model /quit[/bold][/dim]"
+    )
+    console.print(
+        Panel(
+            f"{title}\n{tagline}\n\n{hint}",
+            border_style="cyan",
+            padding=(0, 2),
+        )
+    )
 
 
 def start_repl():

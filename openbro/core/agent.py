@@ -18,6 +18,62 @@ from openbro.utils.language import detect_language, language_instruction
 console = Console()
 
 
+def _friendly_error(e: Exception) -> str:
+    """User-facing error message with category + fix hint.
+
+    The agent loop catches every exception from the LLM provider and
+    formats it for chat. Generic 'Error: ...' confused users — they
+    couldn't tell rate limit from auth from network from a tool-call
+    schema mismatch. Each branch below picks the most actionable
+    Hinglish phrasing + concrete next step.
+    """
+    msg = str(e)
+    low = msg.lower()
+    # Auth — recoverable by setting API key
+    if "401" in msg or "unauthorized" in low or "invalid api key" in low:
+        return (
+            "❌ API key invalid hai bhai.\n"
+            "   Fix: `openbro config set providers.groq.api_key gsk_YOUR_KEY`\n"
+            "   Naya key: https://console.groq.com/keys"
+        )
+    # Rate / quota — wait or switch model
+    if (
+        "429" in msg
+        or "rate limit" in low
+        or "rate_limit" in low
+        or "413" in msg
+        or "tokens per minute" in low
+        or "request too large" in low
+    ):
+        return (
+            "⏱️  Rate limit hit ho gaya — saare fallback models bhi exhausted.\n"
+            "   Fix: 30-60 sec ruk OR `openbro config set providers.groq.model "
+            "llama-3.3-70b-versatile` (looser cap)."
+        )
+    # Network — likely offline
+    if (
+        isinstance(e, ConnectionError)
+        or "connection" in low
+        or "timed out" in low
+        or "name resolution" in low
+        or "getaddrinfo" in low
+    ):
+        return (
+            "🌐 LLM se connect nahi ho pa raha bhai.\n"
+            "   Fix: internet check kar; ya offline use kar — `openbro --offline` "
+            "(local llama.cpp model chahiye, `openbro model download llama3.1:8b`)."
+        )
+    # Tool call schema mismatch — model generated bad args
+    if "tool call validation failed" in low or "failed to parse tool call" in low:
+        return (
+            "🔧 Model ne tool ko galat call kiya (schema mismatch).\n"
+            "   Try same query phir se — agent ka fallback chain dusra model try karega.\n"
+            f"   Raw: {msg[:200]}"
+        )
+    # Catch-all — show type + message so it's debuggable
+    return f"❌ Error ({type(e).__name__}): {msg[:400]}"
+
+
 class Agent:
     def __init__(
         self,
@@ -148,28 +204,8 @@ class Agent:
         for _iteration in range(self.MAX_TOOL_ITERATIONS):
             try:
                 response = self.provider.chat(self.history, tools=tools)
-            except ConnectionError:
-                return (
-                    "Bro, LLM se connect nahi ho pa raha. "
-                    "Cloud provider use kar raha hai to internet check kar; "
-                    "local model use kar raha hai to model file check kar "
-                    "(openbro model list)."
-                )
             except Exception as e:
-                error_msg = str(e)
-                # Strict matching — earlier 'rate' substring match was too
-                # loose ('generate', 'iterate', 'reasoning' all matched and
-                # the user got 'Rate limit hit' for unrelated errors).
-                # Require the actual HTTP signal or an explicit rate-limit
-                # phrase.
-                if "401" in error_msg or "Unauthorized" in error_msg:
-                    return "API key galat ya expired hai bhai. 'config set' se update kar."
-                low = error_msg.lower()
-                if "429" in error_msg or "rate limit" in low or "rate_limit" in low:
-                    return "Rate limit hit ho gaya bro. Thoda ruk ke try kar."
-                # Surface the full error — earlier we hid it behind a
-                # generic 'Error: ...' which made debugging impossible.
-                return f"Error ({type(e).__name__}): {e}"
+                return _friendly_error(e)
 
             if not response.tool_calls:
                 # Final answer — model decided no more tools needed.

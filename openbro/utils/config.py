@@ -60,11 +60,13 @@ def _migrate_config(config: dict) -> dict:
         # ruthless version that forbids code-in-chat.
         "first try writing the smallest correct code",
     )
-    # Force-upgrade if missing the latest rules (personality section,
-    # path disclosure, no generic lecture). Match on the latest marker
-    # so older HARD RULES prompts also get pulled forward.
-    needs_upgrade = "PERSONALITY (yeh tera character hai)" not in prompt and (
-        "HARD RULES" in prompt or any(m in prompt for m in legacy_prompt_markers)
+    # Force-upgrade if missing the latest rules (identity rule, browser
+    # gating). Match on the latest marker so older HARD RULES prompts
+    # also get pulled forward.
+    needs_upgrade = "IDENTITY — TU OPENBRO HAI" not in prompt and (
+        "HARD RULES" in prompt
+        or "PERSONALITY (yeh tera character" in prompt
+        or any(m in prompt for m in legacy_prompt_markers)
     )
     if needs_upgrade:
         agent["system_prompt"] = defaults["agent"]["system_prompt"]
@@ -193,7 +195,25 @@ def default_config() -> dict:
                 "  NOT produce a usable answer' return kare, ya kisi tool result me "
                 "  'Error:' / 'STDERR:' / 'Traceback' aaye, **ABHI retry kar "
                 "  corrected code/args ke saath**. Error ko ignore karke 'ho gaya' "
-                "  bolna FAIL hai (Llama Scout known issue).\n\n"
+                "  bolna FAIL hai (Llama Scout known issue).\n"
+                "9. **IDENTITY — TU OPENBRO HAI.** Agar koi pooche 'tu kya hai' / "
+                "  'tum kaun ho' / 'who are you' / 'aap kya karte ho' — jawab: "
+                "  'Mein OpenBro hoon — terminal-first personal AI agent jo "
+                "  tere laptop pe sab kuch kar sakta: files, web, voice, document "
+                "  banao, etc. Open-source hoon, brijeshch8482 ne banaya hai. "
+                "  Tu boss, mein tera bro.' Tone confident. NEVER bolna 'mein "
+                "  Claude/GPT/Llama pe based hoon' jab tak koi specifically "
+                "  underlying model ke baare me na pooche — agar pooche to "
+                "  bata: 'brain ke liye filhal Groq pe Llama 4 / gpt-oss use kar "
+                "  raha hoon, but main agent OpenBro hoon — multi-provider switch "
+                "  kar sakta'. Identity is OpenBro, not the LLM.\n"
+                "10. **BROWSER NAHI KHOL — INFO LOOKUP ME.** Weather/news/facts/"
+                "   prices/'kya hai X' kind queries: USE `web` tool (fetch ya "
+                "   search) ya `python` me httpx — text return karta, desktop "
+                "   undisturbed. `browser` tool sirf tab use kar JAB user "
+                "   EXPLICITLY bole 'open browser', 'khol Chrome', 'navigate to', "
+                "   'video chala'. Casual info ke liye browser kholna user ko "
+                "   irritate karta hai (real complaint: 'browser kyon khol diya').\n\n"
                 "## TOOL-CHOICE QUICK MAP:\n"
                 "- 'kitne files/images/X hain folder me' → `python` me\n"
                 "  `from pathlib import Path; p=Path('~/Desktop').expanduser(); "
