@@ -56,6 +56,43 @@ def _sanitize_tool_call(name: str, arguments: str | dict) -> tuple[str, dict]:
     return name, args
 
 
+def _serialize_message(m: Message) -> dict:
+    """Render a Message in OpenAI/Groq wire format, preserving tool_calls.
+
+    Why this matters: the previous serialization dropped Message.tool_calls
+    and Message.tool_call_id and only kept role+content. After a tool
+    round-trip, the LLM saw 'Tools called: X(...)' and 'Tool results: ...'
+    as plain assistant/user text — and on the next iteration it echoed
+    those lines back as its own response (user saw 'Tools called:
+    browser({"action": "search"...})' in the chat). Using the proper
+    tool_calls + role='tool' schema makes the LLM treat them as
+    structured tool round-trips and reply with prose.
+    """
+    base = {"role": m.role, "content": m.content or ""}
+    if m.tool_calls:
+        # Assistant message that called tools. content may be empty.
+        base["tool_calls"] = [
+            {
+                "id": tc.get("id", ""),
+                "type": "function",
+                "function": {
+                    "name": tc.get("function", {}).get("name", ""),
+                    "arguments": (
+                        json.dumps(tc.get("function", {}).get("arguments", {}))
+                        if isinstance(tc.get("function", {}).get("arguments"), dict)
+                        else tc.get("function", {}).get("arguments", "")
+                    ),
+                },
+            }
+            for tc in m.tool_calls
+        ]
+    if m.tool_call_id:
+        # Tool result message — must include tool_call_id linking back
+        # to the call that produced it.
+        base["tool_call_id"] = m.tool_call_id
+    return base
+
+
 _DEFAULT_FALLBACK_CHAIN = [
     # Order is failover priority: try primary first, then these on 429 /
     # 503. All currently active on Groq free tier (May 2026). 3.1-70b is
@@ -94,16 +131,29 @@ class GroqProvider(LLMProvider):
             try:
                 return self._chat_with_model(attempt_model, messages, tools)
             except RuntimeError as e:
-                msg = str(e)
-                # Only fail over on rate-limit-style errors. Validation
-                # errors, auth errors, etc. mean the request itself is
-                # broken — retrying with another model would just spam.
-                if "429" not in msg and "rate_limit" not in msg.lower():
+                msg = str(e).lower()
+                # Failover triggers:
+                # - 429 / rate_limit: primary model out of quota
+                # - 400 + 'failed to parse tool call arguments as json':
+                #   the model emitted malformed tool serialization.
+                #   gpt-oss-20b on Groq does this when it crams raw
+                #   python code into the arguments field instead of
+                #   wrapping it as {"code": "..."}. A different model
+                #   in the chain (especially llama-3.3-70b which we have
+                #   the sanitizer for) generates clean tool calls.
+                failover = (
+                    "429" in msg
+                    or "rate_limit" in msg
+                    or "rate limit" in msg
+                    or "413" in msg  # request too large / TPM throttling
+                    or "tokens per minute" in msg
+                    or "request too large" in msg
+                    or ("400" in msg and "failed to parse tool call arguments" in msg)
+                )
+                if not failover:
                     raise
                 last_error = e
                 continue
-        # All models in the chain hit rate limit. Surface the last error
-        # so the agent can show 'Rate limit hit' to the user.
         if last_error is not None:
             raise last_error
         raise RuntimeError("Groq: no models in fallback chain")
@@ -120,7 +170,7 @@ class GroqProvider(LLMProvider):
         }
         payload = {
             "model": model,
-            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "messages": [_serialize_message(m) for m in messages],
         }
         if tools:
             payload["tools"] = [{"type": "function", "function": t} for t in tools]

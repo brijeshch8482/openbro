@@ -75,12 +75,47 @@ class Agent:
                 f"\nTere paas ye tools available hai: {self.tool_names}. "
                 "Zaroorat padne pe inhe use kar."
             ),
+            self._world_facts_block(),
         ]
         if memory_context:
             parts.append("\n" + memory_context)
         if lang:
             parts.append("\n" + language_instruction(lang))
-        return "\n".join(parts)
+        return "\n".join(p for p in parts if p)
+
+    def _world_facts_block(self) -> str:
+        """User-environment facts the LLM needs every turn (e.g. OneDrive paths).
+
+        The python tool runs subprocess so it can't use openbro's OneDrive
+        path resolver — the LLM has to know the real Desktop/Documents/
+        Pictures locations and include them in the snippet directly.
+        Without this, `Path('~/Desktop').expanduser()` lands on the
+        empty system Desktop and the user sees '0 files' for a folder
+        that has 5 (real user incident).
+        """
+        try:
+            from openbro.brain.world import detect_paths
+        except Exception:
+            return ""
+        try:
+            paths = detect_paths()
+        except Exception:
+            return ""
+        if not paths:
+            return ""
+        lines = ["\n## USER ENVIRONMENT (Windows OneDrive-aware paths):"]
+        # Surface every known user folder by name so the LLM can pick
+        # the right one — most relevant: desktop/documents/pictures.
+        for key in ("desktop", "documents", "downloads", "pictures", "videos"):
+            if key in paths:
+                lines.append(f"- {key}: {paths[key]}")
+        if "onedrive" in paths:
+            lines.append(f"- onedrive_root: {paths['onedrive']}")
+        lines.append(
+            "When user says 'desktop' / 'documents' / etc., USE THE PATHS ABOVE "
+            "(not '~/Desktop' which may resolve to an empty system folder)."
+        )
+        return "\n".join(lines)
 
     def _refresh_system_prompt(self, lang: str) -> None:
         self.history[0] = Message(role="system", content=self._build_system_prompt(lang))
@@ -193,28 +228,25 @@ class Agent:
     def _execute_tool_batch(self, response: LLMResponse) -> None:
         """Run every tool call in `response`, append results to history.
 
-        Does NOT call the LLM — the outer loop in _chat_impl does that
-        on the next iteration, with tools= still available. That's the
-        whole point: if the model wants to try another approach (different
-        glob, different tool, retry with sanitized args) after seeing the
-        results, it can.
+        Uses proper OpenAI tool_calls + role='tool' message schema so the
+        LLM sees structured round-trips. Previous version stuffed tool
+        calls as plain assistant text ('Tools called: X(...)') and tool
+        results as plain user text. On the next iteration the model
+        echoed those lines back as its own response — real user incident:
+        chat showed 'Tools called: browser({"action": "search"...})' as
+        the agent's reply with no actual answer. The proper schema is
+        what function-calling-tuned models are trained on.
         """
-        # First, record the assistant's tool-calling turn so the LLM has
-        # context for what it just asked. We use a plain text summary —
-        # not the strict OpenAI tool_calls schema — because Groq/local
-        # providers serialize history as role/content only. The model
-        # still understands 'I called X with args Y, got result Z'.
-        call_summaries = []
-        for tc in response.tool_calls:
-            func = tc.get("function", {})
-            call_summaries.append(f"  {func.get('name', '?')}({func.get('arguments', {})})")
-        if response.content:
-            self.history.append(Message(role="assistant", content=response.content))
+        # Assistant turn that called tools — keep the original tool_calls
+        # structure; provider serializes it back into the wire format.
         self.history.append(
-            Message(role="assistant", content="Tools called:\n" + "\n".join(call_summaries))
+            Message(
+                role="assistant",
+                content=response.content or "",
+                tool_calls=response.tool_calls,
+            )
         )
 
-        results = []
         for tool_call in response.tool_calls:
             func = tool_call.get("function", {})
             name = func.get("name", "")
@@ -234,25 +266,25 @@ class Agent:
             confirmed = allowed
 
             if not allowed:
-                msg = f"[{name}]: DENIED by user"
-                results.append(msg)
-                self.bus.emit("tool_end", msg, tool=name, ok=False)
-                continue
+                result = f"[{name}]: DENIED by user"
+                self.bus.emit("tool_end", result, tool=name, ok=False)
+            else:
+                if risk == "moderate":
+                    console.print(f"[yellow]Tool: {name} ({risk})[/yellow] [dim]args: {args}[/dim]")
+                elif risk == "safe":
+                    console.print(f"[dim]Tool: {name} ({risk})[/dim]")
+                result = self.tool_registry.execute(name, args, confirmed=confirmed)
+                self.bus.emit("tool_end", f"{name} done", tool=name, ok=True, preview=result[:200])
 
-            if risk == "moderate":
-                console.print(f"[yellow]Tool: {name} ({risk})[/yellow] [dim]args: {args}[/dim]")
-            elif risk == "safe":
-                console.print(f"[dim]Tool: {name} ({risk})[/dim]")
-
-            result = self.tool_registry.execute(name, args, confirmed=confirmed)
-            results.append(f"[{name}]: {result}")
-            self.bus.emit("tool_end", f"{name} done", tool=name, ok=True, preview=result[:200])
-
-        # Tool results go back as a user message so the LLM treats them
-        # as fresh input to react to. No 'now respond' instruction —
-        # the model decides on the next iteration whether to call more
-        # tools or finalize with text.
-        self.history.append(Message(role="user", content="Tool results:\n" + "\n".join(results)))
+            # One role='tool' message per call, linked by tool_call_id.
+            # This is the OpenAI/Groq Assistants spec.
+            self.history.append(
+                Message(
+                    role="tool",
+                    content=result,
+                    tool_call_id=tool_call.get("id", ""),
+                )
+            )
 
     def _trim_history(self):
         if len(self.history) > self.max_history + 1:

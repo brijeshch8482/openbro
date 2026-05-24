@@ -777,8 +777,20 @@ def _start_voice(agent: Agent):
     # broken when really the STT just heard "hello bro" instead of "hey
     # openbro". Print on a fresh line so it doesn't trample the prompt.
     def _on_heard(text: str, has_wake: bool) -> None:
-        label = "[cyan]wake[/cyan]" if has_wake else "[dim]heard[/dim]"
-        console.print(f"\n[dim]🎤 {label}:[/dim] {text}", highlight=False)
+        if has_wake:
+            console.print(f"\n[dim]🎤 [cyan]wake[/cyan]:[/dim] {text}", highlight=False)
+        else:
+            # Surface the transcript AND remind the user that without a
+            # wake word the agent ignores it. Real user complaint: 'mera
+            # voice command yha likh rha lekin accept kyo nhi kr rha?'
+            # That was wake-word miss, not a bug. The hint shortcuts the
+            # confusion.
+            console.print(
+                f"\n[dim]🎤 heard (no wake word — ignored):[/dim] {text}\n"
+                "[dim]   say 'hey openbro <command>' or 'ok bro <command>' "
+                "to act on voice[/dim]",
+                highlight=False,
+            )
 
     _voice_listener.on_heard = _on_heard
 

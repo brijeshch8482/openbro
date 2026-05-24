@@ -10,7 +10,11 @@ class WebTool(BaseTool):
     description = "Search the web or fetch content from a URL"
     risk = RiskLevel.SAFE
 
-    def run(self, action: str, url: str = "", query: str = "") -> str:
+    def run(self, action: str, url: str | None = "", query: str | None = "") -> str:
+        # Coerce None -> "" so we don't crash when the LLM sends `null`
+        # (Groq rejects null up front, but some providers don't).
+        url = url or ""
+        query = query or ""
         if action == "fetch":
             return self._fetch(url)
         elif action == "search":
@@ -63,10 +67,27 @@ class WebTool(BaseTool):
                     "action": {
                         "type": "string",
                         "enum": ["fetch", "search"],
-                        "description": "Action: fetch a URL or search the web",
+                        "description": (
+                            "fetch=GET a URL (returns HTML/text), "
+                            "search=DuckDuckGo instant-answer (returns summary). "
+                            "For search OMIT 'url'; for fetch OMIT 'query'. "
+                            "Never pass null — omit instead."
+                        ),
                     },
-                    "url": {"type": "string", "description": "URL to fetch (for fetch action)"},
-                    "query": {"type": "string", "description": "Search query (for search action)"},
+                    "url": {
+                        "type": "string",
+                        "description": (
+                            "URL to fetch — REQUIRED for action=fetch, "
+                            "OMIT entirely for action=search (do not pass null)."
+                        ),
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": (
+                            "Search query — REQUIRED for action=search, "
+                            "OMIT entirely for action=fetch (do not pass null)."
+                        ),
+                    },
                 },
                 "required": ["action"],
             },

@@ -24,8 +24,15 @@ SEARCH_ENGINES = {
 class BrowserTool(BaseTool):
     name = "browser"
     description = (
-        "Open URLs or search the web in the user's default browser. "
-        "Supports Google, YouTube, GitHub, StackOverflow, Amazon, Flipkart, etc."
+        "Launch the user's default browser to open a URL or run a search. "
+        "USE ONLY when the user EXPLICITLY asks to open/launch a browser, "
+        "open a URL, watch a video, navigate to a site, or 'khol'/'open'/"
+        "'launch' something. For information lookup (weather, news, facts, "
+        "definitions, prices, summaries) — DO NOT use this; use the `web` "
+        "tool (fetch/search returns text without disturbing the desktop) "
+        "or `python` (httpx GET). Opening a browser window for every "
+        "info query annoys the user — 'mere laptop par browser kyon khol "
+        "diya' was a real complaint."
     )
     risk = RiskLevel.MODERATE
 
