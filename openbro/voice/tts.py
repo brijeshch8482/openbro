@@ -13,6 +13,36 @@ from pathlib import Path
 DEFAULT_VOICE = "en-IN-NeerjaNeural"  # Indian English, female; great for Hinglish
 
 
+def _play_mp3_mci(path: str) -> None:
+    """Play an MP3 in-process via Windows MCI. No external app launched.
+
+    Uses an open->play->close cycle with a unique alias so concurrent
+    speak() calls don't collide. Each MCI command is checked; any
+    non-zero return raises so the speak() caller can fall back to
+    pyttsx3 (SAPI5) instead of silently dropping audio.
+    """
+    import ctypes
+    import os
+    import threading
+
+    winmm = ctypes.windll.winmm
+    # Alias must be unique per thread + time so threaded callers don't
+    # stomp on each other's playback handles.
+    alias = f"openbro_tts_{os.getpid()}_{threading.get_ident()}"
+    # MCI prefers POSIX-style paths quoted; backslashes also work but
+    # quoting is essential for paths with spaces (Windows temp dir).
+    open_cmd = f'open "{path}" type mpegvideo alias {alias}'
+    rc = winmm.mciSendStringW(open_cmd, None, 0, 0)
+    if rc != 0:
+        raise RuntimeError(f"MCI open failed (rc={rc}) for {path}")
+    try:
+        rc = winmm.mciSendStringW(f"play {alias} wait", None, 0, 0)
+        if rc != 0:
+            raise RuntimeError(f"MCI play failed (rc={rc})")
+    finally:
+        winmm.mciSendStringW(f"close {alias}", None, 0, 0)
+
+
 class TextToSpeech:
     """Speak text aloud or save to a file. Auto-falls back to pyttsx3 offline."""
 
@@ -70,39 +100,40 @@ class TextToSpeech:
 
     @staticmethod
     def _play_audio(path: str) -> None:
-        """Play audio file using a system player. Cross-platform."""
+        """Play audio file in-process. NEVER invoke the system shell-open path.
+
+        Earlier this used `start /wait <mp3>` as a fallback which on
+        Windows opens the user's default music app (Groove / Spotify /
+        Media Player) every time the agent speaks — extremely intrusive
+        and the app stayed open. The fix: route MP3 through Windows MCI
+        (Media Control Interface, a built-in winmm API) which plays the
+        file in-process without spawning any UI app. Raises on failure
+        so the speak() caller can fall through to pyttsx3 / SAPI.
+        """
         if sys.platform == "win32":
-            # Use Windows Media Player command line
-            try:
+            # WAV: winsound is in stdlib and instant.
+            if path.lower().endswith(".wav"):
                 import winsound
 
-                # winsound only handles WAV; for MP3 use ffplay/start
-                if path.lower().endswith(".wav"):
-                    winsound.PlaySound(path, winsound.SND_FILENAME)
-                    return
-            except Exception:
-                pass
-            # Fallback: 'start' command opens default player (non-blocking)
-            ffplay = shutil.which("ffplay")
-            if ffplay:
-                subprocess.run(
-                    [ffplay, "-nodisp", "-autoexit", "-loglevel", "quiet", path],
-                    check=False,
-                )
-            else:
-                # Last resort: PowerShell SoundPlayer (WAV only) or start
-                subprocess.run(["cmd", "/c", "start", "/wait", "", path], check=False)
-        elif sys.platform == "darwin":
+                winsound.PlaySound(path, winsound.SND_FILENAME)
+                return
+            # MP3 (edge-tts output): MCI via winmm.dll. No external
+            # process, no music app, no shell-open side effects.
+            _play_mp3_mci(path)
+            return
+        if sys.platform == "darwin":
             subprocess.run(["afplay", path], check=False)
-        else:
-            for player in ("paplay", "aplay", "ffplay"):
-                p = shutil.which(player)
-                if p:
-                    args = [p, path]
-                    if player == "ffplay":
-                        args = [p, "-nodisp", "-autoexit", "-loglevel", "quiet", path]
-                    subprocess.run(args, check=False)
-                    return
+            return
+        # Linux
+        for player in ("paplay", "aplay", "ffplay"):
+            p = shutil.which(player)
+            if p:
+                args = [p, path]
+                if player == "ffplay":
+                    args = [p, "-nodisp", "-autoexit", "-loglevel", "quiet", path]
+                subprocess.run(args, check=False)
+                return
+        raise RuntimeError("No supported audio player found (paplay/aplay/ffplay missing).")
 
     def _speak_pyttsx3(self, text: str) -> None:
         try:
