@@ -85,6 +85,37 @@ def main(
     start_repl()
 
 
+# ─── `openbro ask "<query>"` — single-shot non-interactive ────────────
+# Lets you script the agent (CI, automation, verification) without
+# entering the REPL. The agent loop runs the same way; output goes
+# to stdout so the caller can capture it. Exit code 0 on success,
+# 1 on agent error.
+
+
+@main.command("ask")
+@click.argument("query", nargs=-1, required=True)
+def ask(query):
+    """Ask one question, get one answer, exit. Non-interactive.
+
+    Example: openbro ask "kitne word files mere desktop par"
+    """
+    user_input = " ".join(query)
+    from openbro.core.agent import Agent
+    from openbro.core.permissions import PermissionGate
+
+    # auto-permission mode for scripted use — no interactive prompts.
+    # If the user wants strict gating they can use the REPL or set
+    # safety.permission_mode in config to 'boss'.
+    gate = PermissionGate(mode="auto", channel="silent")
+    agent = Agent(interactive=False, permission_gate=gate)
+    try:
+        response = agent.chat(user_input)
+        click.echo(response)
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1) from e
+
+
 # ─── `openbro model …` subcommands ────────────────────────────────────
 
 

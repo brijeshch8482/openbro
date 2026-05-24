@@ -122,11 +122,19 @@ class Agent:
                 )
             except Exception as e:
                 error_msg = str(e)
+                # Strict matching — earlier 'rate' substring match was too
+                # loose ('generate', 'iterate', 'reasoning' all matched and
+                # the user got 'Rate limit hit' for unrelated errors).
+                # Require the actual HTTP signal or an explicit rate-limit
+                # phrase.
                 if "401" in error_msg or "Unauthorized" in error_msg:
                     return "API key galat ya expired hai bhai. 'config set' se update kar."
-                if "429" in error_msg or "rate" in error_msg.lower():
+                low = error_msg.lower()
+                if "429" in error_msg or "rate limit" in low or "rate_limit" in low:
                     return "Rate limit hit ho gaya bro. Thoda ruk ke try kar."
-                return f"Error: {e}"
+                # Surface the full error — earlier we hid it behind a
+                # generic 'Error: ...' which made debugging impossible.
+                return f"Error ({type(e).__name__}): {e}"
 
             if not response.tool_calls:
                 # Final answer — model decided no more tools needed.

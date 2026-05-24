@@ -56,18 +56,70 @@ def _sanitize_tool_call(name: str, arguments: str | dict) -> tuple[str, dict]:
     return name, args
 
 
+_DEFAULT_FALLBACK_CHAIN = [
+    # Order is failover priority: try primary first, then these on 429 /
+    # 503. All currently active on Groq free tier (May 2026). 3.1-70b is
+    # decommissioned and omitted; 3.3-70b has tool-call quirks the
+    # sanitizer recovers.
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+    "llama-3.3-70b-versatile",
+    "openai/gpt-oss-20b",
+    "llama-3.1-8b-instant",
+]
+
+
 class GroqProvider(LLMProvider):
-    def __init__(self, api_key: str, model: str = "meta-llama/llama-4-scout-17b-16e-instruct"):
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "meta-llama/llama-4-scout-17b-16e-instruct",
+        fallback_models: list[str] | None = None,
+    ):
         self.api_key = api_key
         self.model = model
+        # Build chain: configured model first, then any unique defaults.
+        # This way 'rate limit on primary' silently rolls over to a
+        # different family — gpt-oss-20b free tier is tighter than
+        # llama-3.3-70b, but both work, so failover keeps the user
+        # unblocked instead of the cryptic 'Rate limit hit ho gaya'.
+        chain = [model]
+        for m in fallback_models or _DEFAULT_FALLBACK_CHAIN:
+            if m not in chain:
+                chain.append(m)
+        self._chain = chain
 
     def chat(self, messages: list[Message], tools: list[dict] | None = None) -> LLMResponse:
+        last_error: Exception | None = None
+        for attempt_model in self._chain:
+            try:
+                return self._chat_with_model(attempt_model, messages, tools)
+            except RuntimeError as e:
+                msg = str(e)
+                # Only fail over on rate-limit-style errors. Validation
+                # errors, auth errors, etc. mean the request itself is
+                # broken — retrying with another model would just spam.
+                if "429" not in msg and "rate_limit" not in msg.lower():
+                    raise
+                last_error = e
+                continue
+        # All models in the chain hit rate limit. Surface the last error
+        # so the agent can show 'Rate limit hit' to the user.
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("Groq: no models in fallback chain")
+
+    def _chat_with_model(
+        self,
+        model: str,
+        messages: list[Message],
+        tools: list[dict] | None,
+    ) -> LLMResponse:
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
         payload = {
-            "model": self.model,
+            "model": model,
             "messages": [{"role": m.role, "content": m.content} for m in messages],
         }
         if tools:
@@ -140,7 +192,9 @@ class GroqProvider(LLMProvider):
                 "input": data.get("usage", {}).get("prompt_tokens", 0),
                 "output": data.get("usage", {}).get("completion_tokens", 0),
             },
-            model=self.model,
+            # Echo the model Groq actually served (may differ from
+            # self.model if the fallback chain rolled over after a 429).
+            model=data.get("model") or self.model,
         )
 
     def supports_tools(self) -> bool:
