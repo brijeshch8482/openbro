@@ -195,6 +195,59 @@ Step 2: Choose your LLM
 
 Pick **Local (offline)** and the wizard installs `llama-cpp-python` (~150 MB wheel), downloads `Llama 3.2 3B` (2 GB) from HuggingFace, and you're ready — fully offline forever after that one-time download.
 
+## ⚡ Quick Cheatsheet
+
+Sab kuch ek jagah — common things you'll do all the time. Detailed reference is below.
+
+### Inside the chat (REPL)
+
+```text
+You > help                                  # show all commands
+You > tools                                 # list tools + risk levels
+You > model switch llama-3.3-70b-versatile  # change LLM (instant, this session)
+You > model switch groq                     # switch provider (alias)
+You > voice on  / voice off                 # toggle mic + TTS
+You > boss on   / boss off                  # require permission for every tool
+You > remember birthday is 8 Aug            # save a fact
+You > forget birthday                       # delete it
+You > show / hide                           # live activity panel
+You > clear                                 # clear screen (history kept)
+You > reset                                 # wipe conversation history
+You > exit  / quit                          # leave REPL
+```
+
+### Outside the chat (shell)
+
+```bash
+openbro                                                # launch the REPL
+openbro ask "kitne word files mere desktop par hain?"  # one-shot question, no REPL
+openbro --voice                                        # voice-only mode (mic + TTS)
+openbro --offline                                      # force local llama.cpp
+openbro --setup                                        # re-run the 7-step wizard
+openbro config set llm.provider anthropic              # persist a config change
+openbro config set providers.groq.model llama-3.3-70b-versatile
+openbro config set providers.anthropic.api_key sk-ant-...
+openbro model list                                     # see installed + available models
+openbro model download llama3.1:8b                     # pull a local GGUF
+```
+
+### Voice activation
+
+- Default wake words: **"hey openbro"**, **"ok openbro"**, **"hi openbro"**, **"hey bro"**, **"ok bro"**.
+- Whisper-mishearing variants ("hebron", "open bro", "ai bro") are also wired up — speak naturally.
+- When you see `🎤 heard (no wake word — ignored): ...` it means the mic captured your speech but no wake word matched. Just say "hey openbro <command>" to act.
+
+### Common fixes
+
+| Symptom | Quick fix |
+|---|---|
+| `⏱️ Rate limit hit ho gaya` | `model switch llama-3.3-70b-versatile` (looser cap) — or wait 30-60 s |
+| `❌ API key invalid` | `openbro config set providers.groq.api_key gsk_YOUR_KEY` |
+| `🌐 LLM se connect nahi ho pa raha` | Check internet — or `openbro --offline` for local model |
+| Browser opens on every "weather"-type query | Already fixed (Rule 10) — `openbro` update karo if pre-`a09a4a4` |
+| File created but you can't find it | OneDrive Desktop redirect — agent now uses the path Explorer shows. Update to ≥ `eb36312`. |
+| Voice doesn't reply | Wake word missed — say "hey openbro" first; check `🎤 heard:` lines for what mic captured |
+
 ## CLI Commands
 
 | Command | Description |
