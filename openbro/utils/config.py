@@ -270,6 +270,12 @@ def default_config() -> dict:
                 "- Single fact: one short sentence, no formatting"
             ),
             "max_history": 50,
+            # Playbooks = pre-built workflows that handle common intents
+            # without an LLM call (close_app, geo_lookup, system_health,
+            # file_search, etc.). Zero tokens, instant, deterministic. Set
+            # to False to force the LLM loop for every query (useful when
+            # debugging a regressed playbook).
+            "playbooks_enabled": True,
         },
         "storage": {
             "base_dir": str(Path.home() / ".openbro"),

@@ -237,12 +237,23 @@ class _ToolCallRenderer:
                 in_t = ev.meta.get("input_tokens", 0)
                 out_t = ev.meta.get("output_tokens", 0)
                 elapsed = ev.meta.get("elapsed", 0)
-                self.con.print(
-                    f"[dim]  ↳ step {step} done · "
-                    f"[cyan]{in_t}↓[/cyan] [magenta]{out_t}↑[/magenta] tokens · "
-                    f"{elapsed:.1f}s[/dim]",
-                    highlight=False,
-                )
+                playbook = ev.meta.get("playbook")
+                if playbook and in_t == 0 and out_t == 0:
+                    # Playbook fast-path — 0 LLM tokens. Surface it as a
+                    # distinct line so the user sees WHY this turn was
+                    # instant + free.
+                    self.con.print(
+                        f"[dim]  ↳ [green]playbook[/green] [bold]{playbook}[/bold] "
+                        f"· [green]0 tokens[/green] · {elapsed:.1f}s[/dim]",
+                        highlight=False,
+                    )
+                else:
+                    self.con.print(
+                        f"[dim]  ↳ step {step} done · "
+                        f"[cyan]{in_t}↓[/cyan] [magenta]{out_t}↑[/magenta] tokens · "
+                        f"{elapsed:.1f}s[/dim]",
+                        highlight=False,
+                    )
             elif ev.kind == "tool_start":
                 name = ev.meta.get("tool", "?")
                 risk = ev.meta.get("risk", "safe")
@@ -311,6 +322,7 @@ COMMANDS = [
     "models",
     "pull",
     "tools",
+    "playbooks",
     "storage",
     "audit",
     "memory",
@@ -590,6 +602,10 @@ def _handle_command(cmd: str, agent: Agent) -> bool:
         _show_tools(agent)
         return True
 
+    if cmd_lower in ("playbooks", "playbook"):
+        _show_playbooks(agent)
+        return True
+
     if cmd_lower == "storage":
         _show_storage()
         return True
@@ -773,6 +789,7 @@ def _show_help():
     table.add_row("model", "Show current LLM model")
     table.add_row("model <name>", "Switch model (e.g. model gpt-4o)")
     table.add_row("tools", "List available tools")
+    table.add_row("playbooks", "List pre-built workflows (0 LLM tokens when matched)")
     table.add_row("models", "List downloaded offline models")
     table.add_row("pull", "Download a new offline model (interactive)")
     table.add_row("pull <model>", "Download specific model (e.g. pull llama3.2:3b)")
@@ -900,6 +917,44 @@ def _show_tools(agent: Agent):
         "\n[dim]Risk: safe = read-only, "
         "moderate = modifies files/opens apps, "
         "dangerous = system-level changes[/dim]\n"
+    )
+
+
+def _show_playbooks(agent: Agent):
+    """List every registered playbook + its trigger count.
+
+    Playbooks are pre-built workflows that handle common intents without
+    an LLM call. Match -> direct tool sequence -> templated response.
+    """
+    table = Table(title="Playbooks (LLM-free fast path)", border_style="green")
+    table.add_column("Name", style="bold")
+    table.add_column("Triggers", justify="right")
+    table.add_column("Keywords", justify="right")
+    table.add_column("Description")
+
+    pbs = agent.playbook_registry.list_all()
+    if not pbs:
+        console.print("[dim]No playbooks loaded.[/dim]\n")
+        return
+
+    for pb in pbs:
+        info = pb.info()
+        table.add_row(
+            info["name"],
+            str(info["triggers"]),
+            str(info["keywords"]),
+            info["description"],
+        )
+    console.print(table)
+    enabled = getattr(agent, "playbooks_enabled", True)
+    status = (
+        "[green]enabled[/green]"
+        if enabled
+        else "[yellow]disabled (config: agent.playbooks_enabled)[/yellow]"
+    )
+    console.print(
+        f"\n[dim]Status: {status} · matches use 0 LLM tokens, return "
+        "instantly with a templated response.[/dim]\n"
     )
 
 

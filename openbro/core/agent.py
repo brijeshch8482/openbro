@@ -10,6 +10,7 @@ from openbro.core.permissions import PermissionGate, PermissionRequest
 from openbro.llm.base import LLMResponse, Message
 from openbro.llm.router import create_provider
 from openbro.memory import MemoryManager
+from openbro.playbooks import PlaybookContext, PlaybookRegistry
 from openbro.tools.memory_tool import MemoryTool
 from openbro.tools.registry import ToolRegistry
 from openbro.utils.config import load_config
@@ -98,6 +99,15 @@ class Agent:
         mem_tool = self.tool_registry.get_tool("memory")
         if isinstance(mem_tool, MemoryTool):
             mem_tool._manager = self.memory
+
+        # Playbooks — pre-built workflows that bypass the LLM for common
+        # intents (geo lookup, close app, file search, etc.). Match on
+        # intent BEFORE the LLM loop and short-circuit if confident.
+        # Falls through to the LLM cleanly when no playbook matches.
+        self.playbook_registry = PlaybookRegistry()
+        # Allow users to disable the fast-path via config without yanking
+        # the import (useful when a playbook regresses).
+        self.playbooks_enabled = bool(config.get("agent", {}).get("playbooks_enabled", True))
 
         # Permission gate
         if permission_gate is not None:
@@ -208,6 +218,16 @@ class Agent:
         # without the agent having to thread them through every emit.
         self._turn_tokens_in = 0
         self._turn_tokens_out = 0
+
+        # ─── Playbook fast path ──────────────────────────────────────
+        # Try matching the query to a pre-built playbook. If we get a
+        # confident match, execute it and skip the LLM loop entirely.
+        # Zero tokens, instant response, no hallucination risk.
+        if self.playbooks_enabled:
+            pb_response = self._try_playbook(user_input, turn_started)
+            if pb_response is not None:
+                return pb_response
+
         self.bus.emit("thinking", "agent thinking…")
 
         # ─── Agent loop (was single-shot, which forced LLM to hallucinate
@@ -309,6 +329,96 @@ class Agent:
         self.history.append(Message(role="assistant", content=full_response))
         self.memory.add("assistant", full_response)
         self.bus.emit("assistant", full_response)
+
+    def _try_playbook(self, user_input: str, turn_started: float) -> str | None:
+        """Run a matching playbook if confidence is high enough.
+
+        Returns the response string when a playbook handled the query,
+        or None when the agent should fall through to the LLM loop.
+        Emits the same llm_start/llm_end/tool_start/tool_end events the
+        UI already listens for so the live status bar shows progress —
+        the only difference is `input_tokens=0, output_tokens=0` on the
+        llm_end event so the status bar can show '0 tokens · playbook'.
+        """
+        import time as _time
+
+        match = self.playbook_registry.match(user_input)
+        if match is None:
+            return None
+
+        playbook = match.playbook
+        # Surface the dispatch on the bus so the UI shows '⏵ playbook NAME'.
+        # Reuse the llm_start/end shape because the live status bar already
+        # listens for it — saves us a dedicated event type.
+        self.bus.emit(
+            "llm_start",
+            f"playbook: {playbook.name}",
+            step=1,
+            max_steps=1,
+            playbook=playbook.name,
+            playbook_confidence=match.confidence,
+        )
+        pb_t0 = _time.monotonic()
+
+        ctx = PlaybookContext(
+            user_input=user_input,
+            tool_registry=self.tool_registry,
+            captures=match.captures,
+            language=self.last_language,
+        )
+        try:
+            response = playbook.execute(ctx)
+        except Exception as e:
+            self.bus.emit(
+                "playbook_error",
+                f"playbook {playbook.name} failed: {e}",
+                playbook=playbook.name,
+            )
+            # Don't crash the turn — fall through to LLM so the user still
+            # gets an answer. This preserves the 'playbooks are fast path,
+            # not authoritative' guarantee.
+            return None
+
+        # Empty response from a playbook = 'I matched but decided not to
+        # handle this one' (open_app does this for file-open shapes).
+        # Treat as no-match and let the LLM take over.
+        if not response or not response.strip():
+            self.bus.emit(
+                "playbook_end",
+                f"playbook {playbook.name} declined",
+                playbook=playbook.name,
+            )
+            return None
+
+        elapsed = _time.monotonic() - pb_t0
+        self.bus.emit(
+            "llm_end",
+            f"playbook {playbook.name} · {elapsed:.1f}s · 0 LLM tokens",
+            step=1,
+            input_tokens=0,
+            output_tokens=0,
+            turn_tokens_in=0,
+            turn_tokens_out=0,
+            session_tokens_in=self.session_tokens_in,
+            session_tokens_out=self.session_tokens_out,
+            elapsed=elapsed,
+            playbook=playbook.name,
+        )
+
+        # Persist as a normal assistant turn so chat history stays consistent
+        # — the LLM will see this on its next turn and won't be surprised.
+        self.history.append(Message(role="assistant", content=response))
+        self.memory.add("assistant", response)
+        self.bus.emit(
+            "assistant",
+            response,
+            turn_elapsed=_time.monotonic() - turn_started,
+            turn_tokens_in=0,
+            turn_tokens_out=0,
+            steps=1,
+            playbook=playbook.name,
+        )
+        return response
 
     def _execute_tool_batch(self, response: LLMResponse) -> None:
         """Run every tool call in `response`, append results to history.

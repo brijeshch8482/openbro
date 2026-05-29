@@ -231,6 +231,22 @@ openbro model list                                     # see installed + availab
 openbro model download llama3.1:8b                     # pull a local GGUF
 ```
 
+### Playbooks — instant, LLM-free answers for common queries
+
+Some queries don't need an LLM. OpenBro ships with **pre-built playbooks** that match the intent, run the right tools directly, and template the response — **zero tokens, instant**. Examples:
+
+| Query | Playbook | LLM calls |
+|---|---|---|
+| `mai kaha hu` / `where am I` | `geo_lookup` | 0 |
+| `kya time hua` / `what's the time` | `time_now` | 0 |
+| `D drive ka health check` / `disk space` | `system_health` | 0 |
+| `is chrome running` / `kya claude chal raha` | `process_check` | 0 |
+| `close my browser` / `chrome band kar` | `close_app` | 0 |
+| `open vscode` / `spotify kholo` | `open_app` | 0 |
+| `kitne pdfs hain Desktop me` / `find fee documents on D drive` | `file_search` | 0 |
+
+Type `playbooks` inside the REPL to see the full list. When a query doesn't match any playbook, the regular LLM + tools loop runs as before. Disable the fast path with `openbro config set agent.playbooks_enabled false`.
+
 ### Voice activation
 
 - Default mode is **continuous** — say `voice on` once, then every utterance is a command. No wake word needed. Mic auto-pauses while OpenBro is replying so it doesn't hear itself.
