@@ -284,10 +284,7 @@ class _ToolCallRenderer:
                 tl = ev.meta.get("tasklist")
                 if tl is not None:
                     step_count = len(tl.all())
-                    title = (
-                        f"[bold green]◆ Plan[/bold green] "
-                        f"[dim]· {step_count} steps[/dim]"
-                    )
+                    title = f"[bold green]◆ Plan[/bold green] [dim]· {step_count} steps[/dim]"
                     self.con.print(
                         Panel(
                             tl.render_markdown(),
