@@ -409,21 +409,25 @@ def _render_response(con: Console, text: str) -> None:
 
 
 def print_banner():
-    # Claude-Code-style minimal banner — no box around it. The status bar
-    # at the bottom of every prompt already carries the persistent info
-    # (model, voice, mode, shortcuts), so the banner can stay quiet. Just
-    # name + tagline + cwd, like Claude Code's '✻ Welcome to Claude Code!'.
+    # Minimal, professional banner — Claude-Code-style. No bold caps, no
+    # ASCII glyphs at headline size. One muted intro line + cwd + hint,
+    # all in `dim` so the eye lands on the user's input first. Status
+    # bar at the bottom carries the persistent details (model, voice,
+    # tokens, shortcuts).
     import os as _os
 
     cwd = _os.getcwd()
     if len(cwd) > 60:
         cwd = "…" + cwd[-58:]
     console.print()
-    console.print(f"[bold cyan]◆[/bold cyan]  [bold]OpenBro[/bold] [dim]v{__version__}[/dim]")
-    console.print("   [dim]Terminal-first AI bro — voice, files, web, full machine access.[/dim]")
-    console.print(f"   [dim]cwd: {cwd}[/dim]")
+    # Subtle one-line header — small, soft, no shouty colors.
+    console.print(
+        f"  [grey50]◆[/grey50] [white]openbro[/white] "
+        f"[grey42]v{__version__}[/grey42]  "
+        f"[grey42]·[/grey42]  [grey42]{cwd}[/grey42]"
+    )
+    console.print("  [grey42]Type your question, or `/help` for commands. `exit` to quit.[/grey42]")
     console.print()
-    console.print("   [dim]Type a question or `/help` for commands. `exit` to quit.[/dim]")
 
 
 def _make_status_bar(agent, get_voice_state):
@@ -470,7 +474,7 @@ def _make_status_bar(agent, get_voice_state):
         from html import escape as _esc
 
         return HTML(
-            f" <ansicyan>◆</ansicyan> <ansigray>{_esc(provider)}/{_esc(short_model)}</ansigray>"
+            f" <ansigray>◆</ansigray> <ansigray>{_esc(provider)}/{_esc(short_model)}</ansigray>"
             f"  <ansigray>·</ansigray>  <ansigray>voice {voice_state}</ansigray>"
             f"  <ansigray>·</ansigray>  <ansigray>{boss_state}</ansigray>"
             f"  <ansigray>·</ansigray>  <ansigray>"
@@ -557,7 +561,9 @@ def start_repl(resume_session: str | None = None):
 
                 console.print()
                 console.rule(style="grey23")
-                user_input = session.prompt(ANSI("\x1b[36m›\x1b[0m ")).strip()
+                # Dim grey prompt glyph — Claude-style. Loud cyan was
+                # competing with the user's typed text for attention.
+                user_input = session.prompt(ANSI("\x1b[38;5;245m›\x1b[0m ")).strip()
 
                 if not user_input:
                     continue
@@ -596,17 +602,17 @@ def start_repl(resume_session: str | None = None):
                         # ⏺ (filled circle) for the assistant marker — Claude
                         # Code's same glyph. Cleaner than ◆ when output is
                         # immediately followed by code or markdown.
-                        console.print("\n[bold cyan]⏺[/bold cyan] ", end="")
+                        console.print("\n[grey50]⏺[/grey50] ", end="")
                         _render_response(console, response)
                     else:
-                        console.print("\n[bold cyan]⏺[/bold cyan] ", end="")
+                        console.print("\n[grey50]⏺[/grey50] ", end="")
                         for token in agent.stream_chat(user_input):
                             console.print(token, end="", highlight=False)
                             response += token
                 except Exception:
                     with _LiveStatus(agent, console):
                         response = agent.chat(user_input)
-                    console.print("\n[bold cyan]⏺[/bold cyan] ", end="")
+                    console.print("\n[grey50]⏺[/grey50] ", end="")
                     _render_response(console, response)
                 # Turn footer — Claude Code-style "what just happened" line.
                 # in/out token delta + wall-clock for this single turn so
