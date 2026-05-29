@@ -58,6 +58,57 @@ DEFAULT_STOP_PHRASES = [
     "good night openbro",
 ]
 
+# Whisper-family STT hallucinations on silence / ambient noise. These are
+# known training-data artifacts (YouTube transcripts dominate). When the
+# user is quiet, Whisper confidently emits one of these every few seconds.
+# Filtering them at the listener level prevents the agent from being
+# triggered by phantom commands. Exact-match check after stripping
+# punctuation/whitespace and lowercasing, so legitimate "thank you bhai
+# kar do" type commands still pass through.
+WHISPER_HALLUCINATIONS = {
+    "thank you",
+    "thanks",
+    "thank you for watching",
+    "thank you so much",
+    "thank you so much for watching",
+    "thanks for watching",
+    "please subscribe",
+    "subscribe",
+    "like and subscribe",
+    "bye",
+    "bye bye",
+    "music",
+    "applause",
+    "laughter",
+    "silence",
+    ".",
+    "..",
+    "...",
+    "you",
+    "yeah",
+    "okay",
+    "ok",
+    "hmm",
+    "mm",
+    "uh",
+    "uh huh",
+    "i'm gonna call you",  # captured 2026-05
+    "i'm going to do it",  # captured 2026-05
+    "i'll see you",  # captured 2026-05
+}
+
+
+def _is_whisper_hallucination(text: str) -> bool:
+    """True if the transcript is a known STT phantom on silence."""
+    if not text:
+        return True
+    cleaned = text.strip().lower().strip(".,!?\"'")
+    # Pure punctuation/whitespace (e.g. '...' / '.') is also a Whisper
+    # phantom — nothing was actually said.
+    if not cleaned:
+        return True
+    return cleaned in WHISPER_HALLUCINATIONS
+
 
 class VoiceListener:
     """Continuous voice loop.
@@ -184,6 +235,14 @@ class VoiceListener:
 
                 text = self.listen_once()
                 if not text:
+                    continue
+
+                # Silence -> 'Thank you' / 'Bye' / 'Music' is a Whisper
+                # training-data artifact (YouTube transcripts). These fire
+                # every few seconds when the room is quiet and would dispatch
+                # phantom commands to the agent. Drop them before they ever
+                # reach the handler.
+                if _is_whisper_hallucination(text):
                     continue
 
                 # Continuous mode acts on every utterance; wake_word mode

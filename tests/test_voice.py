@@ -117,6 +117,43 @@ def test_listener_speak_with_mic_paused_preserves_existing_pause():
     assert listener._paused is True
 
 
+def test_whisper_hallucination_filter_blocks_known_phantoms():
+    """Faster-whisper emits 'Thank you' / 'Bye' / 'Music' on silence
+    (YouTube training-data leak). These should be dropped before the
+    agent ever sees them as a command."""
+    from openbro.voice.listener import _is_whisper_hallucination
+
+    for phantom in [
+        "Thank you.",
+        "thank you for watching",
+        "Bye",
+        "BYE BYE",
+        "Music",
+        "Applause",
+        "subscribe",
+        "I'll see you",
+        "okay",
+        "...",
+        "",
+    ]:
+        assert _is_whisper_hallucination(phantom), f"{phantom!r} should be filtered"
+
+
+def test_whisper_hallucination_filter_lets_real_commands_through():
+    """Don't false-positive on legitimate Hinglish commands that happen
+    to contain trigger words ('thank you bhai, kar do')."""
+    from openbro.voice.listener import _is_whisper_hallucination
+
+    for cmd in [
+        "mai kaha hu",
+        "D drive me sab pdfs dhoondh",
+        "Thank you bhai kar do",  # legit use of 'thank you' as ack + command
+        "kya time hua",
+        "open chrome bro",
+    ]:
+        assert not _is_whisper_hallucination(cmd), f"{cmd!r} should pass through"
+
+
 def test_tts_speak_falls_back_on_edge_failure():
     tts = TextToSpeech()
     with patch.object(tts, "_speak_edge", side_effect=RuntimeError("no edge")):

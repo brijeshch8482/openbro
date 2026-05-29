@@ -56,6 +56,61 @@ def _sanitize_tool_call(name: str, arguments: str | dict) -> tuple[str, dict]:
     return name, args
 
 
+_FUNCTION_TAG_RE = re.compile(
+    r"<function\s*=\s*(?P<name>[a-zA-Z_][a-zA-Z0-9_]*)\s*>\s*"
+    r"(?P<args>\{.*?\})\s*</function\s*>?",
+    re.DOTALL,
+)
+_FUNCTION_TAG_BARE_RE = re.compile(
+    # Variant without closing </function>, sometimes followed by EOF or newline.
+    # Llama-4 captured: <function=network>{"action": "ip"}
+    r"<function\s*=\s*(?P<name>[a-zA-Z_][a-zA-Z0-9_]*)\s*>\s*(?P<args>\{[^<]*\})",
+    re.DOTALL,
+)
+
+
+def _extract_function_tag_calls(content: str) -> list[dict]:
+    """Recover tool calls emitted in the <function=NAME>{args}</function> shape.
+
+    Llama-4-Scout and Llama-3.3-70b on Groq occasionally serialize tool calls
+    as XML-style tags inside chat content instead of using the structured
+    tool_calls slot. Real captured failure (2026-05-29):
+
+        Ek minute, bro! Mai IP address find karta hoon.
+        <function=network>{"action": "ip"}
+
+    Without rescue, the agent treats the whole thing as the final answer,
+    no tool runs, the user sees the literal tag. Returns shaped tool_calls
+    (matching _extract_inline_tool_calls's output).
+    """
+    if not content or "<function" not in content:
+        return []
+    out: list[dict] = []
+    seen_spans: list[tuple[int, int]] = []
+    # Try the closed form first (cleaner), fall back to the bare form.
+    for regex in (_FUNCTION_TAG_RE, _FUNCTION_TAG_BARE_RE):
+        for m in regex.finditer(content):
+            span = m.span()
+            if any(s[0] <= span[0] < s[1] for s in seen_spans):
+                continue
+            seen_spans.append(span)
+            name = m.group("name")
+            raw_args = m.group("args").strip()
+            try:
+                args = json.loads(raw_args)
+            except (TypeError, ValueError):
+                args = {}
+            if not isinstance(args, dict):
+                args = {}
+            out.append(
+                {
+                    "id": f"inline_fn_{len(out)}",
+                    "function": {"name": name, "arguments": args},
+                }
+            )
+    return out
+
+
 def _extract_inline_tool_calls(content: str) -> list[dict]:
     """Recover tool calls that the model dumped as JSON in content.
 
@@ -66,6 +121,8 @@ def _extract_inline_tool_calls(content: str) -> list[dict]:
         [ { "name": "file_ops", "parameters": {"action": "open", ...} } ]
         { "name": "word", "arguments": {"action": "read", "file": "..."} }
         ```json\n[ ... ]\n```
+        <function=network>{"action": "ip"}      (Llama 4 variant — handled
+                                                  by _extract_function_tag_calls)
 
     The agent treats this as plain text, so the call never runs and the
     user sees raw JSON as the reply. Strip code fences, parse, normalize
@@ -75,6 +132,11 @@ def _extract_inline_tool_calls(content: str) -> list[dict]:
     """
     if not content or not content.strip():
         return []
+    # XML-style <function=…> tag first — distinct enough that the
+    # generic JSON-span scanner can't reliably catch it.
+    tag_calls = _extract_function_tag_calls(content)
+    if tag_calls:
+        return tag_calls
     text = content.strip()
     # Strip ```json ... ``` or ``` ... ``` wrappers.
     if text.startswith("```"):

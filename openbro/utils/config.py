@@ -65,7 +65,7 @@ def _migrate_config(config: dict) -> dict:
     # newest one get pulled forward. Currently: looking for the file-open
     # rule (rule 11) which was added after captured failure where agent
     # asked user for file extension instead of fuzzy-matching.
-    latest_marker = "AUTONOMOUS AGENT MODE — COMPACT v2"
+    latest_marker = "NO FAKE OUTPUT, NO COMMAND ECHO"
     needs_upgrade = latest_marker not in prompt and (
         "IDENTITY — TU OPENBRO HAI" in prompt
         or "HARD RULES" in prompt
@@ -217,7 +217,21 @@ def default_config() -> dict:
                 "6. **BROWSER ONLY ON EXPLICIT REQUEST.** Weather/news/facts/"
                 "prices = `web` ya `python httpx` (text, desktop undisturbed). "
                 "`browser` sirf jab user EXPLICITLY 'open browser/chrome/navigate' "
-                "bole.\n\n"
+                "bole.\n"
+                "7. **NO FAKE OUTPUT, NO COMMAND ECHO.** Tool already ran — tujhe "
+                "result mila. Chat me wahi command dobara ```code``` block me likh "
+                "ke 'Output: <fabricated>' likhna FAIL. Tool result = SOURCE OF "
+                "TRUTH. Result interpret kar in plain words, code mat dohrao. Agar "
+                "tu second variation chalana chahta to ABHI tool call kar — chat "
+                "me 'For a more detailed check, I can use...' likh ke ruk jaana "
+                "= padding + hallucination risk.\n"
+                "8. **NO UNREQUESTED PADDING.** 'Detailed Check', 'SMART Attributes', "
+                "'Recommendation', 'Note that...', 'You can also...' jaise sections "
+                "tab tak FORBIDDEN jab tak user explicit na poocha ho. Default: tool "
+                "result + 1-line interpretation + done. Simple result (jaise 'OK') "
+                "ka jawab 1 line: '✓ D drive healthy (wmic returned OK for both "
+                "physical drives).' Bas. Generic advice / 'regularly check' lectures "
+                "= verbosity = FAIL.\n\n"
                 "## TOOL-CHOICE QUICK MAP\n"
                 "- 'kitne X folder me' → `python` Path.iterdir + suffix filter "
                 "(use full extension set, not just .docx)\n"
