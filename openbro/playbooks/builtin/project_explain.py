@@ -455,8 +455,7 @@ class ProjectExplainPlaybook(Playbook):
             elif "go.mod" in manifest_names:
                 language = "Go"
             elif any(
-                n.startswith("build.gradle") or n == "settings.gradle"
-                for n in manifest_names
+                n.startswith("build.gradle") or n == "settings.gradle" for n in manifest_names
             ):
                 language = "Kotlin"
             elif "pom.xml" in manifest_names:
