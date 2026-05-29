@@ -1,18 +1,159 @@
 """Interactive terminal REPL for OpenBro."""
 
+import json as _json
+
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.history import FileHistory
 from rich.console import Console
+from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
 
 from openbro import __version__
 from openbro.cli.wizard import needs_setup, run_wizard
+from openbro.core.activity import get_bus
 from openbro.core.agent import Agent
 from openbro.utils.config import get_config_dir, load_config, save_config
 
 console = Console()
+
+
+_RISK_COLORS = {"safe": "green", "moderate": "yellow", "dangerous": "red"}
+
+
+def _format_args(name: str, args: dict) -> tuple[str, str]:
+    """Pick a syntax-highlight lexer and pretty-print args for display.
+
+    `python` / `shell` get their actual code rendered as syntax-highlighted
+    blocks (Claude Code parity — you see the bash command before it runs).
+    Other tools get compact JSON. Returns (lexer, text).
+    """
+    if not isinstance(args, dict):
+        return ("text", str(args))
+    # Surface the actual code/command verbatim for the tools where it
+    # matters most. Strip the line wrapping a JSON dump would impose.
+    if name == "python" and "code" in args:
+        return ("python", str(args["code"]))
+    if name == "shell" and "command" in args:
+        return ("powershell", str(args["command"]))
+    if name == "file_ops" and args.get("action") == "write" and "content" in args:
+        # Show write payload as text rather than embedded in JSON
+        header = (
+            f"# file_ops write: {args.get('path', '')}\n# {len(args.get('content', ''))} chars\n"
+        )
+        return ("text", header + str(args["content"])[:1500])
+    try:
+        return ("json", _json.dumps(args, indent=2, ensure_ascii=False)[:1500])
+    except (TypeError, ValueError):
+        return ("text", str(args)[:1500])
+
+
+class _ToolCallRenderer:
+    """Subscribe to ActivityBus events and render Claude-Code-style panels.
+
+    Bus events drive the UI: `llm_start`/`llm_end` produce a thin status
+    line with step + tokens + elapsed; `tool_start`/`tool_end` render a
+    bordered panel with the tool name, formatted args (syntax-highlighted
+    for python/shell), and a result preview.
+    """
+
+    def __init__(self, con: Console):
+        self.con = con
+        self._unsub = None
+        self._open_step = 0
+
+    def attach(self) -> None:
+        self._unsub = get_bus().subscribe(self._on_event)
+
+    def detach(self) -> None:
+        if self._unsub:
+            try:
+                self._unsub()
+            except Exception:
+                pass
+            self._unsub = None
+
+    def _on_event(self, ev) -> None:
+        try:
+            if ev.kind == "llm_start":
+                step = ev.meta.get("step", 0)
+                max_steps = ev.meta.get("max_steps", 0)
+                # Subtle: just a thin "step N/M thinking..." marker. The
+                # actual spinner comes from console.status in the REPL.
+                self.con.print(
+                    f"[dim]  ↳ step {step}/{max_steps} · thinking...[/dim]",
+                    highlight=False,
+                )
+            elif ev.kind == "llm_end":
+                step = ev.meta.get("step", 0)
+                in_t = ev.meta.get("input_tokens", 0)
+                out_t = ev.meta.get("output_tokens", 0)
+                elapsed = ev.meta.get("elapsed", 0)
+                self.con.print(
+                    f"[dim]  ↳ step {step} done · "
+                    f"[cyan]{in_t}↓[/cyan] [magenta]{out_t}↑[/magenta] tokens · "
+                    f"{elapsed:.1f}s[/dim]",
+                    highlight=False,
+                )
+            elif ev.kind == "tool_start":
+                name = ev.meta.get("tool", "?")
+                risk = ev.meta.get("risk", "safe")
+                args = ev.meta.get("args", {})
+                color = _RISK_COLORS.get(risk, "white")
+                lexer, body = _format_args(name, args)
+                if lexer == "json":
+                    rendered = Syntax(
+                        body, "json", theme="monokai", line_numbers=False, word_wrap=True
+                    )
+                elif lexer in ("python", "powershell"):
+                    rendered = Syntax(
+                        body, lexer, theme="monokai", line_numbers=False, word_wrap=True
+                    )
+                else:
+                    rendered = body
+                title = f"[bold {color}]⏵ {name}[/bold {color}] [dim]· {risk}[/dim]"
+                self.con.print(
+                    Panel(
+                        rendered,
+                        title=title,
+                        title_align="left",
+                        border_style=color,
+                        padding=(0, 1),
+                    )
+                )
+            elif ev.kind == "tool_end":
+                name = ev.meta.get("tool", "?")
+                ok = ev.meta.get("ok", True)
+                preview = ev.meta.get("preview", "") or ""
+                full_length = ev.meta.get("full_length", len(preview))
+                elapsed = ev.meta.get("elapsed", 0)
+                # Trim very long results — the LLM gets the full thing,
+                # the user just needs a confirmation glance.
+                preview_short = preview
+                if len(preview_short) > 600:
+                    preview_short = preview_short[:600] + f"\n… (+{full_length - 600} chars)"
+                marker = "[green]✓[/green]" if ok else "[red]✗[/red]"
+                if preview_short.strip():
+                    self.con.print(
+                        Panel(
+                            preview_short,
+                            title=f"{marker} [dim]{name} result · {elapsed:.1f}s[/dim]",
+                            title_align="left",
+                            border_style="grey42",
+                            padding=(0, 1),
+                        ),
+                        highlight=False,
+                    )
+                else:
+                    self.con.print(
+                        f"  {marker} [dim]{name} done · {elapsed:.1f}s · (no output)[/dim]",
+                        highlight=False,
+                    )
+        except Exception:
+            # Never let UI rendering crash the agent loop.
+            pass
+
 
 COMMANDS = [
     "help",
@@ -84,9 +225,9 @@ def _make_status_bar(agent, get_voice_state):
     """Build a prompt_toolkit bottom_toolbar callable.
 
     Claude Code parity: a thin status line always visible under the prompt
-    showing what model is active, voice/boss state, and the most useful
-    slash-commands. Called fresh on every keystroke so toggling 'voice on'
-    or 'boss on' updates the bar immediately.
+    showing model, voice/boss state, cumulative token usage, and slash
+    commands. Called fresh on every keystroke so toggling voice or
+    completing a turn updates the bar immediately.
     """
     from prompt_toolkit.formatted_text import HTML
 
@@ -106,6 +247,19 @@ def _make_status_bar(agent, get_voice_state):
             and getattr(agent.permissions, "mode", "") == "boss"
             else "auto"
         )
+        # Cumulative session token spend — Claude Code-like at-a-glance
+        # gauge for how much the conversation has used.
+        tok_in = getattr(agent, "session_tokens_in", 0)
+        tok_out = getattr(agent, "session_tokens_out", 0)
+        tok_total = tok_in + tok_out
+
+        def _fmt_tok(n: int) -> str:
+            if n < 1000:
+                return str(n)
+            if n < 10000:
+                return f"{n / 1000:.1f}k"
+            return f"{n // 1000}k"
+
         # HTML-escape the model name — it can contain '<' / '&' that
         # prompt_toolkit's HTML parser would choke on.
         from html import escape as _esc
@@ -114,6 +268,8 @@ def _make_status_bar(agent, get_voice_state):
             f" <ansicyan>◆</ansicyan> <ansigray>{_esc(provider)}/{_esc(short_model)}</ansigray>"
             f"  <ansigray>·</ansigray>  <ansigray>voice {voice_state}</ansigray>"
             f"  <ansigray>·</ansigray>  <ansigray>{boss_state}</ansigray>"
+            f"  <ansigray>·</ansigray>  <ansigray>"
+            f"{_fmt_tok(tok_in)}↓ {_fmt_tok(tok_out)}↑ ({_fmt_tok(tok_total)})</ansigray>"
             f"  <ansigray>·</ansigray>  <ansigray>/help /tools /voice /model /quit</ansigray>"
         )
 
@@ -148,6 +304,13 @@ def start_repl():
     # toggling voice on/off updates the toolbar without re-creating the
     # session.
     status_bar = _make_status_bar(agent, lambda: _voice_listener is not None)
+
+    # Subscribe a rich renderer to the ActivityBus — shows each LLM step,
+    # tool call (with syntax-highlighted python/shell args), and result
+    # preview. This is the Claude-Code-style "see what's happening"
+    # surface above the chat box.
+    progress = _ToolCallRenderer(console)
+    progress.attach()
 
     session = PromptSession(
         history=FileHistory(str(history_file)),
@@ -198,6 +361,11 @@ def start_repl():
                 # plain console.print() leaves '```python\n...' as raw backticks.
                 # (_render_response handles the Markdown import — see helper.)
                 response = ""
+                turn_in_before = agent.session_tokens_in
+                turn_out_before = agent.session_tokens_out
+                import time as _t
+
+                turn_t0 = _t.monotonic()
                 try:
                     if agent.provider.supports_tools():
                         with console.status(
@@ -220,6 +388,18 @@ def start_repl():
                         response = agent.chat(user_input)
                     console.print("\n[bold cyan]⏺[/bold cyan] ", end="")
                     _render_response(console, response)
+                # Turn footer — Claude Code-style "what just happened" line.
+                # in/out token delta + wall-clock for this single turn so
+                # the user can spot a runaway loop (huge in tokens) or a
+                # network stall (high elapsed, low tokens).
+                turn_in = agent.session_tokens_in - turn_in_before
+                turn_out = agent.session_tokens_out - turn_out_before
+                turn_elapsed = _t.monotonic() - turn_t0
+                if turn_in or turn_out:
+                    console.print(
+                        f"  [dim]· {turn_in}↓ {turn_out}↑ tokens · {turn_elapsed:.1f}s[/dim]",
+                        highlight=False,
+                    )
                 console.print("")
 
             except KeyboardInterrupt:

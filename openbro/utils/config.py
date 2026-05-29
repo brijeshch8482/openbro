@@ -65,7 +65,7 @@ def _migrate_config(config: dict) -> dict:
     # newest one get pulled forward. Currently: looking for the file-open
     # rule (rule 11) which was added after captured failure where agent
     # asked user for file extension instead of fuzzy-matching.
-    latest_marker = "TRY 3 DIFFERENT ANGLES"
+    latest_marker = "IP GEOLOCATION KAR"
     needs_upgrade = latest_marker not in prompt and (
         "IDENTITY — TU OPENBRO HAI" in prompt
         or "HARD RULES" in prompt
@@ -290,7 +290,18 @@ def default_config() -> dict:
                 "   ke 'support nahi hai' bolna FAIL — tu khud script likh "
                 "   sakta hai sab kuch ke liye. Real failure: 'kya port pe "
                 "   chal raha?' me agent ruk gaya — `netstat -ano | findstr "
-                "   8080` ek line ka shell command tha.\n\n"
+                "   8080` ek line ka shell command tha.\n"
+                "19. **'KAHA HU' / 'MERI LOCATION' = IP GEOLOCATION KAR.** "
+                "   User: 'mai kaha hu', 'meri city', 'where am I', 'my "
+                "   location'. Tu **ABHI** `network` action='ip' call kar "
+                "   public IP nikalne, fir `python` me `httpx.get(f'https://"
+                "ipapi.co/{ip}/json/').json()` se city/region/country uthaa "
+                "   aur user ko bata: 'IP {ip} se lagta hai tu {city}, "
+                "   {region}, {country} me hai (rough, IP-based — VPN ho to "
+                "   off ho sakta)'. **'Mujhe nahi pata' / 'apni settings me "
+                "   dekho' bolna FAIL** — captured failure: user ne 'meri "
+                "   location?' poocha, agent ne 'main nahi batata' kaha "
+                "   jab IP geolocation 2 calls me ho jata hai.\n\n"
                 "## TOOL-CHOICE QUICK MAP:\n"
                 "- 'kitne files/images/X hain folder me' → `python` me\n"
                 "  `from pathlib import Path; p=Path('~/Desktop').expanduser(); "

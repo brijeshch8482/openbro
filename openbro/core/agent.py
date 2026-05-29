@@ -119,6 +119,12 @@ class Agent:
 
         self.last_language = "hinglish"
         self._lock = threading.RLock()  # serialize chat() across threads (REPL + voice)
+        # Cumulative since process start — shown in REPL status bar so the
+        # user knows their free-tier burn rate (Groq has TPM caps).
+        self.session_tokens_in = 0
+        self.session_tokens_out = 0
+        self._turn_tokens_in = 0
+        self._turn_tokens_out = 0
 
         console.print(f"[dim]LLM: {self.provider.name()}[/dim]")
         self.bus.emit("system", f"agent ready: {self.provider.name()}")
@@ -186,6 +192,8 @@ class Agent:
     MAX_TOOL_ITERATIONS = 10
 
     def _chat_impl(self, user_input: str) -> str:
+        import time as _time
+
         self.last_language = detect_language(user_input)
         self._refresh_system_prompt(self.last_language)
 
@@ -195,23 +203,64 @@ class Agent:
         self._trim_history()
 
         tools = self.tool_registry.get_tools_schema() if self.provider.supports_tools() else None
+        turn_started = _time.monotonic()
+        # Per-turn counters so the UI can render "step N, X tokens, Ys"
+        # without the agent having to thread them through every emit.
+        self._turn_tokens_in = 0
+        self._turn_tokens_out = 0
         self.bus.emit("thinking", "agent thinking…")
 
         # ─── Agent loop (was single-shot, which forced LLM to hallucinate
         # answers after one tool returned nothing). Loop till LLM stops
         # calling tools and emits a final text response — same shape as
         # Claude Code / OpenAI Assistants API ReAct loop.
-        for _iteration in range(self.MAX_TOOL_ITERATIONS):
+        for iteration in range(self.MAX_TOOL_ITERATIONS):
+            self.bus.emit(
+                "llm_start",
+                "calling LLM",
+                step=iteration + 1,
+                max_steps=self.MAX_TOOL_ITERATIONS,
+            )
+            llm_t0 = _time.monotonic()
             try:
                 response = self.provider.chat(self.history, tools=tools)
             except Exception as e:
                 return _friendly_error(e)
 
+            # Token accounting — every provider returns usage with at least
+            # {input, output}. Cumulate per turn and emit so the UI can
+            # show a running counter (Claude Code parity).
+            in_t = int(response.usage.get("input", 0) or 0)
+            out_t = int(response.usage.get("output", 0) or 0)
+            self._turn_tokens_in += in_t
+            self._turn_tokens_out += out_t
+            self.session_tokens_in += in_t
+            self.session_tokens_out += out_t
+            self.bus.emit(
+                "llm_end",
+                f"LLM {in_t}↓ {out_t}↑ in {_time.monotonic() - llm_t0:.1f}s",
+                step=iteration + 1,
+                input_tokens=in_t,
+                output_tokens=out_t,
+                turn_tokens_in=self._turn_tokens_in,
+                turn_tokens_out=self._turn_tokens_out,
+                session_tokens_in=self.session_tokens_in,
+                session_tokens_out=self.session_tokens_out,
+                elapsed=_time.monotonic() - llm_t0,
+            )
+
             if not response.tool_calls:
                 # Final answer — model decided no more tools needed.
                 self.history.append(Message(role="assistant", content=response.content))
                 self.memory.add("assistant", response.content)
-                self.bus.emit("assistant", response.content)
+                self.bus.emit(
+                    "assistant",
+                    response.content,
+                    turn_elapsed=_time.monotonic() - turn_started,
+                    turn_tokens_in=self._turn_tokens_in,
+                    turn_tokens_out=self._turn_tokens_out,
+                    steps=iteration + 1,
+                )
                 return response.content
 
             # Execute the tool calls, append results to history, LOOP.
@@ -283,6 +332,8 @@ class Agent:
             )
         )
 
+        import time as _time
+
         for tool_call in response.tool_calls:
             func = tool_call.get("function", {})
             name = func.get("name", "")
@@ -301,16 +352,37 @@ class Agent:
             allowed = self.permissions.request(req)
             confirmed = allowed
 
+            tool_t0 = _time.monotonic()
             if not allowed:
                 result = f"[{name}]: DENIED by user"
-                self.bus.emit("tool_end", result, tool=name, ok=False)
+                self.bus.emit(
+                    "tool_end",
+                    result,
+                    tool=name,
+                    args=args,
+                    ok=False,
+                    elapsed=_time.monotonic() - tool_t0,
+                    preview=result,
+                )
             else:
-                if risk == "moderate":
-                    console.print(f"[yellow]Tool: {name} ({risk})[/yellow] [dim]args: {args}[/dim]")
-                elif risk == "safe":
-                    console.print(f"[dim]Tool: {name} ({risk})[/dim]")
+                # No more plain `console.print("Tool: …")` here — the bus
+                # subscriber in repl.py renders a richer Panel with
+                # syntax-highlighted args. Removing the print stops the
+                # double-render (one line + one panel for every call).
                 result = self.tool_registry.execute(name, args, confirmed=confirmed)
-                self.bus.emit("tool_end", f"{name} done", tool=name, ok=True, preview=result[:200])
+                # Bigger preview (4000 chars) so the live panel can show
+                # meaningful output, not just 200 chars. The history msg
+                # stores the full result regardless.
+                self.bus.emit(
+                    "tool_end",
+                    f"{name} done",
+                    tool=name,
+                    args=args,
+                    ok=True,
+                    preview=result[:4000],
+                    full_length=len(result),
+                    elapsed=_time.monotonic() - tool_t0,
+                )
 
             # One role='tool' message per call, linked by tool_call_id.
             # This is the OpenAI/Groq Assistants spec.
