@@ -280,6 +280,51 @@ class _ToolCallRenderer:
                         padding=(0, 1),
                     )
                 )
+            elif ev.kind == "plan_started":
+                tl = ev.meta.get("tasklist")
+                if tl is not None:
+                    step_count = len(tl.all())
+                    title = (
+                        f"[bold green]◆ Plan[/bold green] "
+                        f"[dim]· {step_count} steps[/dim]"
+                    )
+                    self.con.print(
+                        Panel(
+                            tl.render_markdown(),
+                            title=title,
+                            title_align="left",
+                            border_style="green",
+                            padding=(0, 1),
+                        )
+                    )
+            elif ev.kind == "plan_step_start":
+                desc = ev.meta.get("task_id", "")  # not used in label
+                step_desc = ev.text
+                self.con.print(
+                    f"\n[bold cyan]⏵ Step:[/bold cyan] {step_desc}",
+                    highlight=False,
+                )
+                # silence unused-var warning
+                _ = desc
+            elif ev.kind == "plan_step_end":
+                ok = ev.meta.get("ok", True)
+                marker = "[green]✓[/green]" if ok else "[red]✗[/red]"
+                self.con.print(
+                    f"[dim]  {marker} step done · {ev.text}[/dim]",
+                    highlight=False,
+                )
+            elif ev.kind == "plan_finished":
+                tl = ev.meta.get("tasklist")
+                if tl is not None:
+                    done, total = tl.progress()
+                    ok = tl.succeeded()
+                    color = "green" if ok else "yellow"
+                    glyph = "✓" if ok else "⚠"
+                    self.con.print(
+                        f"\n[bold {color}]{glyph} Plan finished[/bold {color}] "
+                        f"[dim]· {done}/{total} steps[/dim]\n",
+                        highlight=False,
+                    )
             elif ev.kind == "tool_end":
                 name = ev.meta.get("tool", "?")
                 ok = ev.meta.get("ok", True)

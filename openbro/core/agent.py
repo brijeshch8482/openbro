@@ -6,7 +6,9 @@ from collections.abc import Iterator
 from rich.console import Console
 
 from openbro.core.activity import get_bus
+from openbro.core.decompose import decompose
 from openbro.core.permissions import PermissionGate, PermissionRequest
+from openbro.core.tasklist import TaskList
 from openbro.llm.base import LLMResponse, Message
 from openbro.llm.router import create_provider
 from openbro.memory import MemoryManager
@@ -193,13 +195,91 @@ class Agent:
         self.history[0] = Message(role="system", content=self._build_system_prompt(lang))
 
     def chat(self, user_input: str) -> str:
+        """Single user turn. Decomposes compound queries into ordered
+        sub-queries, runs each via _chat_impl, and merges the responses
+        through a TaskList for live progress tracking.
+
+        Single-intent input (the common case) takes the fast path —
+        decompose returns one item, we run _chat_impl once, no overhead.
+        Compound input ('X kar aur Y kar') runs each part sequentially
+        with a visible TaskList the REPL can render.
+        """
         with self._lock:
-            return self._chat_impl(user_input)
+            sub_queries = decompose(user_input)
+            if len(sub_queries) <= 1:
+                return self._chat_impl(user_input)
+            return self._chat_multi(user_input, sub_queries)
 
     # Max LLM round-trips per user message. Real Claude Code loops 5-20+
     # times for non-trivial requests. Cap protects against runaway loops
     # but is loose enough that legit multi-step work completes.
     MAX_TOOL_ITERATIONS = 10
+
+    def _chat_multi(self, original_input: str, sub_queries: list[str]) -> str:
+        """Run a TaskList of sub-queries in order, return combined response.
+
+        Each sub-query becomes one Task. The agent calls _chat_impl for
+        each in sequence, marking the task in_progress before and
+        completed/failed after. The TaskList is published on the bus so
+        the REPL can render a live checklist alongside per-turn output.
+
+        Combined response shape:
+          ### Plan: <original input>
+          1. [✓] sub-query A — <answer A>
+          2. [✓] sub-query B — <answer B>
+
+        If any sub-query fails (raises or returns a friendly error
+        prefix), subsequent tasks are still attempted — we don't bail
+        on the whole plan just because one step had trouble. The
+        TaskList carries per-task status so the UI shows what worked.
+        """
+        tasklist = TaskList(title=f"Plan: {original_input[:80]}")
+        for sq in sub_queries:
+            tasklist.add(description=sq, payload=sq)
+        # Surface the plan so the REPL renderer can draw it up-front.
+        self.bus.emit("plan_started", original_input, tasklist=tasklist)
+
+        results: list[str] = []
+        for task in tasklist.all():
+            tasklist.mark_in_progress(task.id)
+            self.bus.emit(
+                "plan_step_start",
+                task.description,
+                task_id=task.id,
+                tasklist=tasklist,
+            )
+            try:
+                answer = self._chat_impl(task.payload)
+            except Exception as e:  # pragma: no cover — defensive
+                tasklist.mark_failed(task.id, str(e))
+                results.append(f"**{task.description}** — error: {e}")
+                self.bus.emit(
+                    "plan_step_end",
+                    f"{task.description}: failed",
+                    task_id=task.id,
+                    ok=False,
+                    tasklist=tasklist,
+                )
+                continue
+            # Recognise the agent's friendly-error prefixes as failures
+            # so the task list shows ✗ instead of ✓ on rate-limit / auth
+            # / network issues.
+            failed = answer.startswith(("⏱️", "❌", "🌐", "🔧"))
+            if failed:
+                tasklist.mark_failed(task.id, answer[:120])
+            else:
+                tasklist.mark_completed(task.id, result=answer[:120])
+            results.append(f"**{task.description}**\n\n{answer}")
+            self.bus.emit(
+                "plan_step_end",
+                f"{task.description}: {'failed' if failed else 'done'}",
+                task_id=task.id,
+                ok=not failed,
+                tasklist=tasklist,
+            )
+
+        self.bus.emit("plan_finished", original_input, tasklist=tasklist)
+        return tasklist.render_markdown() + "\n\n" + "\n\n---\n\n".join(results)
 
     def _chat_impl(self, user_input: str) -> str:
         import time as _time
