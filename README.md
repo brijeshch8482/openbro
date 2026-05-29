@@ -46,12 +46,94 @@ You > screen lock kar
 Bro: [confirms first since dangerous] Screen locked
 ```
 
+## Agent Intelligence Layer
+
+OpenBro isn't just a chat-over-tools wrapper — it has a real agent runtime with five compounding pieces of intelligence built **around** the LLM:
+
+### Playbooks — pre-built workflows, zero LLM tokens
+
+7 common intents short-circuit the LLM entirely. Pattern match → direct tool calls → templated response. Free, instant, never hallucinates.
+
+```
+mai kaha hu              → geo_lookup       (network ip + ipapi.co)
+kya time hua             → time_now         (local clock)
+D drive ka health check  → system_health    (wmic + drive space + RAM/CPU)
+is chrome running        → process_check    (Name + CommandLine match)
+close my browser         → close_app        (group-aware: brave/chrome/edge/…)
+open vscode              → open_app         (resolves aliases)
+kitne fee pdfs hain      → file_search      (multi-ext + substring + table)
+```
+
+Type `playbooks` in the REPL for the full list. Add your own under `openbro/playbooks/builtin/`.
+
+### Plan mode — compound queries auto-decompose
+
+```
+You > D drive me fee pdfs dhoondh aur Brave open kar
+```
+
+The decomposer splits on `aur` / `fir` / `then` / numbered lists / bullet lists into ordered sub-queries. Each step runs as its own turn (playbook or LLM), tracked in a live TaskList:
+
+```
+◆ Plan · 2 steps
+1. [✓] D drive me fee pdfs dhoondh
+2. [✓] Brave open kar
+
+✓ Plan finished · 2/2 steps
+```
+
+Failures don't abort the plan — subsequent steps still run, status panel shows ✓ / ✗ per step.
+
+### Background jobs — non-blocking long work
+
+```
+You > shell tool with background=true to scan D:/ for *.pdf
+Started background job `a1b2c3d4` for command: ...
+You > kya time hua                  # REPL stays responsive
+You > jobs                          # see all live + recent jobs
+You > wait a1b2c3d4                 # block on result when ready
+You > kill a1b2c3d4                 # cooperative cancel
+```
+
+`shell` and `python` tools both accept `background=true` + `timeout=N`. Long scans / downloads run in daemon threads, REPL keeps typing.
+
+### Session resume — pick up where you left off
+
+```bash
+openbro --resume                    # most recent session
+openbro --resume abc123             # specific session (prefix match)
+```
+
+Loads past messages back into agent history so the model has the full prior context. Works across days/weeks via the SQLite memory store.
+
+### Workspace context — agent knows what project you're in
+
+Auto-injected into the system prompt every turn (cached 60s):
+
+```
+## WORKSPACE
+- cwd: `D:\OpenBro`
+- project: **openbro**
+- git: `main`
+- python project (pyproject.toml detected)
+- recent files: `README.md`, `agent.py`, `tests/`
+```
+
+Drop a `.openbro/workspace.yaml` in your project root to add hand-curated hints (active task, priority, etc.) that surface in every prompt.
+
+---
+
 ## Features
 
 |   | Feature | What it gives you |
 |---|---------|-------------------|
 | 🧠 | **Multi-LLM** | Ollama (offline), Claude, GPT, Groq — switch with one command |
-| 🛠️ | **16 Built-in Tools** | Apps, browser, files, downloads, system control, screenshots, memory & more |
+| ⚡ | **Playbooks** | 7 pre-built workflows for common intents — 0 LLM tokens, instant response |
+| 📋 | **Plan mode** | Compound queries (`X aur Y kar`) auto-decompose into ordered sub-tasks |
+| 🔧 | **Background jobs** | Long shell/python work runs in daemon threads, `jobs` / `wait` / `kill` |
+| ♻️ | **Session resume** | `openbro --resume` to continue past conversations across days |
+| 📁 | **Workspace context** | Agent auto-knows cwd, git branch, project type, recent files |
+| 🛠️ | **21 Built-in Tools** | Apps, browser, files (fuzzy+OneDrive aware), document (PDF/OCR/audio), processes, network, more |
 | 🔌 | **Skills / Plugins** | GitHub · Gmail · Google Calendar · Notion · YouTube — drop your own in `~/.openbro/skills/` |
 | 🤖 | **Claude Code Orchestration** | Tu bole *"Claude se bolo X kar"* → OpenBro spawns `claude` CLI with cost limits, live progress |
 | 🎙️ | **Voice Mode** | Whisper STT + Edge-TTS + wake words. Boss-mode permissions over voice |

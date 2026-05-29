@@ -368,6 +368,7 @@ COMMANDS = [
     "jobs",
     "wait",
     "kill",
+    "workspace",
     "storage",
     "audit",
     "memory",
@@ -667,6 +668,10 @@ def _handle_command(cmd: str, agent: Agent) -> bool:
         _show_jobs()
         return True
 
+    if cmd_lower == "workspace":
+        _show_workspace()
+        return True
+
     if cmd_lower.startswith("wait "):
         _wait_job(cmd[5:].strip())
         return True
@@ -859,6 +864,10 @@ def _show_help():
     table.add_row("model <name>", "Switch model (e.g. model gpt-4o)")
     table.add_row("tools", "List available tools")
     table.add_row("playbooks", "List pre-built workflows (0 LLM tokens when matched)")
+    table.add_row("jobs / tasks", "Show running + recent background jobs")
+    table.add_row("wait <id>", "Block on a background job, show result panel")
+    table.add_row("kill <id>", "Cancel a running background job (cooperative)")
+    table.add_row("workspace", "Show detected cwd / project / git context")
     table.add_row("models", "List downloaded offline models")
     table.add_row("pull", "Download a new offline model (interactive)")
     table.add_row("pull <model>", "Download specific model (e.g. pull llama3.2:3b)")
@@ -1047,6 +1056,35 @@ def _resume_previous_session(agent: Agent, session_hint: str) -> None:
     console.print(
         f"[green]Resumed session[/green] [bold]{target_id}[/bold] "
         f"[dim]({label}, {replayed} messages loaded)[/dim]\n"
+    )
+
+
+def _show_workspace():
+    """Show the workspace context the agent has detected for this cwd."""
+    from openbro.core.workspace import detect
+
+    ctx = detect()
+    table = Table(title="Workspace Context", border_style="cyan")
+    table.add_column("Field", style="bold")
+    table.add_column("Value")
+    table.add_row("cwd", ctx.cwd)
+    if ctx.project_name:
+        table.add_row("project", ctx.project_name)
+    if ctx.is_git_repo:
+        dirty = " (dirty)" if ctx.git_dirty else ""
+        table.add_row("git branch", f"{ctx.git_branch or '?'}{dirty}")
+    if ctx.is_python_project:
+        table.add_row("python project", "yes")
+    if ctx.is_node_project:
+        table.add_row("node project", "yes")
+    if ctx.recent_files:
+        table.add_row("recent files", ", ".join(ctx.recent_files))
+    for key, val in (ctx.hints or {}).items():
+        table.add_row(f"hint:{key}", str(val))
+    console.print(table)
+    console.print(
+        "\n[dim]Drop a `.openbro/workspace.yaml` in this folder to "
+        "add custom hints that get injected into every prompt.[/dim]\n"
     )
 
 
