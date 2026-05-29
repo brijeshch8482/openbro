@@ -18,10 +18,7 @@ from openbro.llm.groq_provider import (
 
 def test_function_tag_bare_form():
     """Llama-4 captured: `<function=network>{"action": "ip"}` (no closing tag)."""
-    captured = (
-        "Ek minute, bro! Mai IP address find karta hoon.\n"
-        '<function=network>{"action": "ip"}'
-    )
+    captured = 'Ek minute, bro! Mai IP address find karta hoon.\n<function=network>{"action": "ip"}'
     calls = _extract_inline_tool_calls(captured)
     assert len(calls) == 1
     assert calls[0]["function"]["name"] == "network"
@@ -29,9 +26,7 @@ def test_function_tag_bare_form():
 
 
 def test_function_tag_closed_form():
-    closed = (
-        'Sure: <function=file_ops>{"action":"open","path":"a.pdf"}</function>'
-    )
+    closed = 'Sure: <function=file_ops>{"action":"open","path":"a.pdf"}</function>'
     calls = _extract_inline_tool_calls(closed)
     assert len(calls) == 1
     assert calls[0]["function"]["name"] == "file_ops"
@@ -42,10 +37,7 @@ def test_function_tag_closed_form():
 
 
 def test_function_tag_multiple():
-    multi = (
-        '<function=tool_a>{"x":1}</function>\n'
-        '<function=tool_b>{"y":2}</function>'
-    )
+    multi = '<function=tool_a>{"x":1}</function>\n<function=tool_b>{"y":2}</function>'
     calls = _extract_inline_tool_calls(multi)
     assert len(calls) == 2
     assert calls[0]["function"]["name"] == "tool_a"

@@ -251,7 +251,7 @@ class AppTool(BaseTool):
                     closed.append(exe)
                 else:
                     stderr = (result.stderr or "").lower()
-                    if "not found" in stderr or "process \"" in stderr:
+                    if "not found" in stderr or 'process "' in stderr:
                         not_running.append(exe)
                     else:
                         errors.append(f"{exe}: {result.stderr.strip()}")

@@ -491,9 +491,10 @@ def test_agent_disables_playbooks_via_config():
     from openbro.core.agent import Agent
     from openbro.llm.base import LLMResponse
 
-    with patch("openbro.core.agent.create_provider") as fake_create, patch(
-        "openbro.core.agent.load_config"
-    ) as fake_cfg:
+    with (
+        patch("openbro.core.agent.create_provider") as fake_create,
+        patch("openbro.core.agent.load_config") as fake_cfg,
+    ):
         fake_cfg.return_value = {
             "llm": {"provider": "groq", "model": "x"},
             "providers": {"groq": {"api_key": "x"}},
