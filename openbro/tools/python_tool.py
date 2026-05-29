@@ -52,7 +52,7 @@ class PythonTool(BaseTool):
     )
     risk = RiskLevel.MODERATE
 
-    def run(self, code: str) -> str:
+    def run(self, code: str, background: bool = False, timeout: int = 30) -> str:
         if not isinstance(code, str) or not code.strip():
             return "Error: code must be a non-empty string"
 
@@ -61,12 +61,18 @@ class PythonTool(BaseTool):
             if blocked.lower().replace(" ", "") in code_low:
                 return f"BLOCKED: snippet contains '{blocked}'"
 
+        if background:
+            return self._run_in_background(code, timeout)
+        return self._run_foreground(code, timeout)
+
+    @staticmethod
+    def _run_foreground(code: str, timeout: int) -> str:
         try:
             result = subprocess.run(
                 [sys.executable, "-c", code],
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=timeout,
                 encoding="utf-8",
                 errors="replace",
             )
@@ -90,9 +96,52 @@ class PythonTool(BaseTool):
                 )[:5000]
             return (stdout or "(no output)")[:5000]
         except subprocess.TimeoutExpired:
-            return "Python snippet timed out (30s limit)"
+            return (
+                f"Python snippet timed out ({timeout}s limit). "
+                f"Try background=true for long-running scripts."
+            )
         except OSError as e:
             return f"Python execution error: {e}"
+
+    def _run_in_background(self, code: str, timeout: int) -> str:
+        from openbro.core.jobs import JobRegistry
+
+        registry = JobRegistry.get()
+
+        def _runner(job):
+            try:
+                result = subprocess.run(
+                    [sys.executable, "-c", code],
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    encoding="utf-8",
+                    errors="replace",
+                )
+                stdout = result.stdout or ""
+                stderr = result.stderr or ""
+                if result.returncode != 0 or stderr.strip():
+                    return (
+                        "ERROR — snippet did NOT produce a usable answer.\n"
+                        f"exit_code: {result.returncode}\n"
+                        f"stdout: {stdout.strip() or '(empty)'}\n"
+                        f"stderr: {stderr.strip()[:1500]}"
+                    )[:10000]
+                return (stdout or "(no output)")[:10000]
+            except subprocess.TimeoutExpired:
+                return f"Background snippet timed out after {timeout}s."
+
+        first_line = code.strip().splitlines()[0][:60]
+        job = registry.submit(
+            label=f"python: {first_line}",
+            fn=_runner,
+            meta={"tool": "python", "timeout": timeout},
+        )
+        return (
+            f"Started background job `{job.id}` (python).\n"
+            f"Check status with the REPL `jobs` command, or pass "
+            f"`background=false` to wait inline."
+        )
 
     def schema(self) -> dict:
         return {
@@ -109,7 +158,23 @@ class PythonTool(BaseTool):
                             "Keep it small — one short script that answers "
                             "the question."
                         ),
-                    }
+                    },
+                    "background": {
+                        "type": "boolean",
+                        "description": (
+                            "Run in a background thread, return job ID immediately. "
+                            "Use for long-running scripts (deep walks, downloads). "
+                            "User can check status with REPL `jobs` command. "
+                            "Default false."
+                        ),
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": (
+                            "Timeout in seconds. Foreground default 30s. "
+                            "Background can use higher values (e.g. 300)."
+                        ),
+                    },
                 },
                 "required": ["code"],
             },

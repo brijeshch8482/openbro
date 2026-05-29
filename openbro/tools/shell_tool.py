@@ -31,20 +31,26 @@ class ShellTool(BaseTool):
     # gates every moderate tool if the user wants stricter policy.
     risk = RiskLevel.MODERATE
 
-    def run(self, command: str) -> str:
+    def run(self, command: str, background: bool = False, timeout: int = 30) -> str:
         # Safety check
         cmd_lower = command.lower().strip()
         for blocked in BLOCKED_PATTERNS:
             if blocked in cmd_lower:
                 return f"BLOCKED: Dangerous command detected. '{command}' is not allowed."
 
+        if background:
+            return self._run_in_background(command, timeout)
+        return self._run_foreground(command, timeout)
+
+    @staticmethod
+    def _run_foreground(command: str, timeout: int) -> str:
         try:
             result = subprocess.run(
                 command,
                 shell=True,
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=timeout,
                 cwd=None,
             )
             output = result.stdout
@@ -54,9 +60,50 @@ class ShellTool(BaseTool):
                 output += f"\n(exit code: {result.returncode})"
             return output[:5000] if output else "(no output)"
         except subprocess.TimeoutExpired:
-            return "Command timed out (30s limit)"
+            return (
+                f"Command timed out ({timeout}s limit). Try background=true for long-running jobs."
+            )
         except Exception as e:
             return f"Error: {e}"
+
+    def _run_in_background(self, command: str, timeout: int) -> str:
+        """Spawn the command as a JobRegistry job, return the job ID
+        immediately. The user / agent can poll with the `jobs` REPL
+        command or another tool call that checks job status.
+        """
+        from openbro.core.jobs import JobRegistry
+
+        registry = JobRegistry.get()
+
+        def _runner(job):
+            try:
+                result = subprocess.run(
+                    command,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    cwd=None,
+                )
+                out = result.stdout
+                if result.stderr:
+                    out += f"\nSTDERR: {result.stderr}"
+                if result.returncode != 0:
+                    out += f"\n(exit code: {result.returncode})"
+                return out[:10000] if out else "(no output)"
+            except subprocess.TimeoutExpired:
+                return f"Background command timed out after {timeout}s."
+
+        job = registry.submit(
+            label=f"shell: {command[:60]}",
+            fn=_runner,
+            meta={"tool": "shell", "command": command, "timeout": timeout},
+        )
+        return (
+            f"Started background job `{job.id}` for command: {command[:60]}.\n"
+            f"Check status with the REPL `jobs` command, or pass "
+            f"`background=false` to wait inline."
+        )
 
     def schema(self) -> dict:
         return {
@@ -68,6 +115,23 @@ class ShellTool(BaseTool):
                     "command": {
                         "type": "string",
                         "description": "Shell command to execute",
+                    },
+                    "background": {
+                        "type": "boolean",
+                        "description": (
+                            "Run the command in a background thread and return a "
+                            "job ID immediately. Use for long-running work "
+                            "(deep file searches, downloads, scans). User can "
+                            "check status via the REPL `jobs` command. Default false."
+                        ),
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": (
+                            "Timeout in seconds. Foreground default 30s; "
+                            "background can use higher values (e.g. 600 for a "
+                            "full drive scan). Bounded by sensible upper limit."
+                        ),
                     },
                 },
                 "required": ["command"],

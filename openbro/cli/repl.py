@@ -365,6 +365,9 @@ COMMANDS = [
     "pull",
     "tools",
     "playbooks",
+    "jobs",
+    "wait",
+    "kill",
     "storage",
     "audit",
     "memory",
@@ -646,6 +649,18 @@ def _handle_command(cmd: str, agent: Agent) -> bool:
 
     if cmd_lower in ("playbooks", "playbook"):
         _show_playbooks(agent)
+        return True
+
+    if cmd_lower in ("jobs", "tasks"):
+        _show_jobs()
+        return True
+
+    if cmd_lower.startswith("wait "):
+        _wait_job(cmd[5:].strip())
+        return True
+
+    if cmd_lower.startswith("kill "):
+        _kill_job(cmd[5:].strip())
         return True
 
     if cmd_lower == "storage":
@@ -960,6 +975,116 @@ def _show_tools(agent: Agent):
         "moderate = modifies files/opens apps, "
         "dangerous = system-level changes[/dim]\n"
     )
+
+
+def _show_jobs():
+    """List every background job — alive ones at the top."""
+    from openbro.core.jobs import JobRegistry
+
+    registry = JobRegistry.get()
+    jobs = registry.list_all()
+    if not jobs:
+        console.print("[dim]No background jobs.[/dim]\n")
+        return
+    # alive first, then finished by recency
+    alive = [j for j in jobs if j.is_alive()]
+    done = sorted(
+        [j for j in jobs if not j.is_alive()],
+        key=lambda j: j.finished_at or 0,
+        reverse=True,
+    )
+    table = Table(title="Background Jobs", border_style="cyan")
+    table.add_column("ID", style="bold")
+    table.add_column("Status", justify="center")
+    table.add_column("Elapsed", justify="right")
+    table.add_column("Label")
+    for j in alive + done[:10]:
+        elapsed = j.elapsed()
+        elapsed_str = f"{elapsed:.1f}s" if elapsed is not None else "-"
+        style = {
+            "running": "yellow",
+            "queued": "dim",
+            "done": "green",
+            "failed": "red",
+            "cancelled": "dim",
+        }.get(j.status.value, "white")
+        table.add_row(
+            j.id,
+            f"[{style}]{j.status.value}[/{style}]",
+            elapsed_str,
+            j.label,
+        )
+    console.print(table)
+    console.print(
+        f"\n[dim]Tip: `wait <id>` to block until finished, "
+        f"`kill <id>` to cancel. Alive: {registry.alive_count()}.[/dim]\n"
+    )
+
+
+def _wait_job(job_id: str):
+    """Block on a background job and show its final result."""
+    from openbro.core.jobs import JobRegistry
+
+    if not job_id:
+        console.print("[red]Usage: wait <job-id>[/red]\n")
+        return
+    registry = JobRegistry.get()
+    job = registry.get_job(job_id)
+    if job is None:
+        console.print(f"[red]No job `{job_id}`[/red]\n")
+        return
+    if job.is_alive():
+        console.print(f"[dim]Waiting for job `{job.id}` ({job.label})...[/dim]")
+        with console.status("[dim]running…[/dim]", spinner="dots"):
+            registry.wait(job.id)
+        job = registry.get_job(job_id)
+    if job is None:
+        console.print("[red]Job vanished.[/red]\n")
+        return
+    elapsed = job.elapsed()
+    elapsed_str = f"{elapsed:.1f}s" if elapsed is not None else "-"
+    status_color = {
+        "done": "green",
+        "failed": "red",
+        "cancelled": "yellow",
+    }.get(job.status.value, "white")
+    console.print(
+        f"\n[bold {status_color}]{job.status.value.upper()}[/bold {status_color}] "
+        f"[dim]· job `{job.id}` · {elapsed_str}[/dim]"
+    )
+    if job.error:
+        console.print(f"[red]Error: {job.error}[/red]\n")
+    if job.result:
+        console.print(
+            Panel(
+                job.result[:4000],
+                title=f"[dim]{job.label}[/dim]",
+                title_align="left",
+                border_style=status_color,
+                padding=(0, 1),
+            )
+        )
+
+
+def _kill_job(job_id: str):
+    """Request cancellation on a running background job."""
+    from openbro.core.jobs import JobRegistry
+
+    if not job_id:
+        console.print("[red]Usage: kill <job-id>[/red]\n")
+        return
+    registry = JobRegistry.get()
+    if registry.cancel(job_id):
+        console.print(
+            f"[yellow]Cancel requested for `{job_id}` — "
+            "thread will exit when it next checks the flag.[/yellow]\n"
+        )
+    else:
+        job = registry.get_job(job_id)
+        if job is None:
+            console.print(f"[red]No job `{job_id}`[/red]\n")
+        else:
+            console.print(f"[dim]Job `{job_id}` already finished ({job.status.value}).[/dim]\n")
 
 
 def _show_playbooks(agent: Agent):
