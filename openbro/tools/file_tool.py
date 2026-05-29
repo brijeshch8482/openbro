@@ -3,20 +3,92 @@
 import os
 import platform
 import subprocess
+from pathlib import Path
 
 from openbro.tools.base import BaseTool, RiskLevel
 from openbro.utils.paths import resolve_user_path
+
+# Where to look when user gives a filename without a directory ("open aadhar"
+# or "open T&P fees"). Walked in order; first hit wins. Keeps the agent from
+# bailing out and asking the user "kya extension hai?" when the answer is on
+# the filesystem already.
+_COMMON_SEARCH_ROOTS = [
+    Path.home() / "Desktop",
+    Path.home() / "OneDrive" / "Desktop",
+    Path.home() / "Documents",
+    Path.home() / "OneDrive" / "Documents",
+    Path.home() / "Downloads",
+    Path.home() / "OneDrive" / "Downloads",
+]
+
+
+def _fuzzy_find(path: Path, max_results: int = 25) -> list[Path]:
+    """Find files matching `path` when the literal path doesn't exist.
+
+    Strategy:
+      1. If `path` has a parent that exists, glob `<stem>*` in that parent.
+         Handles 'D:/T&P fees' → 'D:/T&P fees.pdf'.
+      2. Otherwise, walk the common user roots (Desktop / Documents /
+         Downloads on both system + OneDrive copies) looking for files whose
+         stem CONTAINS the requested basename. Substring match so 'oops' hits
+         'oops_final_v2.pdf'.
+
+    Returns at most `max_results` paths sorted by closeness (exact stem
+    match first). Empty list = no candidates.
+    """
+    stem_query = path.stem.lower()
+    if not stem_query:
+        return []
+
+    # Step 1: parent-dir glob (cheap, precise).
+    if path.parent and path.parent.exists() and path.parent != path:
+        try:
+            candidates = [
+                p for p in path.parent.iterdir() if p.is_file() and p.stem.lower() == stem_query
+            ]
+            if candidates:
+                return candidates[:max_results]
+            # No exact-stem match — try wildcard (T&P fees → T&P fees v2.pdf)
+            wildcard = list(path.parent.glob(f"{path.stem}*"))
+            wildcard = [p for p in wildcard if p.is_file()]
+            if wildcard:
+                return wildcard[:max_results]
+        except (PermissionError, OSError):
+            pass
+
+    # Step 2: walk known user roots, substring match on stem.
+    hits: list[Path] = []
+    for root in _COMMON_SEARCH_ROOTS:
+        if not root.exists():
+            continue
+        try:
+            for entry in root.iterdir():
+                if entry.is_file() and stem_query in entry.stem.lower():
+                    hits.append(entry)
+                    if len(hits) >= max_results:
+                        break
+        except (PermissionError, OSError):
+            continue
+        if len(hits) >= max_results:
+            break
+
+    # Sort: exact stem match first, then alphabetical.
+    hits.sort(key=lambda p: (p.stem.lower() != stem_query, p.name.lower()))
+    return hits[:max_results]
 
 
 class FileTool(BaseTool):
     name = "file_ops"
     description = (
         "Read, write, list, search, or open files on the system. "
-        "Use 'open' to launch a file (PDF, image, video, anything) in the "
-        "user's default app. 'read' auto-handles text AND binary formats "
-        "(PDFs/docx/xlsx/images/audio/HTML/zip get dispatched to the "
-        "`document` backend). For a specific backend or audio "
-        "transcription options, call `document` directly."
+        "'open' launches a file (PDF, image, video, anything) in the user's "
+        "default app and FUZZY-MATCHES by basename when the exact path is "
+        "missing — pass 'T&P fees' and it finds 'T&P fees.pdf' on Desktop/"
+        "Documents/Downloads (system + OneDrive). DON'T ask the user for the "
+        "extension before trying — open just figures it out. 'read' "
+        "auto-handles text AND binary formats (PDFs/docx/xlsx/images/audio/"
+        "HTML/zip get dispatched to the `document` backend). For a specific "
+        "backend or audio transcription options, call `document` directly."
     )
     risk = RiskLevel.MODERATE
 
@@ -75,14 +147,31 @@ class FileTool(BaseTool):
             return "\n".join(str(r) for r in results)
 
         elif action == "open":
-            # Launch in default app. Real-user gap: 'open aadhar.pdf' would
-            # crash with 'Unknown action: open' because file_ops only had
-            # read/write/list/search. The model could call word.open but
-            # that only works for .docx — for arbitrary files we need a
-            # generic launcher. PDF/image/video/zip etc. all work via
-            # os.startfile on Windows.
+            # If the literal path doesn't exist, fuzzy-search before giving
+            # up. User says "open T&P fees" — file_ops should find
+            # "T&P fees.pdf" and open it, not bail out asking "kya extension
+            # hai?". Real captured failure: user said the agent kept
+            # demanding ".pdf" when the unique match was right there.
             if not path.exists():
-                return f"File not found: {path}"
+                matches = _fuzzy_find(path)
+                if len(matches) == 1:
+                    path = matches[0]
+                elif len(matches) > 1:
+                    listing = "\n".join(f"  {m}" for m in matches[:10])
+                    return (
+                        f"Multiple files match '{path.name}':\n{listing}\n"
+                        + (f"  ... (+{len(matches) - 10} more)\n" if len(matches) > 10 else "")
+                        + "Call file_ops open again with the full path "
+                        "(including extension) of the one you want."
+                    )
+                else:
+                    return (
+                        f"File not found: {path}. No fuzzy matches in parent "
+                        "dir or common locations (Desktop/Documents/Downloads, "
+                        "including OneDrive copies). Try file_ops search with a "
+                        "broader pattern, or pass the absolute path."
+                    )
+
             try:
                 if platform.system() == "Windows":
                     os.startfile(str(path))  # type: ignore[attr-defined]

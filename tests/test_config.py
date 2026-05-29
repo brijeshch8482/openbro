@@ -55,3 +55,29 @@ def test_config_migration_updates_legacy_voice_and_prompt():
     assert "terminal-first" in migrated["agent"]["system_prompt"]
     assert "hey openbro" in migrated["voice"]["wake_words"]
     assert "ack_phrases" in migrated["voice"]
+
+
+def test_voice_mode_migration_defaults_to_continuous():
+    """Existing users whose configs predate the `mode` key should land on
+    continuous after migration — not get stuck in the legacy wake_word UX
+    (real captured: user upgraded, REPL still showed 'Voice listening.
+    Wake words: ...')."""
+    legacy = {"voice": {"wake_words": ["hey openbro"], "auto_start": True}}
+    migrated = _migrate_config(_merge_defaults(default_config(), legacy))
+    assert migrated["voice"]["mode"] == "continuous"
+
+
+def test_voice_mode_migration_preserves_explicit_wake_word():
+    """If a user has explicitly chosen wake_word mode, migration must not
+    silently switch them back."""
+    legacy = {"voice": {"mode": "wake_word"}}
+    migrated = _migrate_config(_merge_defaults(default_config(), legacy))
+    assert migrated["voice"]["mode"] == "wake_word"
+
+
+def test_voice_mode_migration_resets_unknown_value():
+    """A garbage mode value (typo, hand-edited) gets reset to continuous
+    rather than crashing the listener constructor."""
+    legacy = {"voice": {"mode": "potato"}}
+    migrated = _migrate_config(_merge_defaults(default_config(), legacy))
+    assert migrated["voice"]["mode"] == "continuous"

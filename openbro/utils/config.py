@@ -97,6 +97,16 @@ def _migrate_config(config: dict) -> dict:
     if voice.get("stt_language") is None and "stt_language" not in (voice.get("_explicit") or {}):
         voice["stt_language"] = defaults["voice"].get("stt_language", "en")
 
+    # `mode` was added with the voice redesign (continuous default, drops
+    # wake words). Existing users have configs predating the key, so
+    # _merge_defaults already fills in 'continuous' — but a real captured
+    # session showed a user with the wake_word UI banner after upgrade. Belt
+    # + suspenders: if mode is missing OR set to a value we no longer
+    # recognise, default to 'continuous'. Users who explicitly chose
+    # 'wake_word' get to keep it (passes the recognised-value check).
+    if voice.get("mode") not in ("continuous", "wake_word"):
+        voice["mode"] = "continuous"
+
     return config
 
 
@@ -213,7 +223,24 @@ def default_config() -> dict:
                 "   undisturbed. `browser` tool sirf tab use kar JAB user "
                 "   EXPLICITLY bole 'open browser', 'khol Chrome', 'navigate to', "
                 "   'video chala'. Casual info ke liye browser kholna user ko "
-                "   irritate karta hai (real complaint: 'browser kyon khol diya').\n\n"
+                "   irritate karta hai (real complaint: 'browser kyon khol diya').\n"
+                "11. **FILE OPEN — DON'T ASK FOR EXTENSION, FUZZY-MATCH KAR.** "
+                "   User: 'oops naam ki pdf khol' ya 'T&P fees open kar'. Tu "
+                "   `file_ops` action='open' path='<jo user ne diya>' CALL kar "
+                "   AB. Tool khud Desktop/Documents/Downloads (+ OneDrive copies) "
+                "   me fuzzy basename match karta — `T&P fees` → `T&P fees.pdf`. "
+                "   Unique match → opens. Multiple matches → tool list deta to "
+                "   USER ko poochho 'in me se kaunsi'. **Pehle se 'kya extension "
+                "   hai?' MAT poochh** — wo bin matlab ka step hai aur user ko "
+                "   irritate karta (real captured failure: agent kept asking '.pdf "
+                "   add karke try karen?' while the unique file was right there).\n"
+                "12. **TOOL CALL SE PEHLE CLAIM MAT KAR.** 'Haan boss, kar deta "
+                "   hoon' bolke chat me ruk jaana = FAIL. Agar tu file_ops open "
+                "   karega to ABHI tool_calls slot me bhej — chat ka text 'Maine "
+                "   kar diya' tool ke result ke BAAD aata. Tool ne 'Opened ...' "
+                "   diya tabhi 'ho gaya' bol; tool ne error diya to retry kar "
+                "   (Rule 8) — tab tak 'file open ho gayi' bolna lie hai (real "
+                "   captured: agent said 'file open ho gayi' without calling tool).\n\n"
                 "## TOOL-CHOICE QUICK MAP:\n"
                 "- 'kitne files/images/X hain folder me' → `python` me\n"
                 "  `from pathlib import Path; p=Path('~/Desktop').expanduser(); "

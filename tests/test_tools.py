@@ -37,6 +37,75 @@ def test_file_tool_schema():
     assert "parameters" in schema
 
 
+def test_file_open_fuzzy_matches_unique_basename(tmp_path, monkeypatch):
+    """open 'T&P fees' should find 'T&P fees.pdf' without the user spelling
+    out the extension. Real captured failure: agent kept asking
+    'kya extension hai?' instead of trying the obvious match."""
+    from openbro.tools import file_tool as ft
+
+    target = tmp_path / "T&P fees.pdf"
+    target.write_bytes(b"%PDF dummy")
+
+    called = {}
+
+    def fake_startfile(p):
+        called["path"] = p
+
+    monkeypatch.setattr(ft.os, "startfile", fake_startfile, raising=False)
+    monkeypatch.setattr(ft.platform, "system", lambda: "Windows")
+
+    out = FileTool().run(action="open", path=str(tmp_path / "T&P fees"))
+    assert "Opened" in out
+    assert called.get("path", "").endswith("T&P fees.pdf")
+
+
+def test_file_open_ambiguous_basename_lists_matches(tmp_path, monkeypatch):
+    """Two files share the basename — tool must list both and ask, not silently
+    pick one (that's how you open the wrong document)."""
+    from openbro.tools import file_tool as ft
+
+    (tmp_path / "report.pdf").write_bytes(b"a")
+    (tmp_path / "report.docx").write_bytes(b"b")
+
+    monkeypatch.setattr(ft.platform, "system", lambda: "Windows")
+
+    out = FileTool().run(action="open", path=str(tmp_path / "report"))
+    assert "Multiple files match" in out
+    assert "report.pdf" in out
+    assert "report.docx" in out
+
+
+def test_file_open_no_matches_anywhere(tmp_path, monkeypatch):
+    """No match in parent OR common roots → return actionable error,
+    don't pretend success."""
+    from openbro.tools import file_tool as ft
+
+    monkeypatch.setattr(ft, "_COMMON_SEARCH_ROOTS", [tmp_path])
+    monkeypatch.setattr(ft.platform, "system", lambda: "Windows")
+    out = FileTool().run(action="open", path=str(tmp_path / "definitely_not_here"))
+    assert "not found" in out.lower() or "no fuzzy matches" in out.lower()
+
+
+def test_file_open_exact_path_skips_fuzzy(tmp_path, monkeypatch):
+    """If the literal path exists, don't go searching — open it directly.
+    Belt + suspenders against the fuzzy logic stealing valid open calls."""
+    from openbro.tools import file_tool as ft
+
+    target = tmp_path / "exact.txt"
+    target.write_text("hi")
+
+    called = {}
+
+    def fake_startfile(p):
+        called["path"] = p
+
+    monkeypatch.setattr(ft.os, "startfile", fake_startfile, raising=False)
+    monkeypatch.setattr(ft.platform, "system", lambda: "Windows")
+    out = FileTool().run(action="open", path=str(target))
+    assert "Opened" in out
+    assert called["path"].endswith("exact.txt")
+
+
 def test_shell_tool_blocks_dangerous():
     tool = ShellTool()
     result = tool.run(command="rm -rf /")
