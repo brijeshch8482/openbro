@@ -22,6 +22,156 @@ console = Console()
 _RISK_COLORS = {"safe": "green", "moderate": "yellow", "dangerous": "red"}
 
 
+class _LiveStatus:
+    """Bottom-pinned status line that ticks every 100ms.
+
+    Shows: spinner · step N/M · current activity (thinking / running TOOL) ·
+    elapsed for current phase · turn tokens · turn elapsed. Updates in place
+    so the user sees a live clock instead of a frozen "OpenBro kaam kar
+    raha hai" spinner. Tool-call panels print ABOVE the live area (Rich
+    keeps the live block pinned at the bottom).
+    """
+
+    def __init__(self, agent, con: Console):
+        import time as _time
+
+        self.agent = agent
+        self.con = con
+        self.live = None
+        self._unsub = None
+        self._tick_thread = None
+        self._tick_running = False
+        self._time = _time
+        self._state = {
+            "step": 0,
+            "max_steps": 10,
+            "activity": "thinking...",
+            "activity_kind": "llm",
+            "activity_started": _time.monotonic(),
+            "turn_started": _time.monotonic(),
+        }
+
+    def __enter__(self):
+        from rich.live import Live
+
+        now = self._time.monotonic()
+        self._state["turn_started"] = now
+        self._state["activity_started"] = now
+        # transient=True so the live area DISAPPEARS when the turn ends —
+        # the final answer + tool panels stay as scrollback, no leftover
+        # ghost status line. refresh_per_second=10 gives smooth tick.
+        self.live = Live(
+            self._render(),
+            console=self.con,
+            refresh_per_second=10,
+            transient=True,
+        )
+        self.live.start()
+        from openbro.core.activity import get_bus
+
+        self._unsub = get_bus().subscribe(self._on_event)
+        # Wall-clock ticker — drives the elapsed counter without needing
+        # bus events. Without this, the displayed elapsed would only
+        # update when an event fires (so a slow LLM call would show
+        # frozen 0.0s for seconds).
+        import threading
+
+        self._tick_running = True
+        self._tick_thread = threading.Thread(target=self._tick, daemon=True)
+        self._tick_thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._tick_running = False
+        if self._unsub:
+            try:
+                self._unsub()
+            except Exception:
+                pass
+            self._unsub = None
+        if self.live:
+            try:
+                self.live.stop()
+            except Exception:
+                pass
+            self.live = None
+
+    def _tick(self) -> None:
+        while self._tick_running:
+            self._time.sleep(0.1)
+            if not self.live:
+                continue
+            try:
+                self.live.update(self._render())
+            except Exception:
+                pass
+
+    def _on_event(self, ev) -> None:
+        try:
+            if ev.kind == "llm_start":
+                self._state["step"] = ev.meta.get("step", 0)
+                self._state["max_steps"] = ev.meta.get("max_steps", 10)
+                self._state["activity"] = "thinking"
+                self._state["activity_kind"] = "llm"
+                self._state["activity_started"] = self._time.monotonic()
+            elif ev.kind == "llm_end":
+                self._state["activity"] = "processing result"
+                self._state["activity_kind"] = "idle"
+                self._state["activity_started"] = self._time.monotonic()
+            elif ev.kind == "tool_start":
+                tool = ev.meta.get("tool", "?")
+                self._state["activity"] = f"running {tool}"
+                self._state["activity_kind"] = "tool"
+                self._state["activity_started"] = self._time.monotonic()
+            elif ev.kind == "tool_end":
+                self._state["activity"] = "thinking"
+                self._state["activity_kind"] = "llm"
+                self._state["activity_started"] = self._time.monotonic()
+        except Exception:
+            pass
+
+    def _render(self):
+        """Build the one-line live status. Called ~10x per second."""
+        from rich.spinner import Spinner
+        from rich.table import Table
+
+        agent = self.agent
+        now = self._time.monotonic()
+        phase_elapsed = now - self._state["activity_started"]
+        turn_elapsed = now - self._state["turn_started"]
+        step = self._state["step"]
+        max_steps = self._state["max_steps"]
+        in_t = getattr(agent, "_turn_tokens_in", 0)
+        out_t = getattr(agent, "_turn_tokens_out", 0)
+        activity = self._state["activity"]
+        kind = self._state["activity_kind"]
+
+        # Color the activity by what kind of work it is.
+        if kind == "llm":
+            activity_style = "cyan"
+        elif kind == "tool":
+            activity_style = "yellow"
+        else:
+            activity_style = "magenta"
+
+        # Compact one-line layout — table prevents column collapse on
+        # narrow terminals. Spinner ticks via Rich's built-in animation.
+        table = Table.grid(padding=(0, 1))
+        table.add_column(no_wrap=True)
+        table.add_column(no_wrap=True)
+        table.add_column(no_wrap=True)
+        table.add_column(no_wrap=True)
+        table.add_column(no_wrap=True)
+        table.add_row(
+            Spinner("dots", style="cyan"),
+            f"[dim]step {step}/{max_steps}[/dim]",
+            f"[{activity_style}]{activity}[/{activity_style}] [dim]· {phase_elapsed:.1f}s[/dim]",
+            f"[dim]turn:[/dim] [grey50]{turn_elapsed:.1f}s[/grey50]",
+            f"[grey50]{in_t}↓ {out_t}↑[/grey50]",
+        )
+        return table
+
+
 def _format_args(name: str, args: dict) -> tuple[str, str]:
     """Pick a syntax-highlight lexer and pretty-print args for display.
 
@@ -77,14 +227,11 @@ class _ToolCallRenderer:
     def _on_event(self, ev) -> None:
         try:
             if ev.kind == "llm_start":
-                step = ev.meta.get("step", 0)
-                max_steps = ev.meta.get("max_steps", 0)
-                # Subtle: just a thin "step N/M thinking..." marker. The
-                # actual spinner comes from console.status in the REPL.
-                self.con.print(
-                    f"[dim]  ↳ step {step}/{max_steps} · thinking...[/dim]",
-                    highlight=False,
-                )
+                # Nothing to print — the live status bar at the bottom
+                # of the screen already shows "step N · thinking · Xs".
+                # Printing here would just duplicate the same info as
+                # frozen scrollback.
+                pass
             elif ev.kind == "llm_end":
                 step = ev.meta.get("step", 0)
                 in_t = ev.meta.get("input_tokens", 0)
@@ -368,10 +515,13 @@ def start_repl():
                 turn_t0 = _t.monotonic()
                 try:
                     if agent.provider.supports_tools():
-                        with console.status(
-                            "[dim]OpenBro kaam kar raha hai...[/dim]",
-                            spinner="dots",
-                        ):
+                        # _LiveStatus replaces console.status — gives a
+                        # bottom-pinned bar that ticks every 100ms with
+                        # the current phase (thinking / running TOOL),
+                        # phase elapsed, turn elapsed, and live token
+                        # counters. Tool panels and step lines print
+                        # ABOVE the live bar as scrollback.
+                        with _LiveStatus(agent, console):
                             response = agent.chat(user_input)
                         # ⏺ (filled circle) for the assistant marker — Claude
                         # Code's same glyph. Cleaner than ◆ when output is
@@ -384,7 +534,7 @@ def start_repl():
                             console.print(token, end="", highlight=False)
                             response += token
                 except Exception:
-                    with console.status("[dim]OpenBro soch raha hai...[/dim]", spinner="dots"):
+                    with _LiveStatus(agent, console):
                         response = agent.chat(user_input)
                     console.print("\n[bold cyan]⏺[/bold cyan] ", end="")
                     _render_response(console, response)

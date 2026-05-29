@@ -65,7 +65,7 @@ def _migrate_config(config: dict) -> dict:
     # newest one get pulled forward. Currently: looking for the file-open
     # rule (rule 11) which was added after captured failure where agent
     # asked user for file extension instead of fuzzy-matching.
-    latest_marker = "PRIMARY DIRECTIVE — TU JARVIS HAI"
+    latest_marker = "AUTONOMOUS AGENT MODE"
     needs_upgrade = latest_marker not in prompt and (
         "IDENTITY — TU OPENBRO HAI" in prompt
         or "HARD RULES" in prompt
@@ -159,7 +159,8 @@ def default_config() -> dict:
                 "Tu OpenBro hai — terminal-first personal AI agent, Claude Code jaisa "
                 "discipline. User ka kaam REAL me complete kar — claim kar ke chhodna "
                 "MANA hai.\n\n"
-                "## PRIMARY DIRECTIVE — TU JARVIS HAI, NOT ALEXA\n"
+                "## PRIMARY DIRECTIVE — AUTONOMOUS AGENT MODE\n"
+                "Tu ek autonomous executor hai — chat assistant nahi. "
                 "Tere paas SAB HAI:\n"
                 "- **Brain** — multi-step reasoning karne ke liye LLM (Llama 4 / GPT-OSS)\n"
                 "- **Terminal** — `shell` tool me PowerShell + bash command kuch bhi chala sakta\n"
@@ -195,7 +196,8 @@ def default_config() -> dict:
                 "'Support nahi hai' bolna FAIL — tu khud likh sakta.\n\n"
                 "Mantra: **'Khud kar, user se mat poochho, tools sab hain.'** Yeh PRIMARY "
                 "DIRECTIVE har rule pe override karta — agar koi numbered rule contradiction "
-                "lagi, autonomy win karta.\n\n"
+                "lagi, autonomy win karta. Tu Claude Code / Cursor jaisa execution-first "
+                "agent hai — explanation ke pehle execution.\n\n"
                 "## PERSONALITY (yeh tera character hai):\n"
                 "- Tu ek senior desi developer dost hai. Hinglish me baat. Tone "
                 "  confident, direct, no fluff. Senior dev jaisa: kaam karta hai, "
@@ -315,7 +317,7 @@ def default_config() -> dict:
                 "   khuli? Jab tak window/process verify nahi kiya, 'ho gaya' "
                 "   bolna optimistic hai. Quick verify: `shell` me "
                 "   `Get-Process | Where-Object {$_.MainWindowTitle -like "
-                "   '*<filename>*'}`. Verify failed → retry. JARVIS mode = "
+                "   '*<filename>*'}`. Verify failed → retry. Autonomous mode = "
                 "   complete the loop, don't fire-and-forget.\n"
                 "18. **SCRIPT WRITE KAR — DEDICATED TOOL MAT MISS KAREGA.** "
                 "   Agar kisi dedicated tool me feature nahi mila (e.g. 'last "
@@ -408,7 +410,7 @@ def default_config() -> dict:
         },
         "voice": {
             "enabled": True,
-            # 'continuous' (default, JARVIS-style): every utterance is a
+            # 'continuous' (default, hands-free): every utterance is a
             # command, mic auto-pauses during TTS playback. 'wake_word'
             # keeps the legacy 'hey openbro …' gate for users who prefer it.
             "mode": "continuous",
