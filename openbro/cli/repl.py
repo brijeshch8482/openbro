@@ -4,7 +4,6 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.history import FileHistory
 from rich.console import Console
-from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
 
@@ -64,22 +63,61 @@ def _render_response(con: Console, text: str) -> None:
 
 
 def print_banner():
-    # Claude-Code-inspired multi-line banner — diamond icon, name,
-    # tagline, and a one-line "what you can do" hint. Keeps the info
-    # density low so the user sees a clean fresh slate every launch.
-    title = f"[bold cyan]◆ OpenBro[/bold cyan] [dim]v{__version__}[/dim]"
-    tagline = "[white]Tera apna AI bro — terminal-first, voice-ready, full machine access.[/white]"
-    hint = (
-        "[dim]Type your question / command. "
-        "Slash-commands: [bold]/help /tools /voice /model /quit[/bold][/dim]"
-    )
-    console.print(
-        Panel(
-            f"{title}\n{tagline}\n\n{hint}",
-            border_style="cyan",
-            padding=(0, 2),
+    # Claude-Code-style minimal banner — no box around it. The status bar
+    # at the bottom of every prompt already carries the persistent info
+    # (model, voice, mode, shortcuts), so the banner can stay quiet. Just
+    # name + tagline + cwd, like Claude Code's '✻ Welcome to Claude Code!'.
+    import os as _os
+
+    cwd = _os.getcwd()
+    if len(cwd) > 60:
+        cwd = "…" + cwd[-58:]
+    console.print()
+    console.print(f"[bold cyan]◆[/bold cyan]  [bold]OpenBro[/bold] [dim]v{__version__}[/dim]")
+    console.print("   [dim]Terminal-first AI bro — voice, files, web, full machine access.[/dim]")
+    console.print(f"   [dim]cwd: {cwd}[/dim]")
+    console.print()
+    console.print("   [dim]Type a question or `/help` for commands. `exit` to quit.[/dim]")
+
+
+def _make_status_bar(agent, get_voice_state):
+    """Build a prompt_toolkit bottom_toolbar callable.
+
+    Claude Code parity: a thin status line always visible under the prompt
+    showing what model is active, voice/boss state, and the most useful
+    slash-commands. Called fresh on every keystroke so toggling 'voice on'
+    or 'boss on' updates the bar immediately.
+    """
+    from prompt_toolkit.formatted_text import HTML
+
+    def _bar():
+        cfg = load_config()
+        provider = cfg.get("llm", {}).get("provider", "?")
+        model = cfg.get("llm", {}).get("model", "?")
+        # Model names like 'meta-llama/llama-4-scout-17b-16e-instruct' get
+        # noisy in a single-line toolbar — trim the org/version cruft.
+        short_model = model.split("/")[-1]
+        if len(short_model) > 32:
+            short_model = short_model[:29] + "…"
+        voice_state = "on" if get_voice_state() else "off"
+        boss_state = (
+            "boss"
+            if getattr(agent, "permissions", None)
+            and getattr(agent.permissions, "mode", "") == "boss"
+            else "auto"
         )
-    )
+        # HTML-escape the model name — it can contain '<' / '&' that
+        # prompt_toolkit's HTML parser would choke on.
+        from html import escape as _esc
+
+        return HTML(
+            f" <ansicyan>◆</ansicyan> <ansigray>{_esc(provider)}/{_esc(short_model)}</ansigray>"
+            f"  <ansigray>·</ansigray>  <ansigray>voice {voice_state}</ansigray>"
+            f"  <ansigray>·</ansigray>  <ansigray>{boss_state}</ansigray>"
+            f"  <ansigray>·</ansigray>  <ansigray>/help /tools /voice /model /quit</ansigray>"
+        )
+
+    return _bar
 
 
 def start_repl():
@@ -97,18 +135,26 @@ def start_repl():
 
     config_dir = get_config_dir()
     history_file = config_dir / "history.txt"
+
+    agent = Agent()
+
+    # Auto-start voice listener if configured (before the session is built
+    # so the status bar can already reflect 'voice on').
+    cfg = load_config()
+    if cfg.get("voice", {}).get("auto_start"):
+        _start_voice(agent)
+
+    # The status bar reads the live voice listener state via a closure so
+    # toggling voice on/off updates the toolbar without re-creating the
+    # session.
+    status_bar = _make_status_bar(agent, lambda: _voice_listener is not None)
+
     session = PromptSession(
         history=FileHistory(str(history_file)),
         completer=completer,
         complete_while_typing=False,
+        bottom_toolbar=status_bar,
     )
-
-    agent = Agent()
-
-    # Auto-start voice listener if configured
-    cfg = load_config()
-    if cfg.get("voice", {}).get("auto_start"):
-        _start_voice(agent)
 
     # Daily LLM-update check (non-blocking, 24h cooldown). If a meaningfully
     # better model is available, prompt the user once.
@@ -123,10 +169,14 @@ def start_repl():
     try:
         while True:
             try:
-                # Claude-Code-style prompt: cyan glyph + space, minimal noise.
-                # Was "You > " — too much chrome on every line.
+                # Claude-Code-style prompt: a subtle thin separator above the
+                # input so each turn has visual breathing room, then a cyan
+                # `›` glyph. Status bar (bottom_toolbar) sits below the input
+                # showing model + voice + boss + shortcut hints.
                 from prompt_toolkit.formatted_text import ANSI
 
+                console.print()
+                console.rule(style="grey23")
                 user_input = session.prompt(ANSI("\x1b[36m›\x1b[0m ")).strip()
 
                 if not user_input:
@@ -155,17 +205,20 @@ def start_repl():
                             spinner="dots",
                         ):
                             response = agent.chat(user_input)
-                        console.print("\n[bold cyan]◆[/bold cyan] ", end="")
+                        # ⏺ (filled circle) for the assistant marker — Claude
+                        # Code's same glyph. Cleaner than ◆ when output is
+                        # immediately followed by code or markdown.
+                        console.print("\n[bold cyan]⏺[/bold cyan] ", end="")
                         _render_response(console, response)
                     else:
-                        console.print("\n[bold cyan]◆[/bold cyan] ", end="")
+                        console.print("\n[bold cyan]⏺[/bold cyan] ", end="")
                         for token in agent.stream_chat(user_input):
                             console.print(token, end="", highlight=False)
                             response += token
                 except Exception:
                     with console.status("[dim]OpenBro soch raha hai...[/dim]", spinner="dots"):
                         response = agent.chat(user_input)
-                    console.print("\n[bold cyan]◆[/bold cyan] ", end="")
+                    console.print("\n[bold cyan]⏺[/bold cyan] ", end="")
                     _render_response(console, response)
                 console.print("")
 
