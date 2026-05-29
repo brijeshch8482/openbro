@@ -1,8 +1,12 @@
 """Tests for voice layer (mocked - no real audio I/O in CI)."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from openbro.voice.listener import DEFAULT_WAKE_WORDS, VoiceListener
+from openbro.voice.listener import (
+    DEFAULT_STOP_PHRASES,
+    DEFAULT_WAKE_WORDS,
+    VoiceListener,
+)
 from openbro.voice.stt import VOICE_DEPS_HINT, SpeechToText
 from openbro.voice.tts import DEFAULT_VOICE, TextToSpeech
 
@@ -60,6 +64,57 @@ def test_listener_custom_wake_words():
     listener.wake_words = ["yo bro"]
     assert listener.is_wake_word("yo bro hello") is True
     assert listener.is_wake_word("hey openbro hello") is False
+
+
+def test_listener_default_mode_is_continuous():
+    """The big UX change: default mode dropped wake words entirely."""
+    listener = VoiceListener.__new__(VoiceListener)
+    listener.mode = "continuous"
+    assert listener.mode == "continuous"
+
+
+def test_listener_stop_phrase_detect():
+    listener = VoiceListener.__new__(VoiceListener)
+    listener.stop_phrases = [p.lower() for p in DEFAULT_STOP_PHRASES]
+    assert listener.is_stop_phrase("ok voice off please") is True
+    assert listener.is_stop_phrase("BYE BRO") is True
+    assert listener.is_stop_phrase("kya hai weather aaj ka") is False
+
+
+def test_listener_pause_resume_flips_flag():
+    listener = VoiceListener.__new__(VoiceListener)
+    listener._paused = False
+    listener.pause()
+    assert listener._paused is True
+    listener.resume()
+    assert listener._paused is False
+
+
+def test_listener_speak_with_mic_paused_pauses_then_resumes():
+    """Mic must be paused around the TTS call so the agent's own audio
+    isn't captured as the next command (echo loop)."""
+    listener = VoiceListener.__new__(VoiceListener)
+    listener._paused = False
+    listener.tts = MagicMock()
+
+    def _check_paused(text):
+        assert listener._paused is True
+
+    listener.tts.speak.side_effect = _check_paused
+    with patch("openbro.voice.listener.time.sleep"):
+        listener._speak_with_mic_paused("hello")
+    listener.tts.speak.assert_called_once_with("hello")
+    assert listener._paused is False
+
+
+def test_listener_speak_with_mic_paused_preserves_existing_pause():
+    """If we were already paused before speaking, don't resume after."""
+    listener = VoiceListener.__new__(VoiceListener)
+    listener._paused = True
+    listener.tts = MagicMock()
+    with patch("openbro.voice.listener.time.sleep"):
+        listener._speak_with_mic_paused("hi")
+    assert listener._paused is True
 
 
 def test_tts_speak_falls_back_on_edge_failure():

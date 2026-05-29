@@ -1,9 +1,16 @@
-"""Voice loop: capture mic audio, detect wake word, transcribe, dispatch to agent.
+"""Voice loop: capture mic audio, transcribe, dispatch to agent.
 
-Uses sounddevice for mic capture, simple energy-based VAD for utterance boundaries,
-and substring match for wake-word detection (e.g. 'hey openbro' / 'hi openbro').
+Two modes:
 
-For a production-grade wake word use Porcupine; this stays dependency-light.
+- **continuous** (default, new): every transcribed utterance is treated as a
+  command. No wake word. Mic auto-pauses while the agent's TTS reply plays so
+  the agent doesn't hear itself. User exits with `voice off` typed in REPL,
+  Ctrl+C, or by speaking a stop phrase like "stop listening" / "bye bro".
+- **wake_word** (legacy): keeps the original "hey openbro" gating. Whisper
+  mishearings are bundled in DEFAULT_WAKE_WORDS so common variants still match.
+
+Uses sounddevice for mic capture, simple energy-based VAD for utterance
+boundaries, and faster-whisper for STT.
 """
 
 from __future__ import annotations
@@ -11,6 +18,7 @@ from __future__ import annotations
 import queue
 import random
 import sys
+import threading
 import time
 from collections.abc import Callable
 
@@ -18,23 +26,19 @@ from openbro.voice.stt import VOICE_DEPS_HINT, SpeechToText
 from openbro.voice.tts import TextToSpeech
 
 # Whisper hears 'hey openbro' as 'Hebron', 'hebro', 'ai bro', or even
-# random Japanese ('レブロー') depending on the audio. We expand the
-# default wake list to include common mishearings so a user saying
-# 'hey openbro' isn't silently ignored just because STT spelt it
-# differently. All substring-matched lowercase.
+# random Japanese ('レブロー') depending on the audio. The wake_word mode
+# uses this expanded list to keep mishearings working.
 DEFAULT_WAKE_WORDS = [
     "hey openbro",
     "hi openbro",
     "ok openbro",
     "hello openbro",
-    # Common Whisper mishearings of 'openbro'
     "hebron",
     "hebro",
     "ai bro",
     "open bro",
     "openborough",
     "openborg",
-    # Generic fallbacks the model picks up cleanly
     "hey bro",
     "ok bro",
     "hi bro",
@@ -42,13 +46,35 @@ DEFAULT_WAKE_WORDS = [
     "openbro suno",
 ]
 
+# Phrases that end a continuous voice session. Lowercase, substring match.
+# Kept short and distinctive so a normal command can't accidentally trip them.
+DEFAULT_STOP_PHRASES = [
+    "voice off",
+    "stop listening",
+    "band karo voice",
+    "bye bro",
+    "bye openbro",
+    "good night bro",
+    "good night openbro",
+]
+
 
 class VoiceListener:
-    """Continuous voice loop with wake-word activation."""
+    """Continuous voice loop.
+
+    `mode='continuous'` (default): treat every transcript as a command. Mic
+    pauses while TTS plays back the reply (prevents the agent hearing itself
+    and looping).
+
+    `mode='wake_word'`: legacy gate; only act when a wake word is in the
+    transcript.
+    """
 
     def __init__(
         self,
+        mode: str = "continuous",
         wake_words: list[str] | None = None,
+        stop_phrases: list[str] | None = None,
         sample_rate: int = 16000,
         chunk_seconds: float = 8.0,
         silence_threshold: float = 0.003,
@@ -65,17 +91,18 @@ class VoiceListener:
         assistant_name: str = "OpenBro",
         ack_phrases: list[str] | None = None,
     ):
+        self.mode = mode if mode in ("continuous", "wake_word") else "continuous"
         self.wake_words = [w.lower() for w in (wake_words or DEFAULT_WAKE_WORDS)]
+        self.stop_phrases = [p.lower() for p in (stop_phrases or DEFAULT_STOP_PHRASES)]
         self.sample_rate = sample_rate
         self.chunk_seconds = chunk_seconds
         self.silence_threshold = silence_threshold
         self.silence_seconds = silence_seconds
         self.on_transcript = on_transcript
-        # Fires for EVERY non-empty transcript, with a flag indicating whether
-        # the wake word was present. Used by terminal/activity debug visibility — so
-        # the user can see "I heard: ..." even when the wake word didn't match
-        # (which is the #1 voice complaint: "voice kaam nahi kar rha" usually
-        # means the wake word wasn't detected, not that the mic failed).
+        # on_heard fires for EVERY non-empty transcript with a flag indicating
+        # whether it would be acted on (wake word matched in wake_word mode;
+        # always True in continuous mode). Lets the terminal show the user
+        # what the mic actually heard.
         self.on_heard = on_heard
         self.speak_replies = speak_replies
         self.assistant_name = assistant_name
@@ -94,10 +121,19 @@ class VoiceListener:
         )
         self.tts = TextToSpeech() if speak_replies else None
         self._running = False
+        # `_paused` is consulted both inside the recording loop (to short-
+        # circuit mic capture while the agent is speaking) and at the top
+        # of `run()`. Plain bool — single-writer, single-reader pattern, no
+        # lock needed.
+        self._paused = False
 
     def is_wake_word(self, text: str) -> bool:
         t = text.lower()
         return any(w in t for w in self.wake_words)
+
+    def is_stop_phrase(self, text: str) -> bool:
+        t = text.lower()
+        return any(p in t for p in self.stop_phrases)
 
     @staticmethod
     def strip_wake_word(text: str, wake_words: list[str]) -> str:
@@ -109,6 +145,14 @@ class VoiceListener:
                 return (t[:idx] + t[idx + len(w) :]).strip(" ,.?!")
         return t
 
+    def pause(self) -> None:
+        """Pause mic capture (used during TTS playback to avoid echo loop)."""
+        self._paused = True
+
+    def resume(self) -> None:
+        """Resume mic capture after a pause."""
+        self._paused = False
+
     def listen_once(self) -> str:
         """Record one chunk and return transcript."""
         audio = self._record_chunk(self.chunk_seconds)
@@ -117,7 +161,7 @@ class VoiceListener:
         return self.stt.transcribe_array(audio, sample_rate=self.sample_rate)
 
     def run(self) -> None:
-        """Main loop: listen, detect wake word, transcribe command, call handler."""
+        """Main loop: listen, optionally gate on wake-word, dispatch to handler."""
         try:
             import numpy as np  # noqa: F401
             import sounddevice as sd  # noqa: F401
@@ -132,34 +176,61 @@ class VoiceListener:
         # _start_voice() already shows a status message before spawning us.
         while self._running:
             try:
+                if self._paused:
+                    # Agent is currently speaking. Don't open the mic at all
+                    # — we'd record our own TTS and feed it back as a command.
+                    time.sleep(0.1)
+                    continue
+
                 text = self.listen_once()
                 if not text:
                     continue
-                has_wake = self.is_wake_word(text)
-                # Tell the terminal/activity surface what we heard, regardless of wake word.
-                # This lets the user debug ("I said X but it heard Y") and keeps
-                # non-wake-word speech from vanishing silently.
+
+                # Continuous mode acts on every utterance; wake_word mode
+                # requires the gate. on_heard's second arg ("would act?")
+                # reflects that.
+                if self.mode == "continuous":
+                    has_wake = True
+                    command = text.strip()
+                else:
+                    has_wake = self.is_wake_word(text)
+                    command = self.strip_wake_word(text, self.wake_words) if has_wake else text
+
                 if self.on_heard:
                     try:
                         self.on_heard(text, has_wake)
                     except Exception:
                         pass
-                if not has_wake:
+
+                # Stop phrase: works in BOTH modes so a user in wake_word
+                # mode can still say "bye bro" to exit without typing.
+                if self.is_stop_phrase(text):
+                    if self.tts and self.speak_replies:
+                        self._speak_with_mic_paused("Voice band kar raha hoon. Bye bro.")
+                    self._running = False
+                    break
+
+                if self.mode == "wake_word" and not has_wake:
                     continue
-                command = self.strip_wake_word(text, self.wake_words)
+
                 if not command:
+                    # Wake word with no payload — ask user to speak the actual
+                    # command. Only meaningful in wake_word mode (continuous
+                    # mode would never produce empty `command` for non-empty
+                    # `text`).
                     if self.tts:
-                        self.tts.speak(random.choice(self.ack_phrases))
+                        self._speak_with_mic_paused(random.choice(self.ack_phrases))
                     command = self.listen_once()
                 if not command:
                     continue
+
                 print(f"You (voice): {command}")
                 if self.on_transcript:
                     reply = self.on_transcript(command)
                     if reply:
                         print(f"{self.assistant_name}: {reply}")
                         if self.tts:
-                            self.tts.speak(reply)
+                            self._speak_with_mic_paused(reply)
             except KeyboardInterrupt:
                 self._running = False
                 break
@@ -169,6 +240,26 @@ class VoiceListener:
 
     def stop(self) -> None:
         self._running = False
+
+    def _speak_with_mic_paused(self, text: str) -> None:
+        """Pause mic, speak, then resume — prevents the agent's own audio
+        from being captured and processed as the next command (the classic
+        always-on assistant echo loop).
+        """
+        if not self.tts:
+            return
+        was_paused = self._paused
+        self._paused = True
+        try:
+            self.tts.speak(text)
+        except Exception as e:
+            print(f"[tts error] {e}", file=sys.stderr)
+        finally:
+            # Brief tail so any residual speaker output settles before the
+            # mic reopens. 250ms is enough on Windows MCI; longer feels laggy.
+            time.sleep(0.25)
+            if not was_paused:
+                self._paused = False
 
     def _record_chunk(self, seconds: float):
         try:
@@ -204,8 +295,11 @@ class VoiceListener:
             last_voice_at = None
             while collected_frames < frames:
                 if respect_stop and not self._running:
-                    # Caller asked us to stop mid-recording. Discard buffer
-                    # and exit so PortAudio releases the mic immediately.
+                    return None
+                if respect_stop and self._paused:
+                    # Mid-recording the listener got paused (TTS started).
+                    # Discard whatever we have, release the mic, let the
+                    # outer loop handle the pause sleep.
                     return None
                 try:
                     data = q.get(timeout=0.5)
@@ -228,9 +322,6 @@ class VoiceListener:
                 ):
                     break
         finally:
-            # Hard cleanup: stop + close the stream even if an exception or
-            # KeyboardInterrupt fires. This is what prevents the "mic still
-            # held by python.exe after exit" zombie state.
             try:
                 stream.stop()
             except Exception:
@@ -243,7 +334,6 @@ class VoiceListener:
         if not collected:
             return None
         audio = np.concatenate(collected, axis=0).flatten().astype("float32")
-        # Drop near-silent chunks early
         rms = float((audio**2).mean() ** 0.5)
         if rms < self.silence_threshold:
             return None
@@ -266,3 +356,8 @@ class VoiceListener:
         start = max(int(active[0]) - pad, 0)
         end = min(int(active[-1]) + pad, len(audio))
         return audio[start:end]
+
+
+# threading is imported at module top for future hooks; keep an explicit
+# reference so static checkers don't flag it as unused.
+_ = threading

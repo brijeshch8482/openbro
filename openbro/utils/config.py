@@ -224,7 +224,14 @@ def default_config() -> dict:
                 "with info_type='disk')\n"
                 "- 'naya word/excel banao' → `word` ya `excel` tool with action='create'\n"
                 "- 'process list / kya chal raha' → `shell` me `Get-Process | Select -First 20`\n"
-                "- 'mausam / web search' → `browser` action='search' OR `web` fetch\n\n"
+                "- 'mausam / web search' → `browser` action='search' OR `web` fetch\n"
+                "- 'ye PDF / image / audio / HTML me kya hai padh' → `document` "
+                "tool action='read' file='<path>'. Auto-dispatches by extension: "
+                "PDF (pypdf + OCR fallback), image (Tesseract OCR), audio "
+                "(faster-whisper transcript), HTML (strips tags), CSV/JSON/YAML, "
+                "Word, Excel, zip. NEVER bolna 'main sirf .docx padh sakta' — "
+                "`document` tool sab kuch padh sakta hai, missing dep ho to "
+                "tool error me install command bata dega.\n\n"
                 "## WORKFLOW:\n"
                 "Tool call karo → real result aaya → CONCISE answer (1-3 lines). "
                 "Tool ne empty/error diya → DIFFERENT tool/approach try karo "
@@ -276,6 +283,10 @@ def default_config() -> dict:
         },
         "voice": {
             "enabled": True,
+            # 'continuous' (default, JARVIS-style): every utterance is a
+            # command, mic auto-pauses during TTS playback. 'wake_word'
+            # keeps the legacy 'hey openbro …' gate for users who prefer it.
+            "mode": "continuous",
             "auto_start": False,  # if true, voice listens by default in REPL
             # small is noticeably better than base for Indian English / Hinglish
             # while still staying usable on normal laptops.
@@ -325,6 +336,17 @@ def default_config() -> dict:
                 "Yes bro, bolo.",
                 "Yes boss, boliye.",
                 "Ji sir, main sun raha hoon.",
+            ],
+            # Spoken stop phrases for continuous mode — say one of these and
+            # the listener exits without typing anything in the REPL.
+            "stop_phrases": [
+                "voice off",
+                "stop listening",
+                "band karo voice",
+                "bye bro",
+                "bye openbro",
+                "good night bro",
+                "good night openbro",
             ],
             "tts_voice": "en-IN-NeerjaNeural",
             "speak_replies": True,

@@ -41,7 +41,9 @@ def run_voice_mode():
     # Build listener first (without callback) so we can pass it to the gate
     try:
         listener = voice_listener_cls(
+            mode=voice_cfg.get("mode", "continuous"),
             wake_words=voice_cfg.get("wake_words"),
+            stop_phrases=voice_cfg.get("stop_phrases"),
             stt_model=voice_cfg.get("stt_model", "small"),
             stt_language=voice_cfg.get("stt_language"),
             stt_device=voice_cfg.get("stt_device", "cpu"),
@@ -71,10 +73,16 @@ def run_voice_mode():
 
     agent = Agent(permission_gate=gate)
     console.print("[bold cyan]Voice mode active.[/bold cyan]")
-    console.print(
-        "[dim]Wake words: hey openbro, hi openbro, ok openbro. "
-        f"Permission mode: {gate.mode}. Ctrl+C to exit.[/dim]\n"
-    )
+    if listener.mode == "continuous":
+        console.print(
+            "[dim]Continuous mode — har baat command hai. "
+            f"Permission: {gate.mode}. Stop: 'voice off' / 'bye bro' / Ctrl+C.[/dim]\n"
+        )
+    else:
+        console.print(
+            "[dim]Wake words: hey openbro, hi openbro, ok openbro. "
+            f"Permission mode: {gate.mode}. Ctrl+C to exit.[/dim]\n"
+        )
 
     def handle(text: str) -> str:
         try:

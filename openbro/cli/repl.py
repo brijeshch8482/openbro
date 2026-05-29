@@ -781,7 +781,9 @@ def _start_voice(agent: Agent):
 
     try:
         _voice_listener = VoiceListener(
+            mode=voice_cfg.get("mode", "continuous"),
             wake_words=voice_cfg.get("wake_words"),
+            stop_phrases=voice_cfg.get("stop_phrases"),
             stt_model=voice_cfg.get("stt_model", "small"),
             stt_language=voice_cfg.get("stt_language"),
             stt_device=voice_cfg.get("stt_device", "cpu"),
@@ -813,20 +815,19 @@ def _start_voice(agent: Agent):
 
     _voice_listener.on_transcript = _handle
 
-    # on_heard fires for EVERY transcript (wake-word matched or not). Wire
-    # it so the user sees what the mic + STT actually captured — without
-    # this they get no feedback on a missed wake word and assume voice is
-    # broken when really the STT just heard "hello bro" instead of "hey
-    # openbro". Print on a fresh line so it doesn't trample the prompt.
+    # on_heard fires for EVERY transcript. In continuous mode every utterance
+    # is treated as a command (has_wake=True), so we just echo what was heard.
+    # In wake_word mode we explain why a non-matching transcript was ignored —
+    # the #1 voice complaint is "voice kaam nahi kar rha" which is usually a
+    # wake-word miss, not a real bug.
+    is_continuous = _voice_listener.mode == "continuous"
+
     def _on_heard(text: str, has_wake: bool) -> None:
-        if has_wake:
+        if is_continuous:
+            console.print(f"\n[dim]🎤[/dim] {text}", highlight=False)
+        elif has_wake:
             console.print(f"\n[dim]🎤 [cyan]wake[/cyan]:[/dim] {text}", highlight=False)
         else:
-            # Surface the transcript AND remind the user that without a
-            # wake word the agent ignores it. Real user complaint: 'mera
-            # voice command yha likh rha lekin accept kyo nhi kr rha?'
-            # That was wake-word miss, not a bug. The hint shortcuts the
-            # confusion.
             console.print(
                 f"\n[dim]🎤 heard (no wake word — ignored):[/dim] {text}\n"
                 "[dim]   say 'hey openbro <command>' or 'ok bro <command>' "
@@ -840,10 +841,17 @@ def _start_voice(agent: Agent):
 
     _voice_thread = threading.Thread(target=_voice_listener.run, daemon=True)
     _voice_thread.start()
-    console.print(
-        "[green]Voice listening.[/green] "
-        "[dim]Wake words: hey openbro, ok openbro. Type 'voice off' to stop.[/dim]"
-    )
+    if is_continuous:
+        console.print(
+            "[green]🎤 Voice ACTIVE — continuous mode.[/green] "
+            "[dim]Bol bhai, har baat command hai. Stop: 'voice off' / "
+            "'bye bro' / Ctrl+C.[/dim]"
+        )
+    else:
+        console.print(
+            "[green]Voice listening.[/green] "
+            "[dim]Wake words: hey openbro, ok openbro. Type 'voice off' to stop.[/dim]"
+        )
 
 
 def _stop_voice():
@@ -865,8 +873,10 @@ def _show_voice_config():
     table.add_column("Setting", style="bold")
     table.add_column("Value")
     table.add_row("enabled", str(voice_cfg.get("enabled", True)))
+    table.add_row("mode", str(voice_cfg.get("mode", "continuous")))
     table.add_row("auto_start", str(voice_cfg.get("auto_start", False)))
     table.add_row("wake_words", ", ".join(voice_cfg.get("wake_words") or []))
+    table.add_row("stop_phrases", ", ".join(voice_cfg.get("stop_phrases") or []))
     table.add_row("ack_phrases", " | ".join(voice_cfg.get("ack_phrases") or []))
     table.add_row("stt_model", str(voice_cfg.get("stt_model", "small")))
     table.add_row("stt_language", str(voice_cfg.get("stt_language")))
