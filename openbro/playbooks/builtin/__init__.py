@@ -19,6 +19,7 @@ def all_builtin_playbooks() -> list[type]:
     from openbro.playbooks.builtin.geo_lookup import GeoLookupPlaybook
     from openbro.playbooks.builtin.open_app import OpenAppPlaybook
     from openbro.playbooks.builtin.process_check import ProcessCheckPlaybook
+    from openbro.playbooks.builtin.project_explain import ProjectExplainPlaybook
     from openbro.playbooks.builtin.system_health import SystemHealthPlaybook
     from openbro.playbooks.builtin.time_now import TimeNowPlaybook
 
@@ -29,6 +30,7 @@ def all_builtin_playbooks() -> list[type]:
         TimeNowPlaybook,
         SystemHealthPlaybook,
         ProcessCheckPlaybook,
+        ProjectExplainPlaybook,
         CloseAppPlaybook,
         OpenAppPlaybook,
         FileSearchPlaybook,

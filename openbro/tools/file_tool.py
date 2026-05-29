@@ -155,6 +155,9 @@ class FileTool(BaseTool):
     name = "file_ops"
     description = (
         "Read, write, list, search, or open files on the system. "
+        "For 'search': pass `path` as a DIRECTORY (e.g. 'D:/proj') and "
+        "`pattern` as a GLOB (e.g. '*.kt') — DON'T put the glob in the "
+        "path. Walk is bounded (4 levels deep, 6s cap). "
         "'open' launches a file (PDF, image, video, anything) in the user's "
         "default app and FUZZY-MATCHES by basename when the exact path is "
         "missing — pass 'T&P fees' and it finds 'T&P fees.pdf' on Desktop/"
@@ -213,16 +216,32 @@ class FileTool(BaseTool):
             return f"Contents of {path}:\n" + "\n".join(entries) if entries else "Empty directory"
 
         elif action == "search":
+            # Captured failure: model passed `path="D:\X\*.kt"` (path+glob
+            # merged) with empty `pattern`. The literal path didn't exist
+            # and the search bailed. Auto-split: if the path contains glob
+            # metacharacters in its TAIL, peel them into `pattern` so the
+            # caller still gets a useful result.
+            import fnmatch as _fnmatch
+
+            path_str = str(path)
+            if not pattern and any(ch in path.name for ch in "*?["):
+                pattern = path.name
+                path = path.parent
+                # Re-resolve in case parent itself referenced ~ etc.
+                path = resolve_user_path(str(path))
+
             if not pattern:
-                return "Pattern required for search"
+                return "Pattern required for search (e.g. pattern='*.pdf')"
             if not path.exists():
-                return f"Search root not found: {path}"
+                return (
+                    f"Search root not found: {path_str}. "
+                    "Pass `path` as a directory and `pattern` as a glob "
+                    "(e.g. path='D:/X' pattern='*.kt')."
+                )
             # rglob on a drive root walked all of D:\ in a captured session
             # and froze the REPL for minutes. Bounded walker: 4 levels
             # deep, 200 hits max, 6s wall clock — fast enough to stay
             # interactive, deep enough to catch normal user files.
-            import fnmatch as _fnmatch
-
             pat = pattern.lower()
 
             def _match(p: Path) -> bool:
