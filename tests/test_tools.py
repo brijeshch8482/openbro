@@ -293,6 +293,60 @@ def test_process_tool_unknown_action():
     assert "Unknown action" in result
 
 
+def test_process_find_requires_query():
+    out = ProcessTool().run(action="find", query="")
+    assert "Query required" in out
+
+
+def test_process_find_windows_matches_command_line(monkeypatch):
+    """Captured failure: 'find query=claude' returned 'no processes' even
+    though Claude Code was running as node.exe with 'claude' in the args.
+    The new Windows impl uses Get-CimInstance + JSON so command-line
+    substrings match. Mock the PowerShell call and verify formatting."""
+    from openbro.tools import process_tool as pt
+
+    fake_json = (
+        '[{"ProcessId":1234,"Name":"node.exe",'
+        '"CommandLine":"node /usr/bin/claude --resume abc"},'
+        '{"ProcessId":5678,"Name":"sh.exe",'
+        '"CommandLine":"sh -c claude"}]'
+    )
+
+    class FakeResult:
+        stdout = fake_json
+        stderr = ""
+        returncode = 0
+
+    monkeypatch.setattr(pt.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(pt.subprocess, "run", lambda *a, **kw: FakeResult())
+
+    out = ProcessTool().run(action="find", query="claude")
+    assert "Found 2" in out
+    assert "PID 1234" in out
+    assert "node.exe" in out
+    assert "PID 5678" in out
+    assert "sh.exe" in out
+
+
+def test_process_find_windows_no_matches_returns_actionable_hint(monkeypatch):
+    """Empty result should suggest looking at adjacent process names rather
+    than silently say 'not found' — the agent has bailed out on this exact
+    case before."""
+    from openbro.tools import process_tool as pt
+
+    class FakeResult:
+        stdout = ""
+        stderr = ""
+        returncode = 0
+
+    monkeypatch.setattr(pt.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(pt.subprocess, "run", lambda *a, **kw: FakeResult())
+
+    out = ProcessTool().run(action="find", query="claude")
+    assert "claude" in out
+    assert "synonym" in out or "node" in out
+
+
 def test_system_control_tool_schema():
     tool = SystemControlTool()
     schema = tool.schema()
