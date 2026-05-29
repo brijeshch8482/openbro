@@ -237,18 +237,17 @@ def test_tool_registry():
 
 
 def test_tool_registry_count():
-    # 20 tools: + sticky_notes for Windows Sticky Notes (memory tool got
-    # confused with it). Most platform-specific integrations should be
-    # done via python/shell tools — sticky_notes is the exception because
-    # it sits in user-facing app territory where the agent needs an
-    # unambiguous mapping.
-    assert len(BUILTIN_TOOLS) == 20
+    # 21 tools: + document for the universal file reader (PDF/image OCR/
+    # audio transcript/HTML/CSV/zip — replaces the old "main sirf .docx
+    # padh sakta" failure mode). sticky_notes is still the carve-out for
+    # Windows Sticky Notes app integration.
+    assert len(BUILTIN_TOOLS) == 21
 
 
 def test_tool_registry_schema():
     registry = ToolRegistry()
     schemas = registry.get_tools_schema()
-    assert len(schemas) == 20
+    assert len(schemas) == 21
     for s in schemas:
         assert "name" in s
         assert "parameters" in s

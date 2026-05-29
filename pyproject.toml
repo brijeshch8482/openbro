@@ -60,6 +60,18 @@ office = [
     "python-docx>=1.1",
     "openpyxl>=3.1",
 ]
+docs = [
+    # Universal file reader backends. All optional — DocumentTool reports
+    # which to install if a needed one is missing. Audio reading reuses
+    # faster-whisper from openbro[voice], so install both together if
+    # you want PDF + image OCR + audio + HTML coverage.
+    "pypdf>=4.0",
+    "pytesseract>=0.3.10",
+    "Pillow>=10.0",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+    "pdf2image>=1.17",
+]
 brain = [
     # Semantic memory backend. Pulls torch (~2.5 GB on Windows). Optional —
     # without it, OpenBro falls back to keyword-based memory search which
@@ -85,6 +97,12 @@ all = [
     "python-docx>=1.1",
     "openpyxl>=3.1",
     "sentence-transformers>=2.7",
+    "pypdf>=4.0",
+    "pytesseract>=0.3.10",
+    "Pillow>=10.0",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+    "pdf2image>=1.17",
 ]
 # Note: Groq uses httpx directly (already a core dependency), no extra package needed
 dev = [

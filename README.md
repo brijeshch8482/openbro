@@ -233,9 +233,18 @@ openbro model download llama3.1:8b                     # pull a local GGUF
 
 ### Voice activation
 
-- Default wake words: **"hey openbro"**, **"ok openbro"**, **"hi openbro"**, **"hey bro"**, **"ok bro"**.
-- Whisper-mishearing variants ("hebron", "open bro", "ai bro") are also wired up — speak naturally.
-- When you see `🎤 heard (no wake word — ignored): ...` it means the mic captured your speech but no wake word matched. Just say "hey openbro <command>" to act.
+- Default mode is **continuous** — say `voice on` once, then every utterance is a command. No wake word needed. Mic auto-pauses while OpenBro is replying so it doesn't hear itself.
+- Stop with `voice off`, `Ctrl+C`, or by speaking **"bye bro"** / **"stop listening"** / **"voice off"**.
+- Prefer the old wake-word UX? `openbro config set voice.mode wake_word` — then say **"hey openbro <command>"** / **"ok bro <command>"** (Whisper mishearings like "hebron" / "open bro" are also wired up).
+
+### Reading files (PDF, image, audio, anything)
+
+- `read this file: ~/Desktop/notes.pdf` — agent uses the `document` tool which auto-dispatches by extension:
+  - **PDF** via pypdf (+ Tesseract OCR fallback for scanned PDFs).
+  - **Image** (.jpg / .png / .webp / …) via Tesseract OCR — "is screenshot me kya likha hai?".
+  - **Audio** (.mp3 / .wav / .m4a / …) via faster-whisper transcript.
+  - **HTML** via BeautifulSoup, **CSV/TSV** via stdlib, **JSON/YAML** pretty-printed, **Word/Excel/zip** handled too.
+- Full coverage: `pip install 'openbro[docs]'` (pypdf, pytesseract, Pillow, beautifulsoup4, pdf2image). Each backend is independently optional — missing deps just print the install command for that one format.
 
 ### Common fixes
 

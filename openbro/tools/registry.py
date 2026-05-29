@@ -6,6 +6,7 @@ from openbro.tools.browser_tool import BrowserTool
 from openbro.tools.cli_agent_tool import CliAgentTool
 from openbro.tools.clipboard_tool import ClipboardTool
 from openbro.tools.datetime_tool import DateTimeTool
+from openbro.tools.document_tool import DocumentTool
 from openbro.tools.download_tool import DownloadTool
 from openbro.tools.excel_tool import ExcelTool
 from openbro.tools.file_tool import FileTool
@@ -29,6 +30,7 @@ BUILTIN_TOOLS = [
     CliAgentTool,
     ClipboardTool,
     DateTimeTool,
+    DocumentTool,
     DownloadTool,
     ExcelTool,
     FileTool,

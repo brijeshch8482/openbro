@@ -13,7 +13,10 @@ class FileTool(BaseTool):
     description = (
         "Read, write, list, search, or open files on the system. "
         "Use 'open' to launch a file (PDF, image, video, anything) in the "
-        "user's default app — works for any extension. 'read' is text-only."
+        "user's default app. 'read' auto-handles text AND binary formats "
+        "(PDFs/docx/xlsx/images/audio/HTML/zip get dispatched to the "
+        "`document` backend). For a specific backend or audio "
+        "transcription options, call `document` directly."
     )
     risk = RiskLevel.MODERATE
 
@@ -26,6 +29,27 @@ class FileTool(BaseTool):
         if action == "read":
             if not path.exists():
                 return f"File not found: {path}"
+            # Non-text formats (PDF, image, audio, docx, etc.) explode or
+            # return garbage when read as text. Delegate them to the
+            # document tool which dispatches by extension. file_ops still
+            # owns plain text / code / unknown extensions for the common
+            # case (`read foo.py`, `read notes.txt`).
+            from openbro.tools.document_tool import (
+                AUDIO_EXTS,
+                DOCX_EXTS,
+                EXCEL_EXTS,
+                HTML_EXTS,
+                IMAGE_EXTS,
+                PDF_EXTS,
+                ZIP_EXTS,
+                DocumentTool,
+            )
+
+            ext = path.suffix.lower()
+            if ext in (
+                PDF_EXTS | DOCX_EXTS | EXCEL_EXTS | IMAGE_EXTS | AUDIO_EXTS | HTML_EXTS | ZIP_EXTS
+            ):
+                return DocumentTool().run(action="read", file=str(path))
             return path.read_text(encoding="utf-8", errors="replace")[:10000]
 
         elif action == "write":
