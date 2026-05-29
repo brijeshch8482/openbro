@@ -216,6 +216,81 @@ def test_app_tool_schema():
     assert tool.risk == RiskLevel.MODERATE
 
 
+def test_app_tool_browser_group_resolves_to_known_exes():
+    """Captured failure: agent picked chrome.exe for 'close my browser'
+    while user was on Brave. 'browser' is now a group alias — tool tries
+    every known browser exe and reports which actually closed."""
+    from openbro.tools.app_tool import APP_GROUPS_WINDOWS
+
+    assert "chrome.exe" in APP_GROUPS_WINDOWS["browser"]
+    assert "brave.exe" in APP_GROUPS_WINDOWS["browser"]
+    assert "firefox.exe" in APP_GROUPS_WINDOWS["browser"]
+    assert "msedge.exe" in APP_GROUPS_WINDOWS["browser"]
+    # Trailing 's' and 'all browsers' should map to the same list.
+    assert APP_GROUPS_WINDOWS["browsers"] == APP_GROUPS_WINDOWS["browser"]
+    assert APP_GROUPS_WINDOWS["all browsers"] == APP_GROUPS_WINDOWS["browser"]
+
+
+def test_app_tool_close_group_summarizes_result(monkeypatch):
+    """_close_app_group should report which exes closed, which were not
+    running, and which errored — one tool call instead of forcing the
+    agent to make 7 calls (saves tokens, avoids rate limit)."""
+    from openbro.tools import app_tool as at
+
+    class FakeResult:
+        def __init__(self, rc, stderr=""):
+            self.returncode = rc
+            self.stderr = stderr
+            self.stdout = ""
+
+    call_log = []
+
+    def fake_run(cmd, **kwargs):
+        # taskkill /F /IM <exe>
+        exe = cmd[-1]
+        call_log.append(exe)
+        if exe == "chrome.exe":
+            return FakeResult(0)
+        if exe == "firefox.exe":
+            return FakeResult(0)
+        return FakeResult(128, stderr=f'ERROR: The process "{exe}" not found.')
+
+    monkeypatch.setattr(at.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(at.subprocess, "run", fake_run)
+
+    tool = at.AppTool()
+    out = tool.run(action="close", app_name="browser")
+
+    # Tool tried each browser exe
+    assert "chrome.exe" in call_log
+    assert "brave.exe" in call_log
+    # Closed ones are reported
+    assert "Closed:" in out
+    assert "chrome.exe" in out
+    assert "firefox.exe" in out
+    # Not-running ones reported separately, not as errors
+    assert "Not running:" in out
+    assert "brave.exe" in out
+
+
+def test_app_tool_close_specific_app_skips_group_logic(monkeypatch):
+    """Belt + suspenders: 'close chrome' (specific) still goes through
+    the single-app path. Group handling only kicks in for category words."""
+    from openbro.tools import app_tool as at
+
+    class FakeResult:
+        returncode = 0
+        stderr = ""
+        stdout = ""
+
+    monkeypatch.setattr(at.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(at.subprocess, "run", lambda *a, **k: FakeResult())
+
+    out = at.AppTool().run(action="close", app_name="chrome")
+    assert "Closed:" in out
+    assert "chrome.exe" in out
+
+
 def test_app_tool_unknown_action():
     tool = AppTool()
     result = tool.run(action="invalid")

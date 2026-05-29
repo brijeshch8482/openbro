@@ -12,6 +12,12 @@ WINDOWS_APP_ALIASES = {
     "chrome": "chrome.exe",
     "firefox": "firefox.exe",
     "edge": "msedge.exe",
+    "msedge": "msedge.exe",
+    "brave": "brave.exe",
+    "opera": "opera.exe",
+    "vivaldi": "vivaldi.exe",
+    "internet explorer": "iexplore.exe",
+    "ie": "iexplore.exe",
     "vscode": "code.exe",
     "vs code": "code.exe",
     "code": "code.exe",
@@ -35,6 +41,45 @@ WINDOWS_APP_ALIASES = {
     "excel": "excel.exe",
     "powerpoint": "powerpnt.exe",
     "outlook": "outlook.exe",
+}
+
+# Generic app categories — when user says "close my browser" they don't
+# specify which one. Map the category to its known exes and operate on
+# whichever is actually running. Group resolution happens before single-
+# app handling so 'browser' / 'browsers' don't fall through to literal
+# 'browser.exe'. Captured failure (2026-05-29): agent silently picked
+# chrome.exe for 'close my browser' even though user was on Brave.
+APP_GROUPS_WINDOWS = {
+    "browser": [
+        "chrome.exe",
+        "firefox.exe",
+        "msedge.exe",
+        "brave.exe",
+        "opera.exe",
+        "vivaldi.exe",
+        "iexplore.exe",
+    ],
+    "browsers": [
+        "chrome.exe",
+        "firefox.exe",
+        "msedge.exe",
+        "brave.exe",
+        "opera.exe",
+        "vivaldi.exe",
+        "iexplore.exe",
+    ],
+    "all browsers": [
+        "chrome.exe",
+        "firefox.exe",
+        "msedge.exe",
+        "brave.exe",
+        "opera.exe",
+        "vivaldi.exe",
+        "iexplore.exe",
+    ],
+    "editor": ["code.exe", "notepad.exe", "notepad++.exe", "sublime_text.exe"],
+    "editors": ["code.exe", "notepad.exe", "notepad++.exe", "sublime_text.exe"],
+    "terminal": ["wt.exe", "powershell.exe", "cmd.exe", "WindowsTerminal.exe"],
 }
 
 LINUX_APP_ALIASES = {
@@ -69,7 +114,13 @@ class AppTool(BaseTool):
     name = "app"
     description = (
         "Open, close, or find applications on the system. "
-        "Use 'open' to launch apps like Chrome, VS Code, Spotify, etc."
+        "Use 'open' to launch apps (chrome, vscode, spotify, etc.). "
+        "For 'close', pass the SPECIFIC app name when user names it "
+        "('close chrome'); pass the CATEGORY name when user is vague "
+        "('close my browser' -> app_name='browser' closes whichever of "
+        "Chrome/Firefox/Edge/Brave/Opera/Vivaldi/IE is actually running). "
+        "Categories: 'browser', 'editor', 'terminal'. Never assume "
+        "Chrome when user says 'browser' — use the group."
     )
     risk = RiskLevel.MODERATE
 
@@ -137,6 +188,14 @@ class AppTool(BaseTool):
             return "App name required"
 
         system = platform.system()
+        name_lower = app_name.lower().strip()
+
+        # Group close first: 'browser' / 'browsers' close whichever browser
+        # is actually running. Captured failure: user said 'close my browser'
+        # and agent silently tried only chrome.exe, missed the user's Brave.
+        if system == "Windows" and name_lower in APP_GROUPS_WINDOWS:
+            return self._close_app_group(APP_GROUPS_WINDOWS[name_lower])
+
         try:
             if system == "Windows":
                 exe = self._resolve_app_name(app_name, system)
@@ -166,6 +225,49 @@ class AppTool(BaseTool):
 
         except Exception as e:
             return f"Error closing app: {e}"
+
+    def _close_app_group(self, exes: list[str]) -> str:
+        """Close every exe in `exes` that is actually running.
+
+        Used for category aliases like 'browser' where the user doesn't
+        know (or care) which specific app. Calls taskkill once per exe,
+        returns a summary of what closed vs what wasn't running. This
+        is one tool call instead of forcing the agent to make 7 separate
+        calls to find which browser is open — saves a ton of tokens
+        and avoids the rate-limit trap from the captured failure.
+        """
+        closed: list[str] = []
+        not_running: list[str] = []
+        errors: list[str] = []
+        for exe in exes:
+            try:
+                result = subprocess.run(
+                    ["taskkill", "/F", "/IM", exe],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                if result.returncode == 0:
+                    closed.append(exe)
+                else:
+                    stderr = (result.stderr or "").lower()
+                    if "not found" in stderr or "process \"" in stderr:
+                        not_running.append(exe)
+                    else:
+                        errors.append(f"{exe}: {result.stderr.strip()}")
+            except Exception as e:
+                errors.append(f"{exe}: {e}")
+
+        parts = []
+        if closed:
+            parts.append("Closed: " + ", ".join(closed))
+        if not_running:
+            parts.append("Not running: " + ", ".join(not_running))
+        if errors:
+            parts.append("Errors: " + "; ".join(errors))
+        if not closed and not errors:
+            return f"No matching apps running (checked {len(exes)}: {', '.join(exes)})."
+        return "\n".join(parts)
 
     def _find_app(self, app_name: str) -> str:
         if not app_name:
