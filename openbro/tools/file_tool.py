@@ -22,33 +22,96 @@ _COMMON_SEARCH_ROOTS = [
 ]
 
 
+def _bounded_walk(
+    root: Path,
+    matcher,
+    max_depth: int = 4,
+    max_results: int = 200,
+    max_time_seconds: float = 6.0,
+) -> list[Path]:
+    """BFS walk under `root` with depth + count + wall-clock caps.
+
+    `matcher(Path) -> bool` decides what counts as a hit. Caps prevent the
+    walker from hanging on big drives — captured incident: agent searched
+    rglob on D:\\ for a filename, REPL froze for minutes because rglob has
+    no built-in cap. Default 6s timeout keeps voice/REPL responsive.
+    """
+    import time as _time
+
+    deadline = _time.monotonic() + max_time_seconds
+    results: list[Path] = []
+    queue: list[tuple[Path, int]] = [(root, 0)]
+    while queue and len(results) < max_results:
+        if _time.monotonic() >= deadline:
+            break
+        current, depth = queue.pop(0)
+        try:
+            entries = list(current.iterdir())
+        except (PermissionError, OSError):
+            continue
+        for entry in entries:
+            try:
+                if entry.is_file():
+                    if matcher(entry):
+                        results.append(entry)
+                        if len(results) >= max_results:
+                            break
+                elif entry.is_dir() and depth < max_depth:
+                    # Skip noisy / huge dirs that aren't where user files live.
+                    name = entry.name.lower()
+                    if name in {
+                        "node_modules",
+                        ".git",
+                        "__pycache__",
+                        ".venv",
+                        "venv",
+                        "windows",
+                        "$recycle.bin",
+                        "system volume information",
+                        "programdata",
+                        "program files",
+                        "program files (x86)",
+                    }:
+                        continue
+                    queue.append((entry, depth + 1))
+            except (PermissionError, OSError):
+                continue
+    return results
+
+
 def _fuzzy_find(path: Path, max_results: int = 25) -> list[Path]:
     """Find files matching `path` when the literal path doesn't exist.
 
-    Strategy:
-      1. If `path` has a parent that exists, glob `<stem>*` in that parent.
-         Handles 'D:/T&P fees' → 'D:/T&P fees.pdf'.
-      2. Otherwise, walk the common user roots (Desktop / Documents /
-         Downloads on both system + OneDrive copies) looking for files whose
-         stem CONTAINS the requested basename. Substring match so 'oops' hits
-         'oops_final_v2.pdf'.
+    Strategy (in order):
+      1. Parent-dir non-recursive glob — handles 'D:/T&P fees' →
+         'D:/T&P fees.pdf' in the same folder. Cheap.
+      2. Parent-dir bounded recursive walk (depth 4, 6s cap) — handles
+         'D:/College Fees Portal 3rd Year' → 'D:/School/College Fees
+         Portal 3rd Year.pdf' a couple of folders deep.
+      3. Common user roots (Desktop/Documents/Downloads ± OneDrive),
+         non-recursive substring match — handles 'open aadhar' from
+         anywhere.
 
     Returns at most `max_results` paths sorted by closeness (exact stem
-    match first). Empty list = no candidates.
+    match first). Empty list = no candidates anywhere.
     """
     stem_query = path.stem.lower()
     if not stem_query:
         return []
 
-    # Step 1: parent-dir glob (cheap, precise).
+    def _matches_exact(p: Path) -> bool:
+        return p.stem.lower() == stem_query
+
+    def _matches_loose(p: Path) -> bool:
+        return stem_query in p.stem.lower()
+
+    # Step 1: parent-dir non-recursive (cheap, precise).
     if path.parent and path.parent.exists() and path.parent != path:
         try:
-            candidates = [
-                p for p in path.parent.iterdir() if p.is_file() and p.stem.lower() == stem_query
-            ]
-            if candidates:
-                return candidates[:max_results]
-            # No exact-stem match — try wildcard (T&P fees → T&P fees v2.pdf)
+            same_folder = [p for p in path.parent.iterdir() if p.is_file()]
+            exact = [p for p in same_folder if _matches_exact(p)]
+            if exact:
+                return exact[:max_results]
             wildcard = list(path.parent.glob(f"{path.stem}*"))
             wildcard = [p for p in wildcard if p.is_file()]
             if wildcard:
@@ -56,7 +119,19 @@ def _fuzzy_find(path: Path, max_results: int = 25) -> list[Path]:
         except (PermissionError, OSError):
             pass
 
-    # Step 2: walk known user roots, substring match on stem.
+    # Step 2: bounded recursive walk under the parent dir.
+    # If parent is a drive root (D:\), walk it; for nested paths walk the
+    # given parent so the user can say 'D:/Documents/x' even if x lives in
+    # D:/Documents/School/x.pdf.
+    if path.parent and path.parent.exists() and path.parent != path:
+        hits = _bounded_walk(path.parent, _matches_exact)
+        if not hits:
+            hits = _bounded_walk(path.parent, _matches_loose)
+        if hits:
+            hits.sort(key=lambda p: (p.stem.lower() != stem_query, len(p.parts), p.name.lower()))
+            return hits[:max_results]
+
+    # Step 3: walk known user roots (shallow, substring match).
     hits: list[Path] = []
     for root in _COMMON_SEARCH_ROOTS:
         if not root.exists():
@@ -72,7 +147,6 @@ def _fuzzy_find(path: Path, max_results: int = 25) -> list[Path]:
         if len(hits) >= max_results:
             break
 
-    # Sort: exact stem match first, then alphabetical.
     hits.sort(key=lambda p: (p.stem.lower() != stem_query, p.name.lower()))
     return hits[:max_results]
 
@@ -141,9 +215,26 @@ class FileTool(BaseTool):
         elif action == "search":
             if not pattern:
                 return "Pattern required for search"
-            results = list(path.rglob(pattern))[:50]
+            if not path.exists():
+                return f"Search root not found: {path}"
+            # rglob on a drive root walked all of D:\ in a captured session
+            # and froze the REPL for minutes. Bounded walker: 4 levels
+            # deep, 200 hits max, 6s wall clock — fast enough to stay
+            # interactive, deep enough to catch normal user files.
+            import fnmatch as _fnmatch
+
+            pat = pattern.lower()
+
+            def _match(p: Path) -> bool:
+                return _fnmatch.fnmatch(p.name.lower(), pat)
+
+            results = _bounded_walk(path, _match)
             if not results:
-                return f"No files matching '{pattern}' in {path}"
+                return (
+                    f"No files matching '{pattern}' in {path} "
+                    "(searched 4 levels deep, 6s cap). Try a narrower "
+                    "root (e.g. D:/Documents instead of D:/) or check spelling."
+                )
             return "\n".join(str(r) for r in results)
 
         elif action == "open":

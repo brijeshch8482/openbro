@@ -60,11 +60,15 @@ def _migrate_config(config: dict) -> dict:
         # ruthless version that forbids code-in-chat.
         "first try writing the smallest correct code",
     )
-    # Force-upgrade if missing the latest rules (identity rule, browser
-    # gating). Match on the latest marker so older HARD RULES prompts
-    # also get pulled forward.
-    needs_upgrade = "IDENTITY — TU OPENBRO HAI" not in prompt and (
-        "HARD RULES" in prompt
+    # Force-upgrade if missing the LATEST rules. Each prompt revision bumps
+    # the version marker; old prompts that have earlier markers but miss the
+    # newest one get pulled forward. Currently: looking for the file-open
+    # rule (rule 11) which was added after captured failure where agent
+    # asked user for file extension instead of fuzzy-matching.
+    latest_marker = "NAAM SE FILTER = SUBSTRING"
+    needs_upgrade = latest_marker not in prompt and (
+        "IDENTITY — TU OPENBRO HAI" in prompt
+        or "HARD RULES" in prompt
         or "PERSONALITY (yeh tera character" in prompt
         or any(m in prompt for m in legacy_prompt_markers)
     )
@@ -240,7 +244,25 @@ def default_config() -> dict:
                 "   kar diya' tool ke result ke BAAD aata. Tool ne 'Opened ...' "
                 "   diya tabhi 'ho gaya' bol; tool ne error diya to retry kar "
                 "   (Rule 8) — tab tak 'file open ho gayi' bolna lie hai (real "
-                "   captured: agent said 'file open ho gayi' without calling tool).\n\n"
+                "   captured: agent said 'file open ho gayi' without calling tool).\n"
+                "13. **'DOCUMENT' = MULTIPLE EXTENSIONS.** User says 'documents', "
+                "   'docs', 'files', 'papers' — yeh `.pdf .docx .doc .odt .txt "
+                ".rtf .md .pages` SAB include karta. SIRF `.docx` check karna "
+                "   = fail (real captured: 'D drive me fee ke documents' search "
+                "   pe agent ne sirf `.docx` count kiya, PDFs miss). Excel/CSV "
+                "   alag — 'spreadsheets' word use ho tab `.xlsx .xls .csv`. "
+                "   Images = `.jpg .png .gif .bmp .webp .jpeg .tif .svg`.\n"
+                "14. **NAAM SE FILTER = SUBSTRING, NOT STARTSWITH.** User: "
+                "   'fee ke documents kitne'. Tu code me `name.lower().find('fee') "
+                ">= 0` likh — NOT `name.startswith('fee')`. Real files: "
+                "   'College_Fee_Receipt.pdf', 'tuition fee 2024.docx'. "
+                "   Startswith pe yeh 0 return hota — captured failure. Always "
+                "   case-insensitive substring jab tak user EXACT naam na de.\n"
+                "15. **FILE-COUNT QUERY = SHOW NAMES, NOT JUST NUMBER.** 'kitne "
+                "   fee documents hain' me sirf `409` count dena = weak. Tool "
+                "   call kar, fir top 5-10 actual filenames bhi list me daal "
+                "   (pura path ya bas basename). User aksar number nahi, exact "
+                "   files dhoond raha hota.\n\n"
                 "## TOOL-CHOICE QUICK MAP:\n"
                 "- 'kitne files/images/X hain folder me' → `python` me\n"
                 "  `from pathlib import Path; p=Path('~/Desktop').expanduser(); "

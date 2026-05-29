@@ -106,6 +106,66 @@ def test_file_open_exact_path_skips_fuzzy(tmp_path, monkeypatch):
     assert called["path"].endswith("exact.txt")
 
 
+def test_file_open_fuzzy_finds_in_nested_subdir(tmp_path, monkeypatch):
+    """Captured failure: user said 'open D:/College Fees Portal 3rd Year' and
+    the file was actually at D:/School/College Fees Portal 3rd Year.pdf —
+    one folder deep. fuzzy_find now does a bounded recursive walk so this
+    works without the user spelling out the full subfolder path."""
+    from openbro.tools import file_tool as ft
+
+    sub = tmp_path / "School"
+    sub.mkdir()
+    target = sub / "College Fees Portal 3rd Year.pdf"
+    target.write_bytes(b"pdf")
+
+    called = {}
+
+    def fake_startfile(p):
+        called["path"] = p
+
+    monkeypatch.setattr(ft.os, "startfile", fake_startfile, raising=False)
+    monkeypatch.setattr(ft.platform, "system", lambda: "Windows")
+    out = FileTool().run(action="open", path=str(tmp_path / "College Fees Portal 3rd Year"))
+    assert "Opened" in out
+    assert called["path"].endswith("College Fees Portal 3rd Year.pdf")
+
+
+def test_file_search_bounded_does_not_hang_on_deep_tree(tmp_path):
+    """Sanity: bounded search returns promptly even when the tree is deeper
+    than the depth cap. Catches the rglob freeze on D:\\ from the captured
+    session."""
+    import time
+
+    # Build a tree deeper than the depth cap. The bounded walker should
+    # bail at depth 4 rather than chasing all 8 levels.
+    current = tmp_path
+    for i in range(8):
+        current = current / f"level{i}"
+        current.mkdir()
+    (current / "deep.pdf").write_bytes(b"x")
+
+    start = time.monotonic()
+    out = FileTool().run(action="search", path=str(tmp_path), pattern="deep.pdf")
+    elapsed = time.monotonic() - start
+    # The file is past the depth cap, so we expect "no files matching"
+    # AND the call to be fast (<2s even on slow disks).
+    assert elapsed < 3.0, f"bounded search took {elapsed:.1f}s — should be fast"
+    assert "No files matching" in out
+
+
+def test_file_search_skips_noisy_dirs(tmp_path):
+    """node_modules / .git / __pycache__ etc. are skipped — they're huge and
+    almost never what the user wants. Verify they're excluded."""
+    (tmp_path / "user_doc.pdf").write_bytes(b"want this")
+    noisy = tmp_path / "node_modules"
+    noisy.mkdir()
+    (noisy / "user_doc.pdf").write_bytes(b"don't want this")
+
+    out = FileTool().run(action="search", path=str(tmp_path), pattern="user_doc.pdf")
+    assert str(tmp_path / "user_doc.pdf") in out
+    assert "node_modules" not in out
+
+
 def test_shell_tool_blocks_dangerous():
     tool = ShellTool()
     result = tool.run(command="rm -rf /")
