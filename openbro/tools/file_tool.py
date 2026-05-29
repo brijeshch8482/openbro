@@ -25,7 +25,7 @@ _COMMON_SEARCH_ROOTS = [
 def _bounded_walk(
     root: Path,
     matcher,
-    max_depth: int = 4,
+    max_depth: int = 8,
     max_results: int = 200,
     max_time_seconds: float = 6.0,
 ) -> list[Path]:
@@ -251,7 +251,7 @@ class FileTool(BaseTool):
             if not results:
                 return (
                     f"No files matching '{pattern}' in {path} "
-                    "(searched 4 levels deep, 6s cap). Try a narrower "
+                    "(searched 8 levels deep, 6s cap). Try a narrower "
                     "root (e.g. D:/Documents instead of D:/) or check spelling."
                 )
             return "\n".join(str(r) for r in results)

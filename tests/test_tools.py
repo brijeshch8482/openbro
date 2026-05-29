@@ -133,13 +133,14 @@ def test_file_open_fuzzy_finds_in_nested_subdir(tmp_path, monkeypatch):
 def test_file_search_bounded_does_not_hang_on_deep_tree(tmp_path):
     """Sanity: bounded search returns promptly even when the tree is deeper
     than the depth cap. Catches the rglob freeze on D:\\ from the captured
-    session."""
+    session. The cap was bumped from 4 to 8 to handle Android source
+    layouts (app/src/main/java/com/example/proj/...). The walker must
+    still bail at the new cap rather than chasing 100 levels."""
     import time
 
-    # Build a tree deeper than the depth cap. The bounded walker should
-    # bail at depth 4 rather than chasing all 8 levels.
+    # Build a tree deeper than the (new) depth cap of 8.
     current = tmp_path
-    for i in range(8):
+    for i in range(15):
         current = current / f"level{i}"
         current.mkdir()
     (current / "deep.pdf").write_bytes(b"x")
@@ -148,7 +149,7 @@ def test_file_search_bounded_does_not_hang_on_deep_tree(tmp_path):
     out = FileTool().run(action="search", path=str(tmp_path), pattern="deep.pdf")
     elapsed = time.monotonic() - start
     # The file is past the depth cap, so we expect "no files matching"
-    # AND the call to be fast (<2s even on slow disks).
+    # AND the call to be fast (<3s even on slow disks).
     assert elapsed < 3.0, f"bounded search took {elapsed:.1f}s — should be fast"
     assert "No files matching" in out
 

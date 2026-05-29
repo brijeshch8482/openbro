@@ -196,3 +196,124 @@ def test_registry_routes_project_explain_query(tmp_path):
     assert m is not None
     # project_explain should win over other playbooks for this shape
     assert m.playbook.name == "project_explain"
+
+
+# ─── Deep inspect ──────────────────────────────────────────────────────
+
+
+def test_deep_inspect_android_reads_manifest_and_source(tmp_path):
+    """Captured failure: MapRadiusKotlin had no README, only top-level
+    Gradle stuff. Deep inspect should drill into app/src/main/ to find
+    the manifest, MainActivity.kt, and dependencies."""
+    # Mimic the captured Android layout
+    (tmp_path / "build.gradle.kts").write_text(
+        'plugins { id("com.android.application") }\n'
+        "android {\n"
+        "    defaultConfig {\n"
+        '        applicationId = "com.example.mapradius"\n'
+        "    }\n"
+        "}\n"
+        "dependencies {\n"
+        '    implementation("com.google.android.gms:play-services-maps:18.2.0")\n'
+        '    implementation("androidx.core:core-ktx:1.12.0")\n'
+        "}"
+    )
+    app_main = tmp_path / "app" / "src" / "main"
+    app_main.mkdir(parents=True)
+    (app_main / "AndroidManifest.xml").write_text(
+        '<?xml version="1.0"?>\n'
+        '<manifest package="com.example.mapradius">\n'
+        '    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n'
+        '    <uses-permission android:name="android.permission.INTERNET" />\n'
+        "    <application>\n"
+        '        <activity android:name=".MainActivity" />\n'
+        '        <activity android:name=".MapActivity" />\n'
+        "    </application>\n"
+        "</manifest>"
+    )
+    src_dir = app_main / "java" / "com" / "example" / "mapradius"
+    src_dir.mkdir(parents=True)
+    (src_dir / "MainActivity.kt").write_text(
+        "package com.example.mapradius\n\n"
+        "import android.app.Activity\n"
+        "import com.google.android.gms.maps.GoogleMap\n\n"
+        "class MainActivity : Activity() {\n"
+        "    private lateinit var map: GoogleMap\n"
+        "    override fun onCreate(savedInstanceState: Bundle?) {\n"
+        "        // Set up map and radius drawing\n"
+        "    }\n"
+        "}"
+    )
+
+    pb = ProjectExplainPlaybook()
+    ctx = PlaybookContext(
+        user_input=f"{tmp_path} explain this project",
+        tool_registry=MagicMock(),
+        captures={},
+    )
+    out = pb.execute(ctx)
+
+    # Should detect Kotlin
+    assert "Kotlin" in out
+    # Should surface manifest content (was previously missing entirely)
+    assert "AndroidManifest.xml" in out
+    assert "com.example.mapradius" in out
+    assert "MainActivity" in out  # at least one activity
+    # Permissions surface
+    assert "ACCESS_FINE_LOCATION" in out or "INTERNET" in out
+    # Dependencies (Google Maps is the key signal for THIS app)
+    assert "play-services-maps" in out or "google" in out.lower()
+    # Source sample — actual code
+    assert "MainActivity.kt" in out
+    assert "GoogleMap" in out  # imported by the file we wrote
+
+
+def test_deep_inspect_python_reads_main_files(tmp_path):
+    """Python project: README-less, should show source samples."""
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "x"\ndescription = "y"\n')
+    src = tmp_path / "src" / "x"
+    src.mkdir(parents=True)
+    (src / "main.py").write_text("def main():\n    print('hello')\n")
+    (src / "helper.py").write_text("def helper():\n    return 42\n")
+
+    pb = ProjectExplainPlaybook()
+    ctx = PlaybookContext(
+        user_input=f"{tmp_path} explain this project",
+        tool_registry=MagicMock(),
+        captures={},
+    )
+    out = pb.execute(ctx)
+    assert "Python" in out
+    # The actual entry should be readable in the output
+    assert "main.py" in out
+    assert "def main" in out
+
+
+def test_deep_inspect_handles_no_recognizable_language(tmp_path):
+    """Random text dir — no language detected, deep inspect returns empty
+    (the response still shows the basic listing)."""
+    (tmp_path / "notes.md").write_text("just notes")
+    pb = ProjectExplainPlaybook()
+    ctx = PlaybookContext(
+        user_input=f"{tmp_path} explain this project",
+        tool_registry=MagicMock(),
+        captures={},
+    )
+    out = pb.execute(ctx)
+    # Doesn't crash, returns the basic structure
+    assert "Project:" in out
+
+
+def test_file_ops_search_depth_handles_nested_android(tmp_path):
+    """Bumped max_depth from 4 to 8 specifically for Android layouts
+    where MainActivity.kt sits at depth 6+. This test asserts the
+    deeper file is now found."""
+    from openbro.tools.file_tool import FileTool
+
+    # depth 6: app/src/main/java/com/example/proj/MainActivity.kt
+    deep = tmp_path / "app" / "src" / "main" / "java" / "com" / "example" / "proj"
+    deep.mkdir(parents=True)
+    (deep / "MainActivity.kt").write_text("class MainActivity")
+
+    out = FileTool().run(action="search", path=str(tmp_path), pattern="*.kt")
+    assert "MainActivity.kt" in out
