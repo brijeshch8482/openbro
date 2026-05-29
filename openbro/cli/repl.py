@@ -480,7 +480,13 @@ def _make_status_bar(agent, get_voice_state):
     return _bar
 
 
-def start_repl():
+def start_repl(resume_session: str | None = None):
+    """Launch the interactive REPL.
+
+    `resume_session`: when set, the agent loads a past session before
+    accepting input. Pass 'latest' to grab the most recent, or a
+    specific session ID to target one. None starts a fresh session.
+    """
     # First-run wizard
     if needs_setup():
         run_wizard()
@@ -497,6 +503,12 @@ def start_repl():
     history_file = config_dir / "history.txt"
 
     agent = Agent()
+
+    # Resume a past session if asked. We do this BEFORE the prompt
+    # session is constructed so the status bar shows the right token
+    # count from the start.
+    if resume_session is not None:
+        _resume_previous_session(agent, resume_session)
 
     # Auto-start voice listener if configured (before the session is built
     # so the status bar can already reflect 'voice on').
@@ -974,6 +986,67 @@ def _show_tools(agent: Agent):
         "\n[dim]Risk: safe = read-only, "
         "moderate = modifies files/opens apps, "
         "dangerous = system-level changes[/dim]\n"
+    )
+
+
+def _resume_previous_session(agent: Agent, session_hint: str) -> None:
+    """Load a past session into the agent's memory + chat history.
+
+    `session_hint` is either 'latest' (sentinel from --resume with no arg)
+    or a specific session ID. We hydrate working memory via the existing
+    MemoryManager.load_session, then push each past message into
+    agent.history so the LLM sees the conversation on next chat() call.
+    """
+    sessions = agent.memory.list_sessions()
+    if not sessions:
+        console.print("[yellow]No past sessions to resume. Starting fresh.[/yellow]\n")
+        return
+
+    if session_hint == "latest":
+        target_id = sessions[0]["session_id"]
+        label = "most recent"
+    else:
+        # Exact match first; if none, allow prefix matching for short IDs.
+        match = next(
+            (s for s in sessions if s["session_id"] == session_hint),
+            None,
+        )
+        if match is None:
+            match = next(
+                (s for s in sessions if s["session_id"].startswith(session_hint)),
+                None,
+            )
+        if match is None:
+            console.print(
+                f"[red]No session matching `{session_hint}`.[/red] "
+                f"Run `sessions` after launch to see options.\n"
+            )
+            return
+        target_id = match["session_id"]
+        label = target_id
+
+    try:
+        agent.memory.load_session(target_id)
+    except Exception as e:
+        console.print(f"[red]Failed to load session {target_id}: {e}[/red]\n")
+        return
+
+    # Replay the past turns into agent.history. The system prompt at
+    # history[0] stays — we only append from the resumed conversation.
+    from openbro.llm.base import Message as _Message
+
+    resumed = agent.memory.working()
+    replayed = 0
+    for msg in resumed:
+        role = msg.get("role")
+        if role not in ("user", "assistant"):
+            continue
+        agent.history.append(_Message(role=role, content=msg.get("content", "")))
+        replayed += 1
+
+    console.print(
+        f"[green]Resumed session[/green] [bold]{target_id}[/bold] "
+        f"[dim]({label}, {replayed} messages loaded)[/dim]\n"
     )
 
 

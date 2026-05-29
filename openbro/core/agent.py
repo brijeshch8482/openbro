@@ -9,6 +9,7 @@ from openbro.core.activity import get_bus
 from openbro.core.decompose import decompose
 from openbro.core.permissions import PermissionGate, PermissionRequest
 from openbro.core.tasklist import TaskList
+from openbro.core.workspace import detect_cached as detect_workspace
 from openbro.llm.base import LLMResponse, Message
 from openbro.llm.router import create_provider
 from openbro.memory import MemoryManager
@@ -150,12 +151,27 @@ class Agent:
                 "Zaroorat padne pe inhe use kar."
             ),
             self._world_facts_block(),
+            self._workspace_block(),
         ]
         if memory_context:
             parts.append("\n" + memory_context)
         if lang:
             parts.append("\n" + language_instruction(lang))
         return "\n".join(p for p in parts if p)
+
+    def _workspace_block(self) -> str:
+        """Per-turn workspace fragment — cwd, git branch, recent files.
+
+        Cached for 60s so a long REPL session doesn't re-scan on every
+        turn; the workspace doesn't change at LLM-call frequency. If
+        detection fails for any reason, return empty and the prompt
+        builder will skip the section.
+        """
+        try:
+            ws = detect_workspace()
+        except Exception:
+            return ""
+        return ws.render_prompt_block()
 
     def _world_facts_block(self) -> str:
         """User-environment facts the LLM needs every turn (e.g. OneDrive paths).

@@ -25,6 +25,19 @@ from openbro import __version__
 @click.option(
     "--mcp-server", is_flag=True, help="Run as MCP server (stdio, for Claude Desktop etc.)"
 )
+@click.option(
+    "--resume",
+    "-r",
+    "resume_session",
+    is_flag=False,
+    flag_value="latest",
+    default=None,
+    help=(
+        "Resume a previous session. With no value, resumes the most recent. "
+        "Pass a session ID (e.g. --resume abc123def456) to load a specific one. "
+        "Use `sessions` REPL command to see options."
+    ),
+)
 @click.pass_context
 def main(
     ctx,
@@ -35,6 +48,7 @@ def main(
     telegram,
     voice,
     mcp_server,
+    resume_session,
 ):
     """OpenBro - terminal-first personal AI agent.
 
@@ -82,7 +96,7 @@ def main(
 
     from openbro.cli.repl import start_repl
 
-    start_repl()
+    start_repl(resume_session=resume_session)
 
 
 # ─── `openbro ask "<query>"` — single-shot non-interactive ────────────
