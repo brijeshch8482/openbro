@@ -417,6 +417,89 @@ def test_router_local_primary_still_uses_llm_model(monkeypatch):
     assert captured == ["phi3:mini"]
 
 
+def test_prompt_fallback_setup_skips_when_already_asked(monkeypatch, tmp_path):
+    """Once the user has been prompted, never prompt again — even if
+    the model isn't downloaded yet (they could have an interrupted
+    download or chose to download manually later)."""
+    from openbro.utils import local_llm_setup as ll
+
+    cfg = {
+        "llm": {"fallback": "local"},
+        "agent": {"fallback_prompted": True},
+        "providers": {"local": {"model": "llama3.2:3b"}},
+    }
+    monkeypatch.setattr(ll, "load_config", lambda: cfg)
+    monkeypatch.setattr(ll, "save_config", lambda c: None)
+    monkeypatch.setattr(ll, "is_fallback_ready", lambda *a, **k: False)
+
+    result = ll.prompt_fallback_setup()
+    assert result == "already_asked"
+
+
+def test_prompt_fallback_setup_skips_when_no_fallback_configured(monkeypatch):
+    """User who configured llm.fallback = null should never see the
+    prompt at all."""
+    from openbro.utils import local_llm_setup as ll
+
+    cfg = {
+        "llm": {"fallback": None},
+        "agent": {},
+        "providers": {"local": {}},
+    }
+    monkeypatch.setattr(ll, "load_config", lambda: cfg)
+    monkeypatch.setattr(ll, "save_config", lambda c: None)
+    monkeypatch.setattr(ll, "is_fallback_ready", lambda *a, **k: False)
+
+    result = ll.prompt_fallback_setup()
+    assert result == "skipped"
+
+
+def test_prompt_fallback_setup_skips_in_non_interactive_run(monkeypatch):
+    """CI / ask-mode (no stdin TTY) shouldn't block waiting for input."""
+    import sys
+
+    from openbro.utils import local_llm_setup as ll
+
+    cfg = {
+        "llm": {"fallback": "local"},
+        "agent": {},
+        "providers": {"local": {"model": "llama3.2:3b"}},
+    }
+    monkeypatch.setattr(ll, "load_config", lambda: cfg)
+    monkeypatch.setattr(ll, "save_config", lambda c: None)
+    monkeypatch.setattr(ll, "is_fallback_ready", lambda *a, **k: False)
+
+    class _NoTty:
+        @staticmethod
+        def isatty():
+            return False
+
+    monkeypatch.setattr(sys, "stdin", _NoTty())
+    result = ll.prompt_fallback_setup()
+    assert result == "skipped"
+
+
+def test_prompt_fallback_setup_marks_ready_when_model_present(monkeypatch):
+    """If the model is already on disk before the user has ever been
+    prompted (maybe they imported it manually), set the prompted flag
+    so we don't pester them later."""
+    from openbro.utils import local_llm_setup as ll
+
+    saved = []
+    cfg = {
+        "llm": {"fallback": "local"},
+        "agent": {},
+        "providers": {"local": {"model": "llama3.2:3b"}},
+    }
+    monkeypatch.setattr(ll, "load_config", lambda: cfg)
+    monkeypatch.setattr(ll, "save_config", lambda c: saved.append(c))
+    monkeypatch.setattr(ll, "is_fallback_ready", lambda *a, **k: True)
+
+    result = ll.prompt_fallback_setup()
+    assert result == "ready"
+    assert saved[0]["agent"]["fallback_prompted"] is True
+
+
 def test_config_migration_fills_local_model_default():
     """Existing users whose providers.local block predates the 'model'
     key get the default filled in on next load."""

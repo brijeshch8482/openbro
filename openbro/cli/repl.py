@@ -537,14 +537,25 @@ def start_repl(resume_session: str | None = None):
 
     agent = Agent()
 
-    # Auto-download the fallback model if it's missing. Returns instantly
-    # — work runs in a background JobRegistry job so the REPL is fully
-    # responsive while the file pulls. Status bar carries a 'fallback:
-    # ⏳ downloading…' indicator that turns to '✓ ready' on completion.
+    # First-launch fallback setup: interactive prompt asks where to put
+    # the 2 GB model and gets explicit consent before downloading. If the
+    # user has been prompted before, this is a quiet no-op and the
+    # already-running background download (if any) resumes. If they said
+    # skip earlier, fallback is disabled in config and nothing happens.
+    # If they say yes here, the background download starts and the
+    # status bar shows 'fallback ⏳'.
     try:
-        from openbro.utils.local_llm_setup import ensure_fallback_ready_async
+        from openbro.utils.local_llm_setup import (
+            ensure_fallback_ready_async,
+            prompt_fallback_setup,
+        )
 
-        ensure_fallback_ready_async()
+        outcome = prompt_fallback_setup()
+        # 'already_asked' means user has been prompted before — fire the
+        # silent re-check so an interrupted download resumes across REPL
+        # restarts.
+        if outcome == "already_asked":
+            ensure_fallback_ready_async()
     except Exception:
         pass  # never let setup break the REPL
 

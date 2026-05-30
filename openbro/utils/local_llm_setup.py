@@ -24,6 +24,8 @@ from rich.console import Console
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
+from openbro.utils.config import load_config, save_config
+
 console = Console()
 
 
@@ -221,6 +223,108 @@ def _download_via_httpx(url: str, target: Path) -> bool:
     except (httpx.HTTPError, OSError) as e:
         console.print(f"[red]Download error: {e}[/red]")
         return False
+
+
+def prompt_fallback_setup() -> str:
+    """First-launch interactive prompt about the local fallback model.
+
+    Returns one of: 'ready' | 'downloading' | 'skipped' | 'already_asked'.
+
+    Behaviour:
+      - If fallback already on disk OR user has been prompted before
+        (agent.fallback_prompted=true), do nothing.
+      - Otherwise show a Rich prompt with three options:
+          [Y] download to the currently configured models dir
+          [N] skip — sets llm.fallback=null so this doesn't ask again
+          [C] change models dir — accept a path, save to
+              storage.models_dir, THEN download
+      - Saves the choice to config so we never ask twice. User can always
+        re-trigger via REPL `fallback download` command.
+
+    Designed for the agent's first launch in the REPL — the call site
+    happens BEFORE the auto-download kick. Quiet no-op when the agent
+    isn't running interactively (no TTY).
+    """
+    cfg = load_config()
+    fb = (cfg.get("llm", {}) or {}).get("fallback")
+    if not fb or fb != "local":
+        return "skipped"
+    if cfg.get("agent", {}).get("fallback_prompted"):
+        return "already_asked"
+    if is_fallback_ready():
+        # Mark as asked so we don't bother on subsequent launches.
+        cfg.setdefault("agent", {})["fallback_prompted"] = True
+        save_config(cfg)
+        return "ready"
+
+    # Non-interactive runs (CI, ask-mode, scripts) should not block on
+    # input. Detect by checking the TTY flag.
+    if not sys.stdin.isatty():
+        return "skipped"
+
+    model_name = (cfg.get("providers", {}).get("local") or {}).get("model") or DEFAULT_MODEL
+    info = MODELS.get(model_name) or {}
+    size = info.get("size", "~2 GB")
+    ram = info.get("ram", "4 GB")
+    desc = info.get("desc", "Offline fallback model")
+
+    target_dir = models_dir()
+
+    console.print()
+    console.print("[bold cyan]◆ Offline fallback model[/bold cyan]")
+    console.print(
+        "[dim]When the cloud LLM (Groq/OpenAI/etc.) rate-limits or "
+        "goes down, OpenBro can fall back to a local model so you never "
+        "see a hard error mid-conversation. One-time download:[/dim]"
+    )
+    console.print(f"  Model:   [bold]{model_name}[/bold] [dim]· {desc}[/dim]")
+    console.print(f"  Size:    [bold]{size}[/bold] [dim](needs ~{ram} RAM at runtime)[/dim]")
+    console.print(f"  Save to: [bold]{target_dir}[/bold]")
+    console.print()
+
+    choice = Prompt.ask(
+        "[bold]Download now?[/bold] [Y]es / [N]o (skip) / [C]hange path",
+        choices=["y", "n", "c"],
+        default="y",
+        show_choices=False,
+    ).lower()
+
+    if choice == "n":
+        # User opted out — disable the fallback chain so we don't keep
+        # warning on every startup. They can re-enable with:
+        #   config set llm.fallback local
+        cfg.setdefault("llm", {})["fallback"] = None
+        cfg.setdefault("agent", {})["fallback_prompted"] = True
+        save_config(cfg)
+        console.print("[yellow]Skipped — fallback disabled. Re-enable later with:[/yellow]")
+        console.print("[dim]  openbro config set llm.fallback local[/dim]\n")
+        return "skipped"
+
+    if choice == "c":
+        new_path = Prompt.ask(
+            "[bold]New models dir[/bold] (full path, e.g. D:/openbro-models)",
+            default=str(target_dir),
+        ).strip()
+        if new_path and new_path != str(target_dir):
+            try:
+                Path(new_path).mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                console.print(f"[red]Couldn't create {new_path}: {e}. Using default.[/red]")
+                new_path = str(target_dir)
+            cfg.setdefault("storage", {})["models_dir"] = new_path
+            save_config(cfg)
+            console.print(f"[green]Models dir set to:[/green] {new_path}")
+
+    # Mark asked + kick off the download (which respects the new dir).
+    cfg.setdefault("agent", {})["fallback_prompted"] = True
+    save_config(cfg)
+    job_id = ensure_fallback_ready_async()
+    if job_id:
+        console.print(
+            f"\n[green]Download started in background[/green] [dim](job `{job_id}`).[/dim] "
+            f"Track with `jobs` / `wait {job_id}`.\n"
+        )
+    return "downloading"
 
 
 def is_fallback_ready(model_name: str | None = None) -> bool:
