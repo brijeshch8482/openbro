@@ -210,6 +210,61 @@ def test_web_tool_schema():
     assert "fetch" in str(schema)
 
 
+def test_web_search_unwraps_ddg_redirect():
+    """DDG wraps result URLs in //duckduckgo.com/l/?uddg=<encoded-url>.
+    Real fetch needs the unwrapped target URL."""
+    from openbro.tools.web_tool import _unwrap_ddg_redirect
+
+    wrapped = "//duckduckgo.com/l/?uddg=https%3A%2F%2Fdeveloper.android.com%2Fdocs%2Fmtp&rut=abc123"
+    assert _unwrap_ddg_redirect(wrapped) == "https://developer.android.com/docs/mtp"
+
+    # Pass-through for non-redirect URLs
+    direct = "https://stackoverflow.com/q/12345"
+    assert _unwrap_ddg_redirect(direct) == direct
+
+
+def test_web_search_parses_ddg_html_results():
+    """Smoke test for the SERP parser: extract title + URL + snippet
+    from a synthetic DDG HTML response."""
+    from openbro.tools.web_tool import _parse_ddg_html
+
+    html = (
+        '<div class="result">'
+        '<a rel="nofollow" class="result__a" '
+        'href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fdeveloper.android.com%2Fkiosk">'
+        "Android Kiosk Mode Guide"
+        "</a>"
+        '<a class="result__snippet" href="x">'
+        "Configure single-app kiosk mode using DevicePolicyManager."
+        "</a>"
+        "</div>"
+    )
+    results = _parse_ddg_html(html)
+    assert len(results) == 1
+    title, url, snippet = results[0]
+    assert "Kiosk" in title
+    assert url == "https://developer.android.com/kiosk"
+    assert "DevicePolicyManager" in snippet
+
+
+def test_web_search_handles_empty_response():
+    """Empty / non-HTML response shouldn't crash the parser."""
+    from openbro.tools.web_tool import _parse_ddg_html
+
+    assert _parse_ddg_html("") == []
+    assert _parse_ddg_html("random text no markup") == []
+
+
+def test_web_tool_run_no_max_results_kwarg():
+    """Regression guard: tech_research playbook used to pass max_results=8
+    which crashed the tool silently. Tool signature must remain
+    (action, url, query) only."""
+    import inspect
+
+    sig = inspect.signature(WebTool.run)
+    assert set(sig.parameters.keys()) == {"self", "action", "url", "query"}
+
+
 def test_app_tool_schema():
     tool = AppTool()
     schema = tool.schema()

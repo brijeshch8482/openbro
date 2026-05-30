@@ -219,7 +219,7 @@ class TechResearchPlaybook(Playbook):
         # search results, fetch up to 6 substantive pages, and pass them
         # all into the LLM's context — the model picks what's relevant.
         try:
-            search_raw = web.run(action="search", query=query, max_results=8)
+            search_raw = web.run(action="search", query=query)
         except Exception:
             return ""
         urls = _extract_urls(search_raw)
@@ -235,7 +235,7 @@ class TechResearchPlaybook(Playbook):
         site_query = _site_augmented_query(query)
         if site_query and site_query != query:
             try:
-                extra = web.run(action="search", query=site_query, max_results=5)
+                extra = web.run(action="search", query=site_query)
                 for u in _extract_urls(extra):
                     if u not in urls:
                         urls.append(u)
