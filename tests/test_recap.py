@@ -218,3 +218,46 @@ def test_fabricated_tool_call_single_block_without_fake_output_passes():
 
     text = "Here's the call signature:\n```python\nopen(path, 'r')\n```"
     assert detect_fabricated_tool_call(text, tool_calls_made=0) is None
+
+
+def test_fabricated_rendered_tool_args_caught():
+    """Captured: 'iss time mera phone laptop se connected hai ya nhi?'
+    → model wrote `network action='ip'` as chat text without making
+    the call. Detector catches the rendered-args shape."""
+    from openbro.playbooks.builtin.tech_research import detect_fabricated_tool_call
+
+    text = (
+        "Chal, network tool se apne device ka connection status dekhte hain.\n"
+        "\n"
+        "Connection Status\n"
+        "\n"
+        " network action='ip'\n"
+    )
+    reason = detect_fabricated_tool_call(text, tool_calls_made=0)
+    assert reason is not None
+    assert "tool-args" in reason
+
+
+def test_fabricated_promise_without_action_caught():
+    """'Let me check X' / 'dekhte hain' with 0 tool calls → fabrication."""
+    from openbro.playbooks.builtin.tech_research import detect_fabricated_tool_call
+
+    for text in [
+        "Let me check the file for you.",
+        "I'll run the diagnostic now.",
+        "Dekhte hain kya data hai.",
+        "Check krta hau quickly.",
+    ]:
+        reason = detect_fabricated_tool_call(text, tool_calls_made=0)
+        assert reason is not None, f"{text!r} should be flagged"
+        assert "promised" in reason
+
+
+def test_rendered_tool_args_skipped_when_real_call_was_made():
+    """When at least one tool actually ran, rendered tool args in the
+    accompanying chat text are OK (it's just the model echoing the
+    call it made)."""
+    from openbro.playbooks.builtin.tech_research import detect_fabricated_tool_call
+
+    text = "I ran `network action='ip'` for you and got the result."
+    assert detect_fabricated_tool_call(text, tool_calls_made=1) is None

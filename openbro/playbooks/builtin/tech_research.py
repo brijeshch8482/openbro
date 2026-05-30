@@ -180,8 +180,28 @@ _FOLLOWUP_BLOCKERS = re.compile(
 )
 
 
+# Explicit "go research this" / "search and tell me" phrases. When ANY
+# of these appear, fire the playbook regardless of tech-keyword match —
+# the user is asking for grounded sources directly.
+_EXPLICIT_RESEARCH_PATTERNS = [
+    re.compile(r"\bresearch\s+(krke|kar\s+ke|kar\s+ke\s+batao|and\s+tell)\b", re.IGNORECASE),
+    re.compile(r"\bsearch\s+(online|krke|kar\s+ke|the\s+web|google)\b", re.IGNORECASE),
+    re.compile(r"\bfind\s+online\b", re.IGNORECASE),
+    re.compile(r"\b(deep|proper|detailed)\s+research\b", re.IGNORECASE),
+    re.compile(r"\b(web\s+pe|online\s+pe)\s+(dekho|search|dhoondh)\b", re.IGNORECASE),
+    re.compile(r"\bgo\s+research\b", re.IGNORECASE),
+]
+
+
 def _looks_technical(query: str) -> bool:
-    """Both a tech keyword AND a question shape must be present."""
+    """Both a tech keyword AND a question shape must be present.
+
+    OR an explicit 'research / search the web / online dhoondh' phrase
+    overrides the tech-keyword requirement — user is explicitly asking
+    for grounded sources so we honour it even on non-tech questions.
+    """
+    if any(p.search(query) for p in _EXPLICIT_RESEARCH_PATTERNS):
+        return True
     q_lower = query.lower()
     has_keyword = any(kw in q_lower for kw in _TECH_KEYWORDS)
     has_question = any(p.search(query) for p in _QUESTION_PATTERNS)
@@ -552,26 +572,66 @@ _FAKE_OUTPUT_PATTERN = re.compile(
     r"\n\s*(Output|Result|Returns?)\s*[:\-]\s*\n*\s*```", re.IGNORECASE
 )
 
+# Captured 2026-05-30: user asked 'iss time mera phone laptop se
+# connected hai ya nhi?'. Reflection retry fired correctly on round 1.
+# Round 2 then produced this:
+#   'Chal, network tool se apne device ka connection status dekhte
+#    hain. Connection Status. network action='ip''
+# i.e. it RENDERED tool args as chat text — `network action='ip'` —
+# but never emitted a real tool call. The Output: detector missed
+# this because there was no fake output block. We now catch the
+# rendered-args pattern explicitly.
+_RENDERED_TOOL_ARGS = re.compile(
+    r"\b(network|python|shell|file_ops|web|browser|app|cli_agent|memory|document|"
+    r"tech_research|recap|playbook)\s+(action|command|tool|path|url|query|target)\s*=",
+    re.IGNORECASE,
+)
+
+# 'Let me check X' / 'dekhte hain' style promises. Only counts as
+# fabrication when no tool_calls were made — if a real call follows,
+# the promise was honest.
+_PROMISE_WITHOUT_ACTION = re.compile(
+    r"\b(let me (check|try|run|use|call|see|look|verify|test)|"
+    r"i('?ll| will) (check|run|try|use|call|see|look|verify|test)|"
+    r"dekhte hain|check krta hau|check karta hu|"
+    r"chal\s+\w+\s+(tool|se))\b",
+    re.IGNORECASE,
+)
+
 
 def detect_fabricated_tool_call(text: str, tool_calls_made: int) -> str | None:
-    """Detect 'wrote code in chat + invented an Output: block' shape.
+    """Detect responses that LOOK like a tool ran but actually didn't.
 
     Returns a reason string if detected, None otherwise. Skips the
     check when at least one real tool call was made in this turn —
     the model is allowed to render its tool args as code-styled chat
     AFTER the tool actually ran.
+
+    Three shapes are caught:
+      1. fence + fake `Output:` / `Result:` block (NDLS_FDB failure)
+      2. rendered tool args like `network action='ip'` (phone-conn
+         failure)
+      3. 'Let me check X' / 'dekhte hain' promise with no call (drop-
+         and-run failure)
     """
     if not text or tool_calls_made > 0:
         return None
     fence_count = len(_CODE_FENCE.findall(text))
-    if fence_count < 1:
-        return None
-    # Has Code AND a fake Output/Result/Returns: block right after.
-    if _FAKE_OUTPUT_PATTERN.search(text):
+    # 1. Has Code AND a fake Output/Result/Returns: block right after.
+    if fence_count >= 1 and _FAKE_OUTPUT_PATTERN.search(text):
         return "fabricated 'Output:' block after chat-text code"
-    # Two+ code blocks with no real tool call = highly suspect.
+    # 2. Rendered tool args without making the call. Strong signal —
+    # model literally typed out the tool invocation.
+    if _RENDERED_TOOL_ARGS.search(text):
+        return "rendered tool-args (e.g. `network action='ip'`) without making the call"
+    # 3. Two+ code blocks with no real tool call = highly suspect.
     if fence_count >= 2:
         return "multiple chat-text code blocks with no tool calls made"
+    # 4. 'Let me check X' promise without execution. Cap on length so
+    # we don't flag long honest answers that happen to include the
+    # phrase.
+    if _PROMISE_WITHOUT_ACTION.search(text) and len(text) < 600:
+        return "promised an action ('let me check / dekhte hain') but no tool call made"
     return None
 
 

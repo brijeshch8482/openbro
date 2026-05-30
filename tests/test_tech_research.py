@@ -59,6 +59,28 @@ def test_does_not_match_casual_or_followup(q):
     assert pb.match(q) is None, f"{q!r} should NOT match"
 
 
+@pytest.mark.parametrize(
+    "q",
+    [
+        "tumhe kisne banaya research krke poori detail batao",
+        "search online and tell me about brijeshch8482 openbro",
+        "deep research kar this project",
+        "go research what is OpenBro",
+        "find online information about this CLI",
+        "search the web for openbro details",
+    ],
+)
+def test_explicit_research_phrase_overrides_tech_keyword_requirement(q):
+    """Captured failure: user asked 'tumhe kisne banaya research krke'
+    on the openbro project — no tech keyword in the query, so the
+    playbook used to decline and the LLM dumped a generic answer.
+    Explicit 'research krke' / 'search online' / 'find online' phrases
+    now fire the playbook regardless."""
+    pb = TechResearchPlaybook()
+    m = pb.match(q)
+    assert m is not None, f"{q!r} should match (explicit research request)"
+
+
 def test_too_short_queries_decline():
     pb = TechResearchPlaybook()
     assert pb.match("how to docker?") is None  # under 15 chars

@@ -482,20 +482,66 @@ class Agent:
                             role="system",
                             content=(
                                 "[REFLECTION RETRY] Your previous response "
-                                "contained code blocks AND fake 'Output:' "
-                                "or 'Result:' blocks, but you did NOT call "
-                                "any tool. The user did NOT run your code. "
-                                "The fabricated output is a LIE. You MUST "
-                                "actually call the python tool (or shell, "
-                                "or file_ops, or document) via the "
-                                "tool_calls slot — not write code in chat. "
-                                "Retry now: dispatch the appropriate tool "
-                                "call to answer the user's question. Do NOT "
-                                "show code in chat. Do NOT invent output."
+                                "looked like a tool ran but no tool was "
+                                "called. Detected pattern: "
+                                f"{fabricated_reason}. The user did NOT "
+                                "run your code. Any output you 'show' is "
+                                "fabricated. You MUST emit a real "
+                                "tool_calls entry — python, shell, "
+                                "file_ops, network, document, etc. — not "
+                                "type the call as chat text or invent its "
+                                "output. Retry now: dispatch the actual "
+                                "tool call to answer the user's question. "
+                                "Do NOT render tool args as text "
+                                "(`network action='ip'`). Do NOT promise "
+                                "and not deliver. Just call the tool."
                             ),
                         )
                     )
                     continue
+                # Second-pass fabrication: the retry ALSO produced a
+                # fake tool call. Don't let the user see another lie —
+                # surface the failure honestly. Captured failure:
+                # 'iss time mera phone laptop se connected hai ya
+                # nhi?' → step 1 fabricated Output: block (caught),
+                # step 2 rendered `network action='ip'` as text (NOT
+                # caught before this change). Without this branch the
+                # user just sees the second fabrication as the
+                # 'answer'.
+                if fabricated_reason and already_retried:
+                    self.bus.emit(
+                        "fabrication_persisted",
+                        f"second-pass fabrication: {fabricated_reason}",
+                        markers=[fabricated_reason],
+                    )
+                    honest = (
+                        "I tried to call a tool twice but my model kept "
+                        "rendering the call as chat text instead of "
+                        f"actually dispatching it ({fabricated_reason}). "
+                        "Rather than show you an invented answer, I'm "
+                        "stopping here. Options:\n"
+                        "  • Rephrase the request more concretely "
+                        "(`run X`, `check file Y`)\n"
+                        "  • Try `/fallback local` to switch providers "
+                        "for this turn\n"
+                        "  • Ask `/recap` to see the goal state\n"
+                    )
+                    self.history.append(Message(role="assistant", content=honest))
+                    self.memory.add("assistant", honest)
+                    self.history = [
+                        m
+                        for m in self.history
+                        if not (m.role == "system" and "[TRANSIENT_RESEARCH]" in (m.content or ""))
+                    ]
+                    self.bus.emit(
+                        "assistant",
+                        honest,
+                        turn_elapsed=_time.monotonic() - turn_started,
+                        turn_tokens_in=self._turn_tokens_in,
+                        turn_tokens_out=self._turn_tokens_out,
+                        steps=iteration + 1,
+                    )
+                    return honest
                 if lazy_markers and not already_retried:
                     self.bus.emit(
                         "reflection_retry",
