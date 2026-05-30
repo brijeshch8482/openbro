@@ -396,6 +396,68 @@ def test_trim_history_for_local_swap_drops_transient_blocks():
     assert any(m.role == "user" for m in agent.history), kinds
 
 
+def test_fabricated_bare_json_tool_args_caught():
+    """Captured 2026-05-30: llama-3.3-70b emitted
+    `file_ops{"action": "read", "path": "D:\\\\MapRadiusKotlin"}` as
+    chat text. The original regex required whitespace between tool
+    name and args; the no-space JSON shape leaked through and the
+    user saw raw text as the answer instead of debug output."""
+    from openbro.playbooks.builtin.tech_research import detect_fabricated_tool_call
+
+    text = 'file_ops{"action": "read", "path": "D:\\\\MapRadiusKotlin", "force_ocr": false}'
+    reason = detect_fabricated_tool_call(text, tool_calls_made=0)
+    assert reason is not None
+    assert "tool-args" in reason
+
+
+def test_groq_provider_extracts_bare_tool_call():
+    """Tier-1 fix: the groq provider's `_extract_bare_tool_calls`
+    lifts `file_ops{...}` into a real tool_calls entry so the agent
+    actually executes the call instead of showing the text."""
+    from openbro.llm.groq_provider import _extract_bare_tool_calls
+
+    text = 'file_ops{"action": "read", "path": "D:\\\\MapRadiusKotlin"}'
+    calls = _extract_bare_tool_calls(text)
+    assert len(calls) == 1
+    assert calls[0]["function"]["name"] == "file_ops"
+    assert calls[0]["function"]["arguments"] == {
+        "action": "read",
+        "path": "D:\\MapRadiusKotlin",
+    }
+
+
+def test_groq_provider_bare_tool_call_multiple():
+    """Multiple bare calls chained in one response are all lifted."""
+    from openbro.llm.groq_provider import _extract_bare_tool_calls
+
+    text = (
+        'First I will list: file_ops{"action": "list", "path": "D:/foo"} '
+        'then read: file_ops{"action": "read", "path": "D:/foo/a.txt"}'
+    )
+    calls = _extract_bare_tool_calls(text)
+    assert len(calls) == 2
+    assert all(c["function"]["name"] == "file_ops" for c in calls)
+
+
+def test_groq_provider_bare_tool_call_ignores_unknown_names():
+    """A `something{...}` for an unregistered tool name must NOT be
+    lifted — could be a literal map/dict the model is discussing."""
+    from openbro.llm.groq_provider import _extract_bare_tool_calls
+
+    text = 'somerandomname{"foo": "bar"}'
+    assert _extract_bare_tool_calls(text) == []
+
+
+def test_groq_provider_bare_tool_call_handles_nested_json():
+    """Balanced-brace parser must respect nested objects."""
+    from openbro.llm.groq_provider import _extract_bare_tool_calls
+
+    text = 'python{"code": "print({\\"x\\": 1})", "timeout": 5}'
+    calls = _extract_bare_tool_calls(text)
+    assert len(calls) == 1
+    assert calls[0]["function"]["name"] == "python"
+
+
 def test_trim_history_for_local_swap_keeps_under_budget():
     """The trimmed history must respect the token budget (approx)."""
     from unittest.mock import MagicMock, patch

@@ -216,6 +216,112 @@ def _extract_inline_tool_calls(content: str) -> list[dict]:
     return out
 
 
+# Captured 2026-05-30: llama-3.3-70b on Groq emitted
+#   file_ops{"action": "read", "path": "D:\\MapRadiusKotlin"}
+# i.e. bare tool-name followed immediately by JSON args, no
+# wrapper {"name": ..., "arguments": ...}. _extract_inline_tool_calls
+# missed this because it expects the wrapper shape. This regex
+# scans for `<known_tool_name>{...balanced JSON object...}` and
+# the function below extracts them so the agent actually executes
+# the call instead of dumping the text to the user as the answer.
+_KNOWN_TOOL_NAMES = frozenset(
+    {
+        "app",
+        "browser",
+        "cli_agent",
+        "clipboard",
+        "datetime",
+        "document",
+        "download",
+        "excel",
+        "file_ops",
+        "memory",
+        "network",
+        "notification",
+        "process",
+        "python",
+        "screenshot",
+        "shell",
+        "sticky_notes",
+        "system_control",
+        "system_info",
+        "web",
+        "word",
+        "tech_research",
+        "recap",
+    }
+)
+_BARE_TOOL_CALL_RE = re.compile(
+    r"\b(" + "|".join(sorted(_KNOWN_TOOL_NAMES, key=len, reverse=True)) + r")\s*\{",
+    re.IGNORECASE,
+)
+
+
+def _extract_bare_tool_calls(content: str) -> list[dict]:
+    """Recover tool calls in the bare shape `<tool_name>{...json...}`.
+
+    Distinct from `_extract_inline_tool_calls` which expects the
+    wrapper {"name": ..., "arguments": ...}. The bare shape was
+    captured 2026-05-30 from llama-3.3-70b emitting:
+
+        file_ops{"action": "read", "path": "D:\\\\MapRadiusKotlin"}
+
+    The agent treats this as plain text → tool never runs → user
+    sees the raw render as the answer. This rescue lifts the bare
+    form into proper tool_calls so _execute_tool_batch handles it.
+
+    Returns [] when no balanced JSON object follows a recognised
+    tool name. Multiple bare calls in the same response are all
+    recovered (model can chain them).
+    """
+    if not content or not content.strip():
+        return []
+    out: list[dict] = []
+    for i, m in enumerate(_BARE_TOOL_CALL_RE.finditer(content)):
+        name = m.group(1).lower()
+        # Find the matching closing brace for the `{` at m.end()-1.
+        start = m.end() - 1  # position of opening `{`
+        depth = 0
+        in_str = False
+        esc = False
+        end = -1
+        for j in range(start, len(content)):
+            ch = content[j]
+            if esc:
+                esc = False
+                continue
+            if ch == "\\":
+                esc = True
+                continue
+            if ch == '"':
+                in_str = not in_str
+                continue
+            if in_str:
+                continue
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    end = j + 1
+                    break
+        if end < 0:
+            continue
+        try:
+            args = json.loads(content[start:end])
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(args, dict):
+            continue
+        out.append(
+            {
+                "id": f"bare_{i}",
+                "function": {"name": name, "arguments": args},
+            }
+        )
+    return out
+
+
 def _serialize_message(m: Message) -> dict:
     """Render a Message in OpenAI/Groq wire format, preserving tool_calls.
 
@@ -417,6 +523,18 @@ class GroqProvider(LLMProvider):
             extracted = _extract_inline_tool_calls(content)
             if extracted:
                 tool_calls = extracted
+                content = ""
+
+        # Second-pass rescue for the bare shape `<tool_name>{...args
+        # JSON...}` without the {"name": ..., "arguments": ...}
+        # wrapper. Captured 2026-05-30 from llama-3.3-70b emitting
+        # `file_ops{"action": "read", "path": "D:\\\\MapRadiusKotlin"}`
+        # — without this lift, the literal text was shown as the
+        # answer and no debug ever happened.
+        if not tool_calls and content:
+            bare = _extract_bare_tool_calls(content)
+            if bare:
+                tool_calls = bare
                 content = ""
 
         return LLMResponse(

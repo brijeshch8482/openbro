@@ -582,8 +582,18 @@ _FAKE_OUTPUT_PATTERN = re.compile(
 # this because there was no fake output block. We now catch the
 # rendered-args pattern explicitly.
 _RENDERED_TOOL_ARGS = re.compile(
+    # Two shapes:
+    #   1. `network action='ip'` — original key=value (with space)
+    #   2. `file_ops{"action": "read", ...}` — bare JSON args (no
+    #      space). Captured 2026-05-30 from llama-3.3-70b when user
+    #      asked to debug D:\MapRadiusKotlin: agent typed
+    #      `file_ops{"action": "read", "path": "..."}` as chat text
+    #      and the rescue lift didn't trigger.
     r"\b(network|python|shell|file_ops|web|browser|app|cli_agent|memory|document|"
-    r"tech_research|recap|playbook)\s+(action|command|tool|path|url|query|target)\s*=",
+    r"tech_research|recap|playbook|notification|process|system_info|system_control|"
+    r"clipboard|screenshot|sticky_notes|datetime|download|word|excel)"
+    r"(?:\s+(action|command|tool|path|url|query|target)\s*=|"
+    r"\s*\{\s*[\"'](action|command|tool|path|url|query|target|file|name)[\"']\s*:)",
     re.IGNORECASE,
 )
 
