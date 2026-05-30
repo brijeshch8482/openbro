@@ -375,6 +375,8 @@ class Agent:
     def _chat_impl(self, user_input: str) -> str:
         import time as _time
 
+        from openbro.core.reflection_escalator import ReflectionEscalator
+
         self.last_language = detect_language(user_input)
         self._refresh_system_prompt(self.last_language)
 
@@ -394,6 +396,14 @@ class Agent:
         # without the agent having to thread them through every emit.
         self._turn_tokens_in = 0
         self._turn_tokens_out = 0
+
+        # Per-turn escalator: when the LLM produces a fabricated /
+        # lazy response, advance to the next strategy (harder prompt,
+        # model swap, local fallback, simplify, honest stop). Replaces
+        # the old 1-retry cap. See reflection_escalator.py for the
+        # default chain of 6 rounds. Fresh instance per turn so the
+        # next turn starts clean.
+        escalator = ReflectionEscalator()
 
         # ─── Playbook fast path ──────────────────────────────────────
         # Try matching the query to a pre-built playbook. If we get a
@@ -452,129 +462,100 @@ class Agent:
             )
 
             if not response.tool_calls:
-                # ─── Reflection: lazy-response detector ───────────────
-                # When a tech_research playbook injected sources but the
-                # LLM still answered with 'I cannot directly test' / 'test
-                # on different devices' filler, retry ONCE with a
-                # stronger instruction. Cap at one retry so the loop
-                # always terminates.
+                # ─── Reflection: escalating strategy chain ────────────
+                # When the LLM produces a fabricated/lazy response, the
+                # ReflectionEscalator advances to the next strategy:
+                # harder prompt → model swap → local fallback →
+                # simplify context → honest stop. Each retry tries
+                # something DIFFERENT — unbounded same-retry is
+                # useless on a weak model (always same fabrication).
+                # See reflection_escalator.py for the chain.
                 lazy_markers = _detect_lazy_response_safe(response.content)
                 fabricated_reason = _detect_fabricated_tool_call_safe(
                     response.content, turn_tool_calls_made
                 )
-                already_retried = any(
-                    "REFLECTION RETRY" in (m.content or "")
-                    for m in self.history
-                    if m.role == "system"
-                )
-                # Fabricated-tool-output is a HARDER failure than lazy
-                # markers — the agent literally invented results without
-                # running anything. Surface it loudly and demand a real
-                # tool call on the retry.
-                if fabricated_reason and not already_retried:
-                    self.bus.emit(
-                        "reflection_retry",
-                        f"fabricated tool output: {fabricated_reason}",
-                        markers=[fabricated_reason],
-                    )
-                    self.history.append(
-                        Message(
-                            role="system",
-                            content=(
-                                "[REFLECTION RETRY] Your previous response "
-                                "looked like a tool ran but no tool was "
-                                "called. Detected pattern: "
-                                f"{fabricated_reason}. The user did NOT "
-                                "run your code. Any output you 'show' is "
-                                "fabricated. You MUST emit a real "
-                                "tool_calls entry — python, shell, "
-                                "file_ops, network, document, etc. — not "
-                                "type the call as chat text or invent its "
-                                "output. Retry now: dispatch the actual "
-                                "tool call to answer the user's question. "
-                                "Do NOT render tool args as text "
-                                "(`network action='ip'`). Do NOT promise "
-                                "and not deliver. Just call the tool."
-                            ),
+                needs_retry = bool(fabricated_reason or lazy_markers)
+                if needs_retry:
+                    trigger = fabricated_reason or (f"lazy markers: {', '.join(lazy_markers[:3])}")
+                    strategy = escalator.next_strategy(trigger=trigger)
+                    # Either chain exhausted OR landed on honest_stop —
+                    # surface the failure transparently instead of
+                    # showing the user another fabricated answer.
+                    if strategy is None or strategy.is_honest_stop:
+                        self.bus.emit(
+                            "fabrication_persisted",
+                            f"escalator exhausted after {escalator.rounds_used()} rounds",
+                            tried=escalator.history,
+                            last_trigger=trigger,
                         )
-                    )
-                    continue
-                # Second-pass fabrication: the retry ALSO produced a
-                # fake tool call. Don't let the user see another lie —
-                # surface the failure honestly. Captured failure:
-                # 'iss time mera phone laptop se connected hai ya
-                # nhi?' → step 1 fabricated Output: block (caught),
-                # step 2 rendered `network action='ip'` as text (NOT
-                # caught before this change). Without this branch the
-                # user just sees the second fabrication as the
-                # 'answer'.
-                if fabricated_reason and already_retried:
-                    self.bus.emit(
-                        "fabrication_persisted",
-                        f"second-pass fabrication: {fabricated_reason}",
-                        markers=[fabricated_reason],
-                    )
-                    honest = (
-                        "I tried to call a tool twice but my model kept "
-                        "rendering the call as chat text instead of "
-                        f"actually dispatching it ({fabricated_reason}). "
-                        "Rather than show you an invented answer, I'm "
-                        "stopping here. Options:\n"
-                        "  • Rephrase the request more concretely "
-                        "(`run X`, `check file Y`)\n"
-                        "  • Try `/fallback local` to switch providers "
-                        "for this turn\n"
-                        "  • Ask `/recap` to see the goal state\n"
-                    )
-                    self.history.append(Message(role="assistant", content=honest))
-                    self.memory.add("assistant", honest)
-                    self.history = [
-                        m
-                        for m in self.history
-                        if not (m.role == "system" and "[TRANSIENT_RESEARCH]" in (m.content or ""))
-                    ]
-                    self.bus.emit(
-                        "assistant",
-                        honest,
-                        turn_elapsed=_time.monotonic() - turn_started,
-                        turn_tokens_in=self._turn_tokens_in,
-                        turn_tokens_out=self._turn_tokens_out,
-                        steps=iteration + 1,
-                    )
-                    return honest
-                if lazy_markers and not already_retried:
-                    self.bus.emit(
-                        "reflection_retry",
-                        f"detected lazy markers: {', '.join(lazy_markers[:3])}",
-                        markers=lazy_markers,
-                    )
-                    # Inject a corrective system instruction and loop again.
-                    self.history.append(
-                        Message(
-                            role="system",
-                            content=(
-                                "[REFLECTION RETRY] Your previous answer "
-                                "contained one of these lazy patterns: "
-                                f"{', '.join(lazy_markers)}. The user has "
-                                "REAL fetched sources in the prior system "
-                                "message. Rewrite the answer using ONLY the "
-                                "fetched content. Be specific. Cite "
-                                "[Source N] inline. No 'I cannot directly "
-                                "test'. No 'test on different devices'. No "
-                                "generic best-practice fluff. If a source "
-                                "shows real code, use it. Output the same "
-                                "structure as before (Answer / Steps / Code "
-                                "/ Caveats / Sources)."
-                            ),
+                        honest = escalator.build_honest_stop_message(last_trigger=trigger)
+                        self.history.append(Message(role="assistant", content=honest))
+                        self.memory.add("assistant", honest)
+                        self.history = [
+                            m
+                            for m in self.history
+                            if not (
+                                m.role == "system"
+                                and (
+                                    "[TRANSIENT_RESEARCH]" in (m.content or "")
+                                    or "[TRANSIENT_PLAN]" in (m.content or "")
+                                )
+                            )
+                        ]
+                        self.bus.emit(
+                            "assistant",
+                            honest,
+                            turn_elapsed=_time.monotonic() - turn_started,
+                            turn_tokens_in=self._turn_tokens_in,
+                            turn_tokens_out=self._turn_tokens_out,
+                            steps=iteration + 1,
                         )
+                        return honest
+                    # Apply the strategy: emit event, optionally swap
+                    # model, optionally simplify, then inject prompt
+                    # and loop.
+                    self.bus.emit(
+                        "escalation_round",
+                        f"Round {escalator.rounds_used() + 1}/6 — {strategy.description}",
+                        round=escalator.rounds_used(),
+                        strategy=strategy.name,
+                        description=strategy.description,
+                        trigger=trigger,
                     )
-                    continue  # re-run the LLM
+                    if strategy.model_swap:
+                        try:
+                            self._swap_model_for_retry(strategy.model_swap)
+                        except Exception as e:  # pragma: no cover — defensive
+                            self.bus.emit(
+                                "system",
+                                f"model swap failed ({strategy.model_swap}): {e}",
+                            )
+                    if strategy.simplify:
+                        # Drop transient context blocks so the retry
+                        # sees only the original user question + any
+                        # real tool results.
+                        self.history = [
+                            m
+                            for m in self.history
+                            if not (
+                                m.role == "system"
+                                and (
+                                    "[TRANSIENT_RESEARCH]" in (m.content or "")
+                                    or "[TRANSIENT_PLAN]" in (m.content or "")
+                                )
+                            )
+                        ]
+                    if strategy.prompt_injection:
+                        self.history.append(
+                            Message(role="system", content=strategy.prompt_injection)
+                        )
+                    continue  # re-run the LLM with the new strategy
 
                 # Final answer — model decided no more tools needed.
                 self.history.append(Message(role="assistant", content=response.content))
                 self.memory.add("assistant", response.content)
-                # Prune any [TRANSIENT_RESEARCH] system messages now that
-                # the synthesis is done. They were one-turn context for
+                # Prune any [TRANSIENT_RESEARCH] / [TRANSIENT_PLAN]
+                # system messages now that the synthesis is done. They were one-turn context for
                 # the LLM; keeping them across turns bloats every future
                 # request (captured: 12K-token retries / 413 cascades /
                 # local context overflow). The assistant's final answer
@@ -583,7 +564,13 @@ class Agent:
                 self.history = [
                     m
                     for m in self.history
-                    if not (m.role == "system" and "[TRANSIENT_RESEARCH]" in (m.content or ""))
+                    if not (
+                        m.role == "system"
+                        and (
+                            "[TRANSIENT_RESEARCH]" in (m.content or "")
+                            or "[TRANSIENT_PLAN]" in (m.content or "")
+                        )
+                    )
                 ]
                 self.bus.emit(
                     "assistant",
@@ -642,6 +629,50 @@ class Agent:
         self.history.append(Message(role="assistant", content=full_response))
         self.memory.add("assistant", full_response)
         self.bus.emit("assistant", full_response)
+
+    def _swap_model_for_retry(self, model_id: str) -> None:
+        """Hot-swap the provider's model mid-turn for an escalation retry.
+
+        `model_id` is either a concrete Groq model id (e.g.
+        `meta-llama/llama-4-maverick-17b-128e-instruct`) or the
+        sentinel `"LOCAL"` which means switch to the configured local
+        fallback provider.
+
+        Best-effort: if the swap fails (provider doesn't support live
+        model change, local model not installed, etc.) the caller
+        logs and continues with the current provider. No raise.
+        """
+        from openbro.llm.fallback_provider import FallbackProvider
+
+        if model_id == "LOCAL":
+            # Switch to the local provider by re-creating the provider
+            # with `provider_name="local"`. Best-effort: if local model
+            # isn't installed the call raises and we keep the current
+            # provider.
+            try:
+                from openbro.llm.router import create_provider
+
+                cfg = load_config()
+                local_cfg = cfg.get("providers", {}).get("local", {})
+                self.provider = create_provider(provider_name="local")
+                self.bus.emit(
+                    "system",
+                    f"escalator: swapped to local model ({local_cfg.get('model', '?')})",
+                )
+            except Exception as e:
+                self.bus.emit("system", f"escalator: local swap failed — {e}")
+            return
+
+        # Concrete model id — update the underlying provider's model.
+        # The FallbackProvider doesn't have a `.model` attr; it
+        # delegates to its primary. Most providers store the model
+        # as `self.model`; if not, the swap is silently skipped.
+        target = self.provider
+        if isinstance(target, FallbackProvider):
+            target = getattr(target, "primary", target)
+        if hasattr(target, "model"):
+            target.model = model_id
+            self.bus.emit("system", f"escalator: swapped model to {model_id}")
 
     def _try_playbook(self, user_input: str, turn_started: float) -> str | None:
         """Run a matching playbook if confidence is high enough.
@@ -730,30 +761,33 @@ class Agent:
             # echo it back. Then fall through (return None) so the
             # normal LLM loop runs.
             #
-            # Mark it with [TRANSIENT_RESEARCH] so the agent can prune
-            # it after the synthesis lands. Without pruning, 15K-char
-            # fetched-content blocks accumulate in history and every
-            # subsequent turn drags the same bloat → context overflow,
-            # rate-limit cascade, fallback failure. Captured failure:
-            # second turn after a tech_research synthesis errored with
-            # 'Groq 413 Request too large' + 'local context (8192) <
-            # requested (12063)' because the research block stayed
-            # forever. The post-synthesis prune in _chat_impl removes
-            # any message tagged with this marker.
-            preamble = (
-                "[TRANSIENT_RESEARCH] "
-                f"Playbook `{playbook.name}` ran web research for the "
-                "user's question. Use the sources below to write a "
-                "concrete, specific answer. Cite source URLs inline. "
-                "Do NOT add 'I can't verify' or 'test on different "
-                "devices' filler — the sources are real, current docs."
-            )
-            self.history.append(
-                Message(
-                    role="system",
-                    content=preamble + "\n\n" + response,
+            # Two marker shapes are supported:
+            #   [TRANSIENT_RESEARCH]  — tech_research (web sources)
+            #   [TRANSIENT_PLAN]      — planner (planning instruction)
+            # Both are pruned after the final answer via the same
+            # post-synthesis prune logic in _chat_impl. Without
+            # pruning, 15K-char research blocks accumulate in history
+            # and every subsequent turn drags the same bloat → context
+            # overflow, rate-limit cascade, fallback failure.
+            #
+            # If the playbook's response already starts with a
+            # TRANSIENT marker, append as-is (the playbook controls
+            # its own preamble). Otherwise wrap with the default
+            # research preamble so older playbooks keep working.
+            if response.lstrip().startswith("[TRANSIENT_"):
+                content = response
+            else:
+                preamble = (
+                    "[TRANSIENT_RESEARCH] "
+                    f"Playbook `{playbook.name}` ran web research for "
+                    "the user's question. Use the sources below to "
+                    "write a concrete, specific answer. Cite source "
+                    "URLs inline. Do NOT add 'I can't verify' or "
+                    "'test on different devices' filler — the sources "
+                    "are real, current docs."
                 )
-            )
+                content = preamble + "\n\n" + response
+            self.history.append(Message(role="system", content=content))
             # Note: don't persist this to long-term memory — it's
             # one-turn context. The LLM's final answer will be the
             # persisted assistant message via the normal loop.

@@ -355,7 +355,8 @@ def test_agent_reflection_retries_lazy_responses(monkeypatch):
         assert "MtpManager" in out
         assert fake_provider.chat.call_count == 2
 
-        # The history should have a [REFLECTION RETRY] system message
+        # The history should have an escalation system message from
+        # round 1 (harder_prompt strategy).
         retry_markers = [
             m
             for m in agent.history
@@ -364,38 +365,51 @@ def test_agent_reflection_retries_lazy_responses(monkeypatch):
         assert len(retry_markers) == 1
 
 
-def test_agent_reflection_caps_at_one_retry(monkeypatch):
-    """Don't retry forever — if the second response is ALSO lazy, accept
-    it (so the loop terminates) and surface to the user as-is."""
+def test_agent_escalator_terminates_after_chain_exhausted(monkeypatch):
+    """When EVERY response is lazy, the escalator advances through all
+    strategies (harder_prompt → maverick swap → local fallback →
+    simplify → honest_stop) and then emits an honest stop message.
+    The loop must terminate — no infinite recursion."""
     from unittest.mock import patch
 
     from openbro.core.agent import Agent
     from openbro.llm.base import LLMResponse
 
-    with patch("openbro.core.agent.create_provider") as fake_create:
-        fake_provider = MagicMock()
-        fake_provider.name.return_value = "fake"
-        fake_provider.supports_tools.return_value = True
+    fake_provider = MagicMock()
+    fake_provider.name.return_value = "fake"
+    fake_provider.supports_tools.return_value = True
 
-        # Both responses lazy → agent should retry exactly once, then accept
-        fake_provider.chat.side_effect = [
-            LLMResponse(
-                content="I cannot directly test this code.",
-                usage={"input": 50, "output": 10},
-            ),
-            LLMResponse(
-                content="Still: test on different devices to verify.",
-                usage={"input": 60, "output": 12},
-            ),
-        ]
-        fake_create.return_value = fake_provider
+    # Every response is lazy → escalator advances each round until
+    # it lands on honest_stop. Provide enough responses for all
+    # rounds (5 escalations on top of round 1 = up to 6 calls).
+    lazy = LLMResponse(
+        content="I cannot directly test or verify this on different devices.",
+        usage={"input": 50, "output": 12},
+    )
+    fake_provider.chat.side_effect = [lazy] * 8
+    # `.model` attr present so the `model_swap_maverick` round can
+    # actually set it without hitting hasattr() short-circuit.
+    fake_provider.model = "fake-model"
 
+    # Patch both the agent-level entry AND the router-level entry so
+    # the escalator's mid-turn `create_provider(provider_name="local")`
+    # call returns the same mock instead of loading a real local
+    # llama.cpp model.
+    with (
+        patch("openbro.core.agent.create_provider", return_value=fake_provider),
+        patch("openbro.llm.router.create_provider", return_value=fake_provider),
+    ):
         agent = Agent(interactive=False)
         agent.playbook_registry._playbooks = []
 
         out = agent.chat("how to deploy fastapi on aws")
-        assert fake_provider.chat.call_count == 2  # exactly one retry
-        assert out  # something was returned
+
+    # Loop terminates — call count bounded by the chain length.
+    # Honest stop message tells user what was tried.
+    assert fake_provider.chat.call_count <= 6
+    assert "tried" in out.lower() and "strategies" in out.lower(), (
+        f"expected honest-stop wording in: {out!r}"
+    )
 
 
 def test_agent_prunes_transient_research_after_synthesis(monkeypatch):
