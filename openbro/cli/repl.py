@@ -402,6 +402,7 @@ COMMANDS = [
     "wait",
     "kill",
     "workspace",
+    "recap",
     "fallback",
     "storage",
     "audit",
@@ -749,6 +750,10 @@ def _handle_command(cmd: str, agent: Agent) -> bool:
         _show_workspace()
         return True
 
+    if cmd_lower in ("recap", "/recap"):
+        _show_recap(agent)
+        return True
+
     if cmd_lower in ("fallback", "fallback status"):
         _show_fallback_status()
         return True
@@ -957,6 +962,7 @@ def _show_help():
     table.add_row("wait <id>", "Block on a background job, show result panel")
     table.add_row("kill <id>", "Cancel a running background job (cooperative)")
     table.add_row("workspace", "Show detected cwd / project / git context")
+    table.add_row("recap", "Claude-Code-style 'where are we' summary of recent turns")
     table.add_row("fallback", "Show local-fallback model status (ready / downloading)")
     table.add_row("fallback download", "Manually kick off the fallback model download")
     table.add_row("fallback test", "Send a tiny query through the local fallback")
@@ -1258,6 +1264,37 @@ def _test_fallback(agent):
         console.print(f"[green]Fallback OK[/green] → {resp.content[:200]}\n")
     except Exception as e:
         console.print(f"[red]Fallback failed: {e}[/red]\n")
+
+
+def _show_recap(agent: Agent):
+    """Claude Code-style recap line — Goal / Status / Next built from
+    the last 30 turns of agent history. Cheap, deterministic, no LLM
+    call. Renders as a single dim-magenta line so it doesn't compete
+    with the chat content.
+    """
+    from openbro.core.recap import build_recap
+
+    recap = build_recap(
+        agent.history,
+        max_turns=30,
+        session_id=agent.memory.session_id,
+    )
+    if recap.is_empty():
+        console.print(
+            "[dim magenta]※ recap: no goal-setting turns yet — "
+            "say what you want to do.[/dim magenta]\n"
+        )
+        return
+    # Use Rich markdown so **Goal**: bolding renders inline.
+    from rich.markdown import Markdown
+
+    rendered = f"※ recap: {recap.render()}"
+    console.print()
+    console.print(
+        Markdown(rendered, code_theme="monokai"),
+        style="magenta",
+    )
+    console.print(f"[dim]_(scanned {recap.turns_scanned} turns; `recap` to refresh)_[/dim]\n")
 
 
 def _show_workspace():

@@ -538,9 +538,7 @@ def test_agent_falls_through_to_llm_when_playbook_pass_through(monkeypatch):
         fake_provider.chat.assert_called()
         # The playbook output WAS in the messages list the LLM saw
         injected = [
-            m
-            for m in seen_during_call
-            if m.role == "system" and "RESEARCHED CONTEXT" in m.content
+            m for m in seen_during_call if m.role == "system" and "RESEARCHED CONTEXT" in m.content
         ]
         assert len(injected) >= 1
         # And the LLM's synthesised answer came back to the user

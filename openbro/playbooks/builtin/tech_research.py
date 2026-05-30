@@ -498,11 +498,13 @@ def _render_research(query: str, sources: list[tuple[str, str]]) -> str:
 # Phrases that mark a response as "lazy training-data dump". The reflection
 # layer in the agent looks for these and retries with a stronger prompt.
 LAZY_RESPONSE_MARKERS = (
+    # Training-data disclaimers
     "i cannot directly test",
     "i can't directly test",
     "i don't have the capability to directly",
     "i was trained on",
     "i have been trained on",
+    # 'test it yourself' filler
     "test on different devices",
     "test on various devices",
     "consider using a library",
@@ -514,7 +516,63 @@ LAZY_RESPONSE_MARKERS = (
     "iterate through the following steps",
     "test and verify",
     "refine and adjust",
+    # Meta-commentary instead of action (captured 2026-05-30): user
+    # asked 'i think you did not call you llm', agent responded with
+    # 7 numbered steps explaining how it's 'designed to use the
+    # available tools' instead of just calling them.
+    "i'm designed to use",
+    "i am designed to use",
+    "my primary goal is to follow",
+    "without a specific task, it's challenging",
+    "without a specific task, it is challenging",
+    "could you please provide more context",
+    "could you provide more context",
+    "please let me know how i can assist",
+    "i'm here to help",
+    "i am here to help",
+    "i have access to the following tools",
+    # 'helpful suggestion' filler
+    "you may want to consider",
+    "you can try the following",
+    "consult with",
+    "seek professional help",
+    "contacting the file's creator",
 )
+
+# Patterns that signal "the model wrote code AND a fake Output: block
+# in chat instead of actually calling the python/shell tool". Captured
+# failure: user asked to read D:\\desktop\\NDLS_FDB. Llama 4 Scout
+# wrote `import os; print(os.listdir(...))` in chat text + invented
+# `Output: ['NDLS_FDB', 'other_file.txt']` with NO tool_call ever
+# made (0 tool_start events on the bus, single LLM step at 2180↓).
+# The reflection layer now catches this and retries with a forced-
+# tool-use instruction.
+_CODE_FENCE = re.compile(r"```[a-z]*\n", re.IGNORECASE)
+_FAKE_OUTPUT_PATTERN = re.compile(
+    r"\n\s*(Output|Result|Returns?)\s*[:\-]\s*\n*\s*```", re.IGNORECASE
+)
+
+
+def detect_fabricated_tool_call(text: str, tool_calls_made: int) -> str | None:
+    """Detect 'wrote code in chat + invented an Output: block' shape.
+
+    Returns a reason string if detected, None otherwise. Skips the
+    check when at least one real tool call was made in this turn —
+    the model is allowed to render its tool args as code-styled chat
+    AFTER the tool actually ran.
+    """
+    if not text or tool_calls_made > 0:
+        return None
+    fence_count = len(_CODE_FENCE.findall(text))
+    if fence_count < 1:
+        return None
+    # Has Code AND a fake Output/Result/Returns: block right after.
+    if _FAKE_OUTPUT_PATTERN.search(text):
+        return "fabricated 'Output:' block after chat-text code"
+    # Two+ code blocks with no real tool call = highly suspect.
+    if fence_count >= 2:
+        return "multiple chat-text code blocks with no tool calls made"
+    return None
 
 
 def detect_lazy_response(text: str) -> list[str]:

@@ -1,10 +1,12 @@
 """Core Agent - the brain of OpenBro."""
 
+import re
 import threading
 from collections.abc import Iterator
 
 from rich.console import Console
 
+from openbro.core import session_memory
 from openbro.core.activity import get_bus
 from openbro.core.decompose import decompose
 from openbro.core.permissions import PermissionGate, PermissionRequest
@@ -31,6 +33,16 @@ def _detect_lazy_response_safe(text: str) -> list[str]:
         return detect_lazy_response(text)
     except Exception:
         return []
+
+
+def _detect_fabricated_tool_call_safe(text: str, tool_calls_made: int) -> str | None:
+    """Wrap the fabrication detector — never crash the agent loop."""
+    try:
+        from openbro.playbooks.builtin.tech_research import detect_fabricated_tool_call
+
+        return detect_fabricated_tool_call(text, tool_calls_made)
+    except Exception:
+        return None
 
 
 def _friendly_error(e: Exception) -> str:
@@ -188,6 +200,40 @@ class Agent:
             parts.append("\n" + language_instruction(lang))
         return "\n".join(p for p in parts if p)
 
+    # Goal-setting language we auto-persist via session_memory. Kept
+    # conservative — only obvious imperative + theme phrases trigger
+    # so casual chat doesn't fill the table with noise.
+    _GOAL_HEURISTIC = re.compile(
+        r"\b(let'?s|I want to|I need to|please|"
+        r"(can\s+you|could\s+you|tu)\s+(improve|fix|add|build|make|"
+        r"migrate|deploy|debug|investigate|refactor|implement|setup|configure))\b",
+        re.IGNORECASE,
+    )
+
+    def _maybe_record_goal(self, user_input: str) -> None:
+        """Persist a goal-shaped user turn to session_memory.
+
+        Conservative: a turn must (a) match _GOAL_HEURISTIC, (b) be
+        between 10 and 200 chars (filters greetings + giant prompts),
+        and (c) not be a follow-up shape ('tldr', 'more', etc.).
+        Failures here never bubble — session_memory is best-effort.
+        """
+        text = (user_input or "").strip()
+        if not (10 < len(text) < 200):
+            return
+        if text.lower().startswith(("tldr", "more", "again", "explain")):
+            return
+        if not self._GOAL_HEURISTIC.search(text):
+            return
+        try:
+            session_memory.record_goal(
+                session_id=self.memory.session_id,
+                user_id=self.memory.user_id,
+                text=text,
+            )
+        except Exception:
+            pass
+
     def _workspace_block(self) -> str:
         """Per-turn workspace fragment — cwd, git branch, recent files.
 
@@ -335,6 +381,11 @@ class Agent:
         self.bus.emit("user", user_input, lang=self.last_language)
         self.history.append(Message(role="user", content=user_input))
         self.memory.add("user", user_input)
+        # Auto-record goals from goal-setting user turns. Persists to
+        # SQLite so `openbro --resume` next session can pick up the
+        # same goal. De-duplicates by text — same goal repeated isn't
+        # re-recorded.
+        self._maybe_record_goal(user_input)
         self._trim_history()
 
         tools = self.tool_registry.get_tools_schema() if self.provider.supports_tools() else None
@@ -354,6 +405,12 @@ class Agent:
                 return pb_response
 
         self.bus.emit("thinking", "agent thinking…")
+
+        # Track how many tool calls were dispatched this turn — used
+        # by the reflection layer to detect "wrote code in chat instead
+        # of calling python tool" (captured failure: zero tool calls
+        # made AND response had fake Output: blocks).
+        turn_tool_calls_made = 0
 
         # ─── Agent loop (was single-shot, which forced LLM to hallucinate
         # answers after one tool returned nothing). Loop till LLM stops
@@ -402,11 +459,43 @@ class Agent:
                 # stronger instruction. Cap at one retry so the loop
                 # always terminates.
                 lazy_markers = _detect_lazy_response_safe(response.content)
+                fabricated_reason = _detect_fabricated_tool_call_safe(
+                    response.content, turn_tool_calls_made
+                )
                 already_retried = any(
                     "REFLECTION RETRY" in (m.content or "")
                     for m in self.history
                     if m.role == "system"
                 )
+                # Fabricated-tool-output is a HARDER failure than lazy
+                # markers — the agent literally invented results without
+                # running anything. Surface it loudly and demand a real
+                # tool call on the retry.
+                if fabricated_reason and not already_retried:
+                    self.bus.emit(
+                        "reflection_retry",
+                        f"fabricated tool output: {fabricated_reason}",
+                        markers=[fabricated_reason],
+                    )
+                    self.history.append(
+                        Message(
+                            role="system",
+                            content=(
+                                "[REFLECTION RETRY] Your previous response "
+                                "contained code blocks AND fake 'Output:' "
+                                "or 'Result:' blocks, but you did NOT call "
+                                "any tool. The user did NOT run your code. "
+                                "The fabricated output is a LIE. You MUST "
+                                "actually call the python tool (or shell, "
+                                "or file_ops, or document) via the "
+                                "tool_calls slot — not write code in chat. "
+                                "Retry now: dispatch the appropriate tool "
+                                "call to answer the user's question. Do NOT "
+                                "show code in chat. Do NOT invent output."
+                            ),
+                        )
+                    )
+                    continue
                 if lazy_markers and not already_retried:
                     self.bus.emit(
                         "reflection_retry",
@@ -464,6 +553,7 @@ class Agent:
             # On next iteration the LLM sees the results AND still has
             # tools= available — so it can call another tool (different
             # pattern, different approach) or finalize with text.
+            turn_tool_calls_made += len(response.tool_calls)
             self._execute_tool_batch(response)
 
         # Safety net — model is stuck looping. Force one final no-tools call.
