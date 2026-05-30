@@ -438,6 +438,18 @@ class Agent:
                 # Final answer — model decided no more tools needed.
                 self.history.append(Message(role="assistant", content=response.content))
                 self.memory.add("assistant", response.content)
+                # Prune any [TRANSIENT_RESEARCH] system messages now that
+                # the synthesis is done. They were one-turn context for
+                # the LLM; keeping them across turns bloats every future
+                # request (captured: 12K-token retries / 413 cascades /
+                # local context overflow). The assistant's final answer
+                # IS persisted as a normal turn so the conversation flow
+                # is unaffected.
+                self.history = [
+                    m
+                    for m in self.history
+                    if not (m.role == "system" and "[TRANSIENT_RESEARCH]" in (m.content or ""))
+                ]
                 self.bus.emit(
                     "assistant",
                     response.content,
@@ -581,12 +593,24 @@ class Agent:
             # so the LLM sees it for the NEXT chat() call but doesn't
             # echo it back. Then fall through (return None) so the
             # normal LLM loop runs.
+            #
+            # Mark it with [TRANSIENT_RESEARCH] so the agent can prune
+            # it after the synthesis lands. Without pruning, 15K-char
+            # fetched-content blocks accumulate in history and every
+            # subsequent turn drags the same bloat → context overflow,
+            # rate-limit cascade, fallback failure. Captured failure:
+            # second turn after a tech_research synthesis errored with
+            # 'Groq 413 Request too large' + 'local context (8192) <
+            # requested (12063)' because the research block stayed
+            # forever. The post-synthesis prune in _chat_impl removes
+            # any message tagged with this marker.
             preamble = (
-                f"[Playbook `{playbook.name}` ran web research for the "
+                "[TRANSIENT_RESEARCH] "
+                f"Playbook `{playbook.name}` ran web research for the "
                 "user's question. Use the sources below to write a "
                 "concrete, specific answer. Cite source URLs inline. "
                 "Do NOT add 'I can't verify' or 'test on different "
-                "devices' filler — the sources are real, current docs.]"
+                "devices' filler — the sources are real, current docs."
             )
             self.history.append(
                 Message(

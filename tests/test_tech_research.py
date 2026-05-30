@@ -376,6 +376,111 @@ def test_agent_reflection_caps_at_one_retry(monkeypatch):
         assert out  # something was returned
 
 
+def test_agent_prunes_transient_research_after_synthesis(monkeypatch):
+    """Captured failure: research context (~15K chars) stayed in
+    agent.history forever, so the SECOND turn after a tech_research
+    cascaded through Groq fallback chain hitting 413 / 'context
+    overflow' on both the cloud retry and the local fallback. After
+    the LLM synthesises, the [TRANSIENT_RESEARCH] system message must
+    be removed from history."""
+    from unittest.mock import patch
+
+    from openbro.core.agent import Agent
+    from openbro.llm.base import LLMResponse
+    from openbro.playbooks.base import Playbook
+
+    with patch("openbro.core.agent.create_provider") as fake_create:
+        fake_provider = MagicMock()
+        fake_provider.name.return_value = "fake"
+        fake_provider.supports_tools.return_value = True
+        # First LLM call returns a clean answer (no lazy markers)
+        fake_provider.chat.return_value = LLMResponse(
+            content="## Answer\nUse X [Source 1].",
+            usage={"input": 200, "output": 30},
+        )
+        fake_create.return_value = fake_provider
+
+        agent = Agent(interactive=False)
+
+        class _PassThrough(Playbook):
+            name = "tech_research_test"
+            pass_through_to_llm = True
+
+            def execute(self, ctx):
+                return "FETCHED CONTENT: 15K chars of source pages would be here"
+
+        import re as _re
+
+        pb = _PassThrough()
+        pb.triggers = [(_re.compile(r"how to set up react"), 1.0)]
+        agent.playbook_registry._playbooks = [pb]
+
+        # Run a turn that triggers the pass-through playbook.
+        out = agent.chat("how to set up react with vite")
+        assert "Use X" in out
+
+        # The [TRANSIENT_RESEARCH] system message should be GONE from
+        # history after the synthesis completes.
+        transient = [
+            m
+            for m in agent.history
+            if m.role == "system" and "TRANSIENT_RESEARCH" in (m.content or "")
+        ]
+        assert transient == [], "transient research context leaked into history"
+
+        # But the assistant's final answer IS persisted
+        assistant_msgs = [m for m in agent.history if m.role == "assistant"]
+        assert any("Use X" in m.content for m in assistant_msgs)
+
+
+def test_research_context_does_not_accumulate_across_multiple_turns(monkeypatch):
+    """After 3 consecutive tech_research turns, history should NOT
+    contain 3 research blocks — only 0 (all pruned)."""
+    from unittest.mock import patch
+
+    from openbro.core.agent import Agent
+    from openbro.llm.base import LLMResponse
+    from openbro.playbooks.base import Playbook
+
+    with patch("openbro.core.agent.create_provider") as fake_create:
+        fake_provider = MagicMock()
+        fake_provider.name.return_value = "fake"
+        fake_provider.supports_tools.return_value = True
+        fake_provider.chat.return_value = LLMResponse(
+            content="Answer.", usage={"input": 100, "output": 10}
+        )
+        fake_create.return_value = fake_provider
+
+        agent = Agent(interactive=False)
+
+        class _PT(Playbook):
+            name = "pt"
+            pass_through_to_llm = True
+
+            def execute(self, ctx):
+                return "Research block " * 200  # ~3.6K chars per turn
+
+        import re as _re
+
+        pb = _PT()
+        pb.triggers = [(_re.compile(r"how to"), 1.0)]
+        agent.playbook_registry._playbooks = [pb]
+
+        for q in [
+            "how to do thing X",
+            "how to do thing Y",
+            "how to do thing Z",
+        ]:
+            agent.chat(q)
+
+        transient = [
+            m
+            for m in agent.history
+            if m.role == "system" and "TRANSIENT_RESEARCH" in (m.content or "")
+        ]
+        assert transient == [], f"research context accumulated: {len(transient)} blocks survived"
+
+
 def test_agent_falls_through_to_llm_when_playbook_pass_through(monkeypatch):
     """`pass_through_to_llm=True` playbooks should NOT short-circuit —
     their output gets injected into history as system context and the
@@ -411,12 +516,32 @@ def test_agent_falls_through_to_llm_when_playbook_pass_through(monkeypatch):
         pb.triggers = [(_re.compile(r"research me"), 1.0)]
         agent.playbook_registry._playbooks = [pb]
 
+        # Capture what the LLM SAW at the moment chat() was invoked —
+        # the [TRANSIENT_RESEARCH] context is injected before the LLM
+        # call and pruned after, so a post-call inspection won't see
+        # it (that's the whole point — the prune is what we want).
+        seen_during_call: list = []
+
+        def fake_chat(messages, tools=None):
+            seen_during_call.extend(messages)
+            return LLMResponse(
+                content="Synthesised answer using sources.",
+                usage={"input": 200, "output": 30},
+            )
+
+        fake_provider.chat.side_effect = fake_chat
+        # Clear the default return_value so side_effect runs
+        fake_provider.chat.return_value = None
+
         response = agent.chat("research me please")
         # LLM was actually called (NOT short-circuited)
         fake_provider.chat.assert_called()
-        # The playbook output ended up in agent.history as system context
-        system_msgs = [m for m in agent.history if m.role == "system"]
-        injected = [m for m in system_msgs if "RESEARCHED CONTEXT" in m.content]
+        # The playbook output WAS in the messages list the LLM saw
+        injected = [
+            m
+            for m in seen_during_call
+            if m.role == "system" and "RESEARCHED CONTEXT" in m.content
+        ]
         assert len(injected) >= 1
         # And the LLM's synthesised answer came back to the user
         assert "Synthesised" in response or "synth" in response.lower()

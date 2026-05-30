@@ -1720,13 +1720,34 @@ def _start_voice(agent: Agent):
 
     _voice_listener.tts = tts
 
+    # Captured failure: while a typed-query agent.chat() was mid-flight,
+    # Whisper hallucinated 'I don't know about the distalates. We're dead.'
+    # and called _handle() concurrently — racing against the same
+    # agent.chat() the user was already waiting on. The locking inside
+    # agent.chat() serialised them but the second one then exploded
+    # because asyncio coroutines were being scheduled from a worker
+    # thread that doesn't own the prompt_toolkit event loop. Solution:
+    # check the agent's lock with non-blocking acquire — if it can't
+    # grab it, drop the voice transcript silently. Agents don't need
+    # to chat with their own internal monologue.
     def _handle(text: str) -> str:
         try:
-            from openbro.utils.language import voice_for
+            # Try to grab the agent lock without blocking. If the main
+            # REPL thread is currently running a chat() we discard this
+            # voice transcript — it's almost certainly STT noise or the
+            # user's keyboard input that arrived first.
+            if not agent._lock.acquire(blocking=False):
+                return ""  # silent drop
+            try:
+                from openbro.utils.language import voice_for
 
-            reply = agent.chat(text)
-            tts.voice = voice_for(agent.last_language)
-            return reply
+                # _chat_impl bypasses the outer lock-acquire wrapper
+                # since we already hold it.
+                reply = agent._chat_impl(text)
+                tts.voice = voice_for(agent.last_language)
+                return reply
+            finally:
+                agent._lock.release()
         except Exception as ex:
             return f"Voice error: {ex}"
 
