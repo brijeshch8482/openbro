@@ -115,6 +115,84 @@ def _detect_language(top_files: list[str]) -> str:
     return "Unknown"
 
 
+_FOLLOWUP_PATTERN = re.compile(
+    r"\b("
+    r"explain (more|further|better|deeper|properly)|"
+    r"more details?|tell me more|elaborate|"
+    r"not (show|the) code|without code|short(er)?|"
+    r"summari[sz]e|just (the )?(summary|overview)|"
+    r"in (1|2|3|one|two|three) lines?|"
+    r"in short|tldr|tl;dr|"
+    r"keep it (short|brief|simple)|"
+    r"again|repeat|once more"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_followup(text: str) -> bool:
+    """A query that's clearly a follow-up to a previous project_explain.
+
+    These should fall through to the LLM (which sees the prior turn in
+    chat history) instead of re-running project_explain on the cwd and
+    producing a useless answer about /home/user. Heuristic:
+      - short (under 80 chars), AND
+      - matches one of the explicit follow-up phrases above
+    """
+    if len(text) > 80:
+        return False
+    return bool(_FOLLOWUP_PATTERN.search(text))
+
+
+def _looks_like_project_root(path: str) -> bool:
+    """True when `path` looks like a code project root (vs. a home dir
+    full of dotfiles). Cheap check: any of the standard marker files at
+    top level, OR a .git directory, OR a clearly source-shaped subdir
+    (src/, app/, lib/) at top level.
+
+    The cwd default in execute() uses this so 'explain this project'
+    with no path AND no real project in cwd just declines.
+    """
+    if not path or not os.path.isdir(path):
+        return False
+    marker_names = (
+        "pyproject.toml",
+        "package.json",
+        "Cargo.toml",
+        "go.mod",
+        "build.gradle.kts",
+        "build.gradle",
+        "settings.gradle.kts",
+        "Gemfile",
+        "composer.json",
+        "pom.xml",
+        "AndroidManifest.xml",
+        "Makefile",
+        "Dockerfile",
+        "README.md",
+        "README.rst",
+        ".git",
+    )
+    try:
+        entries = set(os.listdir(path))
+    except OSError:
+        return False
+    for marker in marker_names:
+        if marker in entries:
+            return True
+    # Source-shaped subdir at top level — but only if present alongside
+    # at least one file (a bare 'src' directory in a home dir might be
+    # the user's personal projects folder, not a single project).
+    src_dirs = {"src", "app", "lib"}
+    if src_dirs & entries:
+        # Confirm there's at least one top-level file too
+        for e in entries:
+            full = os.path.join(path, e)
+            if os.path.isfile(full):
+                return True
+    return False
+
+
 def _looks_like_path(text: str) -> str | None:
     """Extract a directory path from the user's query if present."""
     # Common shapes: 'D:\Project', '/home/x/y', './foo'
@@ -606,8 +684,25 @@ class ProjectExplainPlaybook(Playbook):
     def execute(self, context: PlaybookContext) -> str:
         # Resolve target directory. Priority:
         # 1. A path mentioned in the user input
-        # 2. The current working directory
-        target = _looks_like_path(context.user_input) or os.getcwd()
+        # 2. The current working directory IF it looks like a project
+        explicit_path = _looks_like_path(context.user_input)
+        target = explicit_path or os.getcwd()
+
+        # Captured failure: user said 'i want you explain not show code'
+        # as a follow-up to a previous project_explain. The playbook fired
+        # again, defaulted target to C:\\Users\\chaud (home dir), and
+        # dumped a useless listing of dotfiles + NTUSER.DAT. Two guards:
+        #
+        # 1. Follow-up shapes (short query, elaboration verbs, no path) →
+        #    decline so the LLM can use chat history to elaborate.
+        if explicit_path is None and _looks_like_followup(context.user_input):
+            return ""  # registry treats empty as no-match, agent falls through
+
+        # 2. cwd fallback must look like a real project (manifest present
+        #    OR .git dir OR specific source layout). Otherwise return "".
+        if explicit_path is None and not _looks_like_project_root(target):
+            return ""
+
         if not os.path.isdir(target):
             return f"_Not a directory: `{target}`. Try `project_explain D:/path`._"
 

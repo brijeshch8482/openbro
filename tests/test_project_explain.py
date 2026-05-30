@@ -380,6 +380,109 @@ def test_synthesis_python_fastapi_project(tmp_path):
     assert "What it does" in out
 
 
+def test_followup_query_with_no_path_declines(tmp_path, monkeypatch):
+    """Captured failure: user said 'i want you explain not show code'
+    as a follow-up. The playbook fired again on cwd, dumped a home dir
+    listing. Now follow-up shape with no path returns empty so the
+    agent loop falls through to the LLM (which has chat history)."""
+    pb = ProjectExplainPlaybook()
+    # cwd doesn't matter — the query itself trips the follow-up guard
+    monkeypatch.chdir(tmp_path)
+    for q in [
+        "i want you explain not show code",
+        "explain better please",
+        "tell me more",
+        "in short",
+        "tldr",
+        "summarize without code",
+        "elaborate",
+        "more details",
+    ]:
+        ctx = PlaybookContext(
+            user_input=q,
+            tool_registry=MagicMock(),
+            captures={},
+        )
+        out = pb.execute(ctx)
+        assert out == "", f"{q!r} should decline, got: {out[:60]!r}"
+
+
+def test_followup_with_explicit_path_still_runs(tmp_path, monkeypatch):
+    """Belt + suspenders: 'D:/foo explain better' should still run
+    because the user pointed at a real directory."""
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "x"\n')
+    pb = ProjectExplainPlaybook()
+    ctx = PlaybookContext(
+        user_input=f"{tmp_path} explain better please",
+        tool_registry=MagicMock(),
+        captures={},
+    )
+    out = pb.execute(ctx)
+    # Should still produce output (not empty), since user gave a path
+    assert out != ""
+    assert "Project:" in out
+
+
+def test_no_path_in_home_dir_declines(tmp_path, monkeypatch):
+    """A user-home-style cwd with only dotfiles + NTUSER.DAT junk should
+    NOT be treated as a project root. The playbook declines instead of
+    dumping the home dir listing."""
+    # Simulate a Windows user home: dotfiles + no manifests
+    (tmp_path / ".bashrc").write_text("export X=1")
+    (tmp_path / ".gitconfig").write_text("[user]")
+    (tmp_path / "NTUSER.DAT").write_text("blob")
+    monkeypatch.chdir(tmp_path)
+
+    pb = ProjectExplainPlaybook()
+    ctx = PlaybookContext(
+        user_input="explain this project",
+        tool_registry=MagicMock(),
+        captures={},
+    )
+    out = pb.execute(ctx)
+    assert out == ""
+
+
+def test_no_path_in_real_project_root_still_runs(tmp_path, monkeypatch):
+    """When cwd IS a real project, 'explain this project' without an
+    explicit path should still work."""
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "x"\n')
+    (tmp_path / "main.py").write_text("print('hi')")
+    monkeypatch.chdir(tmp_path)
+
+    pb = ProjectExplainPlaybook()
+    ctx = PlaybookContext(
+        user_input="explain this project",
+        tool_registry=MagicMock(),
+        captures={},
+    )
+    out = pb.execute(ctx)
+    assert "Project:" in out
+
+
+def test_looks_like_project_root_detects_markers(tmp_path):
+    """Each marker file individually should flip the cwd check."""
+    from openbro.playbooks.builtin.project_explain import _looks_like_project_root
+
+    # Empty dir = not a project
+    assert _looks_like_project_root(str(tmp_path)) is False
+
+    for marker in ("pyproject.toml", "package.json", "build.gradle.kts", "README.md"):
+        sub = tmp_path / (marker.replace(".", "_") + "_proj")
+        sub.mkdir()
+        (sub / marker).write_text("")
+        assert _looks_like_project_root(str(sub)) is True, marker
+
+
+def test_looks_like_project_root_skips_user_home(tmp_path):
+    """Real-world user-home shape: dotfiles only, no markers."""
+    from openbro.playbooks.builtin.project_explain import _looks_like_project_root
+
+    for f in (".bashrc", ".gitconfig", ".bash_history"):
+        (tmp_path / f).write_text("x")
+    assert _looks_like_project_root(str(tmp_path)) is False
+
+
 def test_file_ops_search_depth_handles_nested_android(tmp_path):
     """Bumped max_depth from 4 to 8 specifically for Android layouts
     where MainActivity.kt sits at depth 6+. This test asserts the
