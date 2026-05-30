@@ -111,6 +111,16 @@ def _migrate_config(config: dict) -> dict:
     if voice.get("mode") not in ("continuous", "wake_word"):
         voice["mode"] = "continuous"
 
+    # Local provider's own model name. Captured failure: existing user's
+    # providers.local block predated the key, fallback tried to lookup
+    # llm.model (which holds the GROQ model name) in the local catalogue
+    # and crashed startup. Fill the default so the fallback chain works
+    # without user intervention.
+    providers = config.setdefault("providers", {})
+    local_provider = providers.setdefault("local", {})
+    if not local_provider.get("model"):
+        local_provider["model"] = defaults["providers"]["local"]["model"]
+
     return config
 
 
@@ -129,9 +139,15 @@ def default_config() -> dict:
         },
         "providers": {
             "local": {
+                # The local provider's OWN model — independent of llm.model
+                # (which holds the primary cloud model name when the user
+                # runs Groq/Anthropic/etc. as primary). 'llama3.2:3b' is
+                # the recommended fallback default: 2 GB GGUF, 4 GB RAM,
+                # ~20 tok/s on CPU, decent tool calling.
+                "model": "llama3.2:3b",
                 # Optional explicit path to a .gguf file. If unset, the router
-                # resolves the registered model name (e.g. 'llama3.1:8b') to
-                # a path under storage.models_dir.
+                # resolves the registered model name to a path under
+                # storage.models_dir.
                 "model_path": None,
                 "n_ctx": 8192,
                 "n_gpu_layers": -1,

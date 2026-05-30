@@ -66,10 +66,25 @@ def _build_one(provider_name: str, config: dict, providers_config: dict) -> LLMP
         # 'ollama' kept as alias for back-compat with old configs; both now
         # route to the in-process llama.cpp engine (no external daemon).
         from openbro.llm.local_provider import LocalLLMProvider
-        from openbro.utils.local_llm_setup import find_installed_match
+        from openbro.utils.local_llm_setup import DEFAULT_MODEL, find_installed_match
 
         local_cfg = providers_config.get("local") or providers_config.get("ollama") or {}
-        model_name = config["llm"].get("model", "llama3.1:8b")
+        # Captured failure: when 'local' is the FALLBACK and primary is a
+        # different cloud provider, config['llm']['model'] holds the cloud
+        # model name (e.g. 'meta-llama/llama-4-scout-...'). Looking that
+        # up in the local GGUF catalogue obviously fails. The local
+        # provider's own model name lives on providers.local.model — use
+        # that first; only fall through to llm.model when the user
+        # explicitly chose local as their primary.
+        model_name = (
+            local_cfg.get("model")
+            or (
+                config["llm"].get("model")
+                if config.get("llm", {}).get("provider") == "local"
+                else None
+            )
+            or DEFAULT_MODEL
+        )
         model_path = local_cfg.get("model_path")
         if not model_path:
             p = find_installed_match(model_name)

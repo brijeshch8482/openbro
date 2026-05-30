@@ -290,6 +290,151 @@ def test_router_no_wrap_when_fallback_unset(monkeypatch):
     assert provider is fake_primary
 
 
+def test_router_local_fallback_uses_providers_local_model_not_llm_model(monkeypatch):
+    """Captured bug: when local is the FALLBACK behind a cloud primary,
+    config['llm']['model'] holds the cloud model name (e.g. 'meta-llama/
+    llama-4-scout-...') — looking that up in the local GGUF catalogue
+    fails immediately and the fallback never activates. The router must
+    use providers.local.model in this case."""
+    from openbro.llm import router
+
+    captured_local_model_name = []
+
+    class FakeLocalProvider:
+        def __init__(self, **kwargs):
+            captured_local_model_name.append(kwargs.get("model_name"))
+
+        def supports_tools(self):
+            return True
+
+        def name(self):
+            return "local"
+
+    monkeypatch.setattr(
+        "openbro.llm.local_provider.LocalLLMProvider",
+        FakeLocalProvider,
+    )
+    # Pretend the GGUF is on disk so the resolver doesn't raise
+    monkeypatch.setattr(
+        "openbro.utils.local_llm_setup.find_installed_match",
+        lambda name: "/fake/path/" + name + ".gguf" if name == "llama3.2:3b" else None,
+    )
+
+    config = {
+        "llm": {
+            "provider": "groq",
+            "model": "meta-llama/llama-4-scout-17b-16e-instruct",  # cloud name
+            "fallback": "local",
+        },
+        "providers": {
+            "groq": {"api_key": "x"},
+            "local": {"model": "llama3.2:3b"},  # local's OWN model
+        },
+    }
+    router._build_one("local", config, config["providers"])
+    # The local provider should have been built with its OWN model
+    # name, NOT the Groq model name.
+    assert captured_local_model_name == ["llama3.2:3b"]
+
+
+def test_router_local_fallback_falls_back_to_default_when_unset(monkeypatch):
+    """If providers.local.model is missing AND llm.provider is NOT local
+    (so llm.model is some cloud name), the router uses DEFAULT_MODEL
+    instead of crashing on the cloud model name."""
+    from openbro.llm import router
+
+    captured = []
+
+    class FakeLocalProvider:
+        def __init__(self, **kwargs):
+            captured.append(kwargs.get("model_name"))
+
+        def supports_tools(self):
+            return True
+
+        def name(self):
+            return "local"
+
+    monkeypatch.setattr(
+        "openbro.llm.local_provider.LocalLLMProvider",
+        FakeLocalProvider,
+    )
+    monkeypatch.setattr(
+        "openbro.utils.local_llm_setup.find_installed_match",
+        lambda name: "/fake/" + name + ".gguf",
+    )
+
+    config = {
+        "llm": {
+            "provider": "groq",
+            "model": "some-cloud-model",  # primary's name; NOT for local
+        },
+        "providers": {
+            "groq": {"api_key": "x"},
+            "local": {},  # no model set
+        },
+    }
+    router._build_one("local", config, config["providers"])
+    # Must fall back to DEFAULT_MODEL (llama3.2:3b), not the cloud name.
+    assert captured == ["llama3.2:3b"]
+
+
+def test_router_local_primary_still_uses_llm_model(monkeypatch):
+    """Regression guard: when the user explicitly picks local as PRIMARY,
+    llm.model holds a real local model name and we should respect it."""
+    from openbro.llm import router
+
+    captured = []
+
+    class FakeLocalProvider:
+        def __init__(self, **kwargs):
+            captured.append(kwargs.get("model_name"))
+
+        def supports_tools(self):
+            return True
+
+        def name(self):
+            return "local"
+
+    monkeypatch.setattr(
+        "openbro.llm.local_provider.LocalLLMProvider",
+        FakeLocalProvider,
+    )
+    monkeypatch.setattr(
+        "openbro.utils.local_llm_setup.find_installed_match",
+        lambda name: "/fake/" + name + ".gguf",
+    )
+
+    config = {
+        "llm": {
+            "provider": "local",
+            "model": "phi3:mini",  # user wants phi3 as primary
+        },
+        "providers": {"local": {}},
+    }
+    router._build_one("local", config, config["providers"])
+    # llm.model wins when local IS primary
+    assert captured == ["phi3:mini"]
+
+
+def test_config_migration_fills_local_model_default():
+    """Existing users whose providers.local block predates the 'model'
+    key get the default filled in on next load."""
+    from openbro.utils.config import _merge_defaults, _migrate_config, default_config
+
+    legacy = {
+        "providers": {
+            "local": {
+                "model_path": None,
+                "n_ctx": 8192,
+                "n_gpu_layers": -1,
+            }
+        }
+    }
+    migrated = _migrate_config(_merge_defaults(default_config(), legacy))
+    assert migrated["providers"]["local"]["model"] == "llama3.2:3b"
+
+
 def test_router_no_wrap_when_fallback_same_as_primary(monkeypatch):
     """Defensive: if a user accidentally configures fallback=groq with
     primary=groq, don't wrap (which would just cascade groq -> groq)."""
