@@ -214,26 +214,31 @@ class TechResearchPlaybook(Playbook):
         if web is None:
             return ""  # decline so the LLM still gets a turn
 
-        # ─── Deep research: search + fetch top 5-7 sources ────────────
-        # User explicitly asked for deeper than 3 sources. We pull more
-        # search results, fetch up to 6 substantive pages, and pass them
-        # all into the LLM's context — the model picks what's relevant.
+        # Live progress events the REPL renders as bullet steps, so the
+        # user SEES the research happening turn-by-turn instead of just
+        # watching a spinner. Without these, a 20-second research feels
+        # like the agent is frozen.
+        from openbro.core.activity import get_bus
+
+        bus = get_bus()
+
+        # ─── Deep research: multi-round search ────────────────────────
+        # Round 1: broad search. Round 2: site-augmented for the
+        # detected tech domain. Round 3 (if results thin): a refined
+        # query that prepends 'how to' / 'tutorial' to surface
+        # walkthrough-style pages over reference docs.
+        urls: list[str] = []
+
+        bus.emit("research_step", "searching the web…", query=query)
         try:
             search_raw = web.run(action="search", query=query)
         except Exception:
             return ""
-        urls = _extract_urls(search_raw)
-        if not urls:
-            return ""
+        urls.extend(_extract_urls(search_raw))
 
-        # ─── Augment with site-specific deep search ───────────────────
-        # For Android/Kotlin questions, prefer developer.android.com +
-        # stackoverflow.com results. For others, the generic search
-        # already has the right shape. We do ONE additional targeted
-        # search to grab authoritative docs that often miss the generic
-        # top-of-results.
         site_query = _site_augmented_query(query)
         if site_query and site_query != query:
+            bus.emit("research_step", "deep-search on official docs…", query=site_query)
             try:
                 extra = web.run(action="search", query=site_query)
                 for u in _extract_urls(extra):
@@ -242,19 +247,52 @@ class TechResearchPlaybook(Playbook):
             except Exception:
                 pass
 
+        # Refined how-to round when results are thin OR when the user
+        # asked a 'how do I' question (most likely to want a tutorial).
+        if len(urls) < 4 or re.search(r"\bhow\s+(do|to|can)\b", query, re.IGNORECASE):
+            howto_query = _howto_refined_query(query)
+            if howto_query and howto_query != query:
+                bus.emit("research_step", "searching for tutorials…", query=howto_query)
+                try:
+                    extra = web.run(action="search", query=howto_query)
+                    for u in _extract_urls(extra):
+                        if u not in urls:
+                            urls.append(u)
+                except Exception:
+                    pass
+
+        if not urls:
+            return ""
+
+        # Rank URLs: prefer authoritative domains (dev docs / SO /
+        # GitHub) over blog spam. Top 8 candidates go into the fetch
+        # pool; we keep fetching until we have 6 substantive pages.
+        urls = _rank_urls(urls)
         fetched: list[tuple[str, str]] = []  # (url, text)
-        for url in urls[:6]:
+
+        for i, url in enumerate(urls[:10], 1):
+            bus.emit(
+                "research_step",
+                f"fetching ({i}/{min(10, len(urls))}): {_short_domain(url)}",
+                url=url,
+            )
             try:
                 text = web.run(action="fetch", url=url)
             except Exception:
                 continue
             if text and len(text.strip()) > 300:
                 fetched.append((url, text))
-            if len(fetched) >= 5:
+            if len(fetched) >= 6:
                 break
 
         if not fetched:
             return ""
+
+        total_chars = sum(len(t) for _, t in fetched)
+        bus.emit(
+            "research_step",
+            f"gathered {len(fetched)} sources ({total_chars // 1000}K chars) — synthesising…",
+        )
 
         return _render_research(query, fetched)
 
@@ -288,6 +326,75 @@ _SITE_AUGMENT_MAP = {
     "github": "site:docs.github.com OR site:github.com",
     "git": "site:git-scm.com/docs OR site:stackoverflow.com",
 }
+
+
+def _howto_refined_query(query: str) -> str:
+    """Refine the query to surface walkthrough/tutorial pages over
+    reference docs. Cheap heuristic: if not already a 'how to', prefix
+    with 'tutorial'; strip trailing '?' since search engines downrank
+    question marks.
+    """
+    q = query.strip().rstrip("?")
+    if re.search(r"\bhow\s+(do|to|can)\b", q, re.IGNORECASE):
+        return q + " tutorial example"
+    if re.search(r"\bwhat\b", q, re.IGNORECASE):
+        return "how to " + q.replace("what can we do for", "").replace("what is", "").strip()
+    return q + " tutorial example"
+
+
+# Authoritative domains we want to surface first. Bigger weight = higher
+# rank. Matched as substring on the URL's netloc.
+_DOMAIN_WEIGHTS = {
+    "developer.android.com": 10,
+    "developer.apple.com": 10,
+    "kotlinlang.org": 10,
+    "docs.python.org": 10,
+    "docs.djangoproject.com": 10,
+    "fastapi.tiangolo.com": 10,
+    "react.dev": 10,
+    "nextjs.org": 10,
+    "vuejs.org": 10,
+    "docs.docker.com": 10,
+    "kubernetes.io": 10,
+    "docs.aws.amazon.com": 10,
+    "cloud.google.com": 10,
+    "learn.microsoft.com": 10,
+    "developer.mozilla.org": 10,
+    "git-scm.com": 10,
+    "go.dev": 10,
+    "doc.rust-lang.org": 10,
+    "stackoverflow.com": 8,
+    "github.com": 7,
+    "medium.com": 3,
+    "dev.to": 4,
+}
+
+
+def _rank_urls(urls: list[str]) -> list[str]:
+    """Sort URLs so authoritative docs come first. Ties keep original
+    order so DDG's relevance signal still counts as a secondary key."""
+    from urllib.parse import urlparse
+
+    scored: list[tuple[int, int, str]] = []
+    for i, u in enumerate(urls):
+        netloc = urlparse(u).netloc.lower()
+        score = 0
+        for domain, weight in _DOMAIN_WEIGHTS.items():
+            if domain in netloc:
+                score = max(score, weight)
+        scored.append((-score, i, u))  # negative so higher score sorts first
+    scored.sort()
+    return [u for _, _, u in scored]
+
+
+def _short_domain(url: str) -> str:
+    """Strip protocol + 'www.' for status-line display."""
+    from urllib.parse import urlparse
+
+    netloc = urlparse(url).netloc
+    if netloc.startswith("www."):
+        netloc = netloc[4:]
+    return netloc or url[:40]
 
 
 def _site_augmented_query(query: str) -> str | None:

@@ -280,6 +280,15 @@ class _ToolCallRenderer:
                         padding=(0, 1),
                     )
                 )
+            elif ev.kind == "research_step":
+                # tech_research playbook is doing real work (search,
+                # fetch, synthesize). Render each step as a quiet bullet
+                # line so the user SEES progress instead of staring at a
+                # frozen spinner for 20 seconds.
+                self.con.print(
+                    f"[dim]  ↳ [cyan]research[/cyan] · {ev.text}[/dim]",
+                    highlight=False,
+                )
             elif ev.kind == "reflection_retry":
                 # The agent's reflection layer caught a lazy response
                 # ('I cannot directly test', etc.) and is retrying with
