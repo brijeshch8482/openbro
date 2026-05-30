@@ -280,6 +280,18 @@ class _ToolCallRenderer:
                         padding=(0, 1),
                     )
                 )
+            elif ev.kind == "provider_fallback":
+                # Primary LLM hit an error, falling back to local.
+                # Surface it loud enough that the user knows why the
+                # response is slower / from a smaller model, but
+                # transient enough that it doesn't dominate the screen.
+                primary = ev.meta.get("primary", "primary")
+                fallback = ev.meta.get("fallback", "fallback")
+                self.con.print(
+                    f"\n[yellow]⚠ {primary} unavailable — switching to "
+                    f"{fallback} for this turn.[/yellow]",
+                    highlight=False,
+                )
             elif ev.kind == "plan_started":
                 tl = ev.meta.get("tasklist")
                 if tl is not None:
@@ -369,6 +381,7 @@ COMMANDS = [
     "wait",
     "kill",
     "workspace",
+    "fallback",
     "storage",
     "audit",
     "memory",
@@ -473,13 +486,28 @@ def _make_status_bar(agent, get_voice_state):
         # prompt_toolkit's HTML parser would choke on.
         from html import escape as _esc
 
+        # Fallback indicator: shows whether the local backup is ready
+        # to take over if the cloud primary craps out. Glyphs:
+        #   ✓ ready    ⏳ downloading    — disabled
+        try:
+            from openbro.utils.local_llm_setup import is_fallback_ready
+
+            fb_ready = is_fallback_ready()
+        except Exception:
+            fb_ready = False
+        fb_text = "fallback ✓" if fb_ready else "fallback ⏳"
+        # If cfg sets fallback to nothing, suppress the indicator entirely.
+        if not (cfg.get("llm", {}) or {}).get("fallback"):
+            fb_text = ""
+
         return HTML(
             f" <ansigray>◆</ansigray> <ansigray>{_esc(provider)}/{_esc(short_model)}</ansigray>"
             f"  <ansigray>·</ansigray>  <ansigray>voice {voice_state}</ansigray>"
             f"  <ansigray>·</ansigray>  <ansigray>{boss_state}</ansigray>"
             f"  <ansigray>·</ansigray>  <ansigray>"
             f"{_fmt_tok(tok_in)}↓ {_fmt_tok(tok_out)}↑ ({_fmt_tok(tok_total)})</ansigray>"
-            f"  <ansigray>·</ansigray>  <ansigray>/help /tools /voice /model /quit</ansigray>"
+            + (f"  <ansigray>·</ansigray>  <ansigray>{fb_text}</ansigray>" if fb_text else "")
+            + "  <ansigray>·</ansigray>  <ansigray>/help /tools /voice /model /quit</ansigray>"
         )
 
     return _bar
@@ -508,6 +536,17 @@ def start_repl(resume_session: str | None = None):
     history_file = config_dir / "history.txt"
 
     agent = Agent()
+
+    # Auto-download the fallback model if it's missing. Returns instantly
+    # — work runs in a background JobRegistry job so the REPL is fully
+    # responsive while the file pulls. Status bar carries a 'fallback:
+    # ⏳ downloading…' indicator that turns to '✓ ready' on completion.
+    try:
+        from openbro.utils.local_llm_setup import ensure_fallback_ready_async
+
+        ensure_fallback_ready_async()
+    except Exception:
+        pass  # never let setup break the REPL
 
     # Resume a past session if asked. We do this BEFORE the prompt
     # session is constructed so the status bar shows the right token
@@ -676,6 +715,18 @@ def _handle_command(cmd: str, agent: Agent) -> bool:
 
     if cmd_lower == "workspace":
         _show_workspace()
+        return True
+
+    if cmd_lower in ("fallback", "fallback status"):
+        _show_fallback_status()
+        return True
+
+    if cmd_lower == "fallback download":
+        _trigger_fallback_download()
+        return True
+
+    if cmd_lower == "fallback test":
+        _test_fallback(agent)
         return True
 
     if cmd_lower.startswith("wait "):
@@ -874,6 +925,9 @@ def _show_help():
     table.add_row("wait <id>", "Block on a background job, show result panel")
     table.add_row("kill <id>", "Cancel a running background job (cooperative)")
     table.add_row("workspace", "Show detected cwd / project / git context")
+    table.add_row("fallback", "Show local-fallback model status (ready / downloading)")
+    table.add_row("fallback download", "Manually kick off the fallback model download")
+    table.add_row("fallback test", "Send a tiny query through the local fallback")
     table.add_row("models", "List downloaded offline models")
     table.add_row("pull", "Download a new offline model (interactive)")
     table.add_row("pull <model>", "Download specific model (e.g. pull llama3.2:3b)")
@@ -1063,6 +1117,115 @@ def _resume_previous_session(agent: Agent, session_hint: str) -> None:
         f"[green]Resumed session[/green] [bold]{target_id}[/bold] "
         f"[dim]({label}, {replayed} messages loaded)[/dim]\n"
     )
+
+
+def _show_fallback_status():
+    """Show whether the local fallback model is downloaded + ready.
+
+    The status bar already shows ✓/⏳, but `fallback` gives the full
+    detail — model name, file size, expected vs actual disk path, any
+    download job that's currently running.
+    """
+    from openbro.utils.config import load_config
+    from openbro.utils.local_llm_setup import MODELS, is_fallback_ready, models_dir
+
+    cfg = load_config()
+    fb = (cfg.get("llm", {}) or {}).get("fallback")
+    if not fb:
+        console.print(
+            "[dim]No fallback configured. Set with: `config set llm.fallback local`[/dim]\n"
+        )
+        return
+    if fb != "local":
+        console.print(
+            f"[green]Fallback configured: {fb} (cloud-to-cloud, no download needed)[/green]\n"
+        )
+        return
+
+    model_name = (cfg.get("providers", {}).get("local") or {}).get("model")
+    if not model_name:
+        model_name = cfg.get("llm", {}).get("model", "llama3.2:3b")
+    info = MODELS.get(model_name) or {}
+    ready = is_fallback_ready(model_name)
+
+    table = Table(title="Fallback Status", border_style="cyan")
+    table.add_column("Field", style="bold")
+    table.add_column("Value")
+    table.add_row("Configured fallback", "local")
+    table.add_row("Model", model_name)
+    if info.get("size"):
+        table.add_row("Size", info["size"])
+    if info.get("ram"):
+        table.add_row("RAM needed", info["ram"])
+    target = models_dir() / info["file"] if info.get("file") else None
+    if target:
+        table.add_row("Expected path", str(target))
+    status = "[green]✓ ready[/green]" if ready else "[yellow]⏳ not downloaded yet[/yellow]"
+    table.add_row("Status", status)
+    console.print(table)
+
+    # Show any active download job
+    try:
+        from openbro.core.jobs import JobRegistry
+
+        for j in JobRegistry.get().list_all():
+            if j.meta.get("kind") == "fallback_download" and j.is_alive():
+                elapsed = j.elapsed() or 0
+                console.print(
+                    f"\n[yellow]⏳ Download running:[/yellow] job `{j.id}` "
+                    f"({elapsed:.0f}s elapsed). `wait {j.id}` to block."
+                )
+                break
+    except Exception:
+        pass
+    if not ready:
+        console.print(
+            "\n[dim]Run `fallback download` to start a manual download, "
+            "or wait — auto-download is queued on every REPL start.[/dim]\n"
+        )
+
+
+def _trigger_fallback_download():
+    """Manually kick the auto-download (idempotent — does nothing if
+    already running or already complete)."""
+    from openbro.utils.local_llm_setup import ensure_fallback_ready_async, is_fallback_ready
+
+    if is_fallback_ready():
+        console.print("[green]Fallback already ready — nothing to do.[/green]\n")
+        return
+    job_id = ensure_fallback_ready_async()
+    if job_id is None:
+        console.print(
+            "[yellow]No fallback configured for download.[/yellow] "
+            "Set with `config set llm.fallback local`.\n"
+        )
+        return
+    console.print(
+        f"[green]Started background download job `{job_id}`.[/green] "
+        f"Track with `jobs` or `wait {job_id}`.\n"
+    )
+
+
+def _test_fallback(agent):
+    """Send a tiny query directly through the fallback provider to verify
+    it works end-to-end."""
+    from openbro.llm.base import Message
+    from openbro.llm.fallback_provider import FallbackProvider
+
+    if not isinstance(agent.provider, FallbackProvider):
+        console.print(
+            "[yellow]Fallback not active in current session.[/yellow] "
+            "Restart the REPL after a fresh download to enable.\n"
+        )
+        return
+    console.print("[dim]Sending test query through fallback…[/dim]")
+    try:
+        resp = agent.provider.fallback.chat(
+            [Message(role="user", content="Reply with exactly: ok")]
+        )
+        console.print(f"[green]Fallback OK[/green] → {resp.content[:200]}\n")
+    except Exception as e:
+        console.print(f"[red]Fallback failed: {e}[/red]\n")
 
 
 def _show_workspace():

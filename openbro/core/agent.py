@@ -93,6 +93,24 @@ class Agent:
             console.print("[yellow]Run 'openbro --setup' to reconfigure.[/yellow]")
             raise SystemExit(1)
 
+        # Wire the fallback provider's notification callback to the
+        # ActivityBus so the REPL renderer can show 'primary failed,
+        # switched to local' inline.
+        from openbro.llm.fallback_provider import FallbackProvider
+
+        if isinstance(self.provider, FallbackProvider):
+
+            def _on_fallback(primary_name: str, fallback_name: str, error: str) -> None:
+                self.bus.emit(
+                    "provider_fallback",
+                    f"{primary_name} → {fallback_name}",
+                    primary=primary_name,
+                    fallback=fallback_name,
+                    error=error,
+                )
+
+            self.provider.on_fallback = _on_fallback
+
         self.memory = memory or MemoryManager()
         self.interactive = interactive
         self.bus = get_bus()

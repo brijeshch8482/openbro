@@ -367,9 +367,7 @@ def test_synthesis_python_fastapi_project(tmp_path):
     (tmp_path / "build.gradle.kts").touch()  # noise to trip the gradle path; shouldn't apply
     src = tmp_path / "src"
     src.mkdir()
-    (src / "main.py").write_text(
-        "from fastapi import FastAPI\napp = FastAPI()\n"
-    )
+    (src / "main.py").write_text("from fastapi import FastAPI\napp = FastAPI()\n")
 
     pb = ProjectExplainPlaybook()
     ctx = PlaybookContext(

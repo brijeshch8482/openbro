@@ -120,6 +120,12 @@ def default_config() -> dict:
             "provider": "local",
             "model": "llama3.2:3b",
             "fallback_provider": None,
+            # `fallback` — secondary provider name. When set, every chat()
+            # call goes through a FallbackProvider that transparently
+            # cascades on rate limits / network errors / 5xx. Default
+            # 'local' so a fresh install with Groq primary still works
+            # offline once the local model is downloaded.
+            "fallback": "local",
         },
         "providers": {
             "local": {

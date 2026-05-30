@@ -223,6 +223,89 @@ def _download_via_httpx(url: str, target: Path) -> bool:
         return False
 
 
+def is_fallback_ready(model_name: str | None = None) -> bool:
+    """Return True if the configured fallback model is already on disk.
+
+    Cheap — just checks the GGUF file exists. Used by the status bar
+    and the agent's startup wiring to decide whether to kick off a
+    download.
+    """
+    if model_name is None:
+        from openbro.utils.config import load_config
+
+        cfg = load_config()
+        primary = (cfg.get("llm", {}) or {}).get("provider")
+        fb_name = (cfg.get("llm", {}) or {}).get("fallback")
+        if not fb_name or fb_name == primary:
+            return True  # no fallback configured = vacuously ready
+        if fb_name != "local":
+            return True  # cloud-to-cloud fallback doesn't need a file
+        # Local fallback — the model lives under the active local model name
+        model_name = (
+            (cfg.get("providers", {}).get("local") or {}).get("model")
+            or cfg.get("llm", {}).get("model")
+            or DEFAULT_MODEL
+        )
+    info = MODELS.get(model_name)
+    if not info:
+        return False
+    return (models_dir() / info["file"]).exists()
+
+
+def ensure_fallback_ready_async(model_name: str | None = None) -> str | None:
+    """Kick off a background JobRegistry job to download the fallback
+    model if not present. Returns the job ID, or None if no work needed
+    (already on disk OR fallback isn't 'local'). Safe to call on every
+    startup — idempotent.
+
+    Why background: the user's design intent was 'kabhi problem na ho'.
+    Blocking the REPL on a 2 GB download is exactly the opposite. We
+    want the agent to come up immediately; the fallback becomes
+    available silently when the download completes.
+    """
+    if is_fallback_ready(model_name):
+        return None
+    from openbro.utils.config import load_config
+
+    cfg = load_config()
+    fb_name = (cfg.get("llm", {}) or {}).get("fallback")
+    if fb_name != "local":
+        return None
+    name = (
+        model_name
+        or (cfg.get("providers", {}).get("local") or {}).get("model")
+        or cfg.get("llm", {}).get("model")
+        or DEFAULT_MODEL
+    )
+    info = MODELS.get(name)
+    if not info:
+        return None  # unknown model — wizard handles, not us
+    # Don't crash startup if the user yanked llama-cpp-python.
+    try:
+        from openbro.core.jobs import JobRegistry
+    except Exception:
+        return None
+
+    registry = JobRegistry.get()
+    # Check if a download for this same model is already running, so
+    # rapid REPL restarts don't queue 5 simultaneous downloads.
+    for j in registry.list_all():
+        if j.meta.get("kind") == "fallback_download" and j.meta.get("model") == name:
+            if j.is_alive():
+                return j.id
+
+    def _runner(job):
+        result = download_model(name)
+        return f"Downloaded {name} -> {result}" if result else f"Download failed for {name}"
+
+    job = registry.submit(
+        label=f"download fallback: {name} ({info['size']})",
+        fn=_runner,
+        meta={"kind": "fallback_download", "model": name, "size": info["size"]},
+    )
+    return job.id
+
+
 def download_model(name: str) -> Path | None:
     """Download a GGUF model from HuggingFace into the user's models dir.
 

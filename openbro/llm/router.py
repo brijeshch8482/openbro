@@ -1,17 +1,66 @@
 """LLM provider router - picks the right provider based on config."""
 
+import sys
+
 from openbro.llm.base import LLMProvider
 from openbro.utils.config import load_config
 
 
 def create_provider(provider_name: str | None = None) -> LLMProvider:
-    """Create an LLM provider based on config or explicit name."""
+    """Create the LLM provider, optionally wrapped with a fallback.
+
+    Config knobs:
+      llm.provider   - primary provider name (groq / anthropic / local / …)
+      llm.fallback   - OPTIONAL fallback provider name. When set, the
+                       returned provider is a FallbackProvider that
+                       transparently cascades on recoverable errors.
+
+    Building the fallback is best-effort: if the user has fallback=local
+    configured but no model downloaded yet (first launch, download in
+    progress), we log a warning and return the primary alone. The
+    download flow re-runs setup once it completes so the fallback is
+    available on the next request.
+    """
     config = load_config()
 
     if provider_name is None:
         provider_name = config["llm"]["provider"]
 
     providers_config = config.get("providers", {})
+    primary = _build_one(provider_name, config, providers_config)
+
+    # Auto-fallback chain: only wraps when the user explicitly sets it
+    # AND it's not the same provider. Default config leaves this empty
+    # so existing single-provider users see no behavior change.
+    fallback_name = (config.get("llm", {}) or {}).get("fallback")
+    if (
+        fallback_name
+        and isinstance(fallback_name, str)
+        and fallback_name.strip()
+        and fallback_name != provider_name
+    ):
+        try:
+            fallback = _build_one(fallback_name, config, providers_config)
+        except Exception as e:
+            # Don't fail-fast — primary still works. Tell the user once
+            # so they know the cushion isn't active yet.
+            print(
+                f"[fallback] '{fallback_name}' not available yet ({e}). "
+                "Primary will run alone; fallback will activate when ready.",
+                file=sys.stderr,
+            )
+            return primary
+        from openbro.llm.fallback_provider import FallbackProvider
+
+        return FallbackProvider(primary=primary, fallback=fallback)
+
+    return primary
+
+
+def _build_one(provider_name: str, config: dict, providers_config: dict) -> LLMProvider:
+    """Build a single provider (no wrapping). Same logic as the original
+    router; pulled into a helper so the fallback wrapper can call it
+    twice with different names."""
 
     if provider_name in ("local", "ollama"):
         # 'ollama' kept as alias for back-compat with old configs; both now
