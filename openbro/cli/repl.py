@@ -280,6 +280,18 @@ class _ToolCallRenderer:
                         padding=(0, 1),
                     )
                 )
+            elif ev.kind == "reflection_retry":
+                # The agent's reflection layer caught a lazy response
+                # ('I cannot directly test', etc.) and is retrying with
+                # a stronger instruction. Surface it so the user knows
+                # WHY the turn is slower this time.
+                markers = ev.meta.get("markers") or []
+                first = markers[0] if markers else "lazy pattern"
+                self.con.print(
+                    f"\n[yellow]🔄 Retrying — caught lazy phrase "
+                    f'"{first}". Forcing source-grounded answer.[/yellow]',
+                    highlight=False,
+                )
             elif ev.kind == "provider_fallback":
                 # Primary LLM hit an error, falling back to local.
                 # Surface it loud enough that the user knows why the

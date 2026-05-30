@@ -21,6 +21,7 @@ def all_builtin_playbooks() -> list[type]:
     from openbro.playbooks.builtin.process_check import ProcessCheckPlaybook
     from openbro.playbooks.builtin.project_explain import ProjectExplainPlaybook
     from openbro.playbooks.builtin.system_health import SystemHealthPlaybook
+    from openbro.playbooks.builtin.tech_research import TechResearchPlaybook
     from openbro.playbooks.builtin.time_now import TimeNowPlaybook
 
     return [
@@ -34,4 +35,8 @@ def all_builtin_playbooks() -> list[type]:
         CloseAppPlaybook,
         OpenAppPlaybook,
         FileSearchPlaybook,
+        # Last — only fires on technical Q&A that no specific playbook
+        # caught. Tech research is the safety net that injects real web
+        # sources into the LLM's context.
+        TechResearchPlaybook,
     ]

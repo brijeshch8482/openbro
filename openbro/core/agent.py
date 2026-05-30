@@ -22,6 +22,17 @@ from openbro.utils.language import detect_language, language_instruction
 console = Console()
 
 
+def _detect_lazy_response_safe(text: str) -> list[str]:
+    """Wrap the tech_research playbook's detector so a refactor of that
+    module can't crash the agent loop. Returns [] on any import error."""
+    try:
+        from openbro.playbooks.builtin.tech_research import detect_lazy_response
+
+        return detect_lazy_response(text)
+    except Exception:
+        return []
+
+
 def _friendly_error(e: Exception) -> str:
     """User-facing error message with category + fix hint.
 
@@ -384,6 +395,46 @@ class Agent:
             )
 
             if not response.tool_calls:
+                # ─── Reflection: lazy-response detector ───────────────
+                # When a tech_research playbook injected sources but the
+                # LLM still answered with 'I cannot directly test' / 'test
+                # on different devices' filler, retry ONCE with a
+                # stronger instruction. Cap at one retry so the loop
+                # always terminates.
+                lazy_markers = _detect_lazy_response_safe(response.content)
+                already_retried = any(
+                    "REFLECTION RETRY" in (m.content or "")
+                    for m in self.history
+                    if m.role == "system"
+                )
+                if lazy_markers and not already_retried:
+                    self.bus.emit(
+                        "reflection_retry",
+                        f"detected lazy markers: {', '.join(lazy_markers[:3])}",
+                        markers=lazy_markers,
+                    )
+                    # Inject a corrective system instruction and loop again.
+                    self.history.append(
+                        Message(
+                            role="system",
+                            content=(
+                                "[REFLECTION RETRY] Your previous answer "
+                                "contained one of these lazy patterns: "
+                                f"{', '.join(lazy_markers)}. The user has "
+                                "REAL fetched sources in the prior system "
+                                "message. Rewrite the answer using ONLY the "
+                                "fetched content. Be specific. Cite "
+                                "[Source N] inline. No 'I cannot directly "
+                                "test'. No 'test on different devices'. No "
+                                "generic best-practice fluff. If a source "
+                                "shows real code, use it. Output the same "
+                                "structure as before (Answer / Steps / Code "
+                                "/ Caveats / Sources)."
+                            ),
+                        )
+                    )
+                    continue  # re-run the LLM
+
                 # Final answer — model decided no more tools needed.
                 self.history.append(Message(role="assistant", content=response.content))
                 self.memory.add("assistant", response.content)
@@ -518,6 +569,35 @@ class Agent:
             elapsed=elapsed,
             playbook=playbook.name,
         )
+
+        # `pass_through_to_llm=True` playbooks (e.g. tech_research) inject
+        # their output as a TOOL-LIKE context turn and let the LLM run
+        # one more synthesis pass with the real source content. This
+        # avoids returning a raw 'here are 3 web pages' dump to the
+        # user — the model sees the sources, then writes a concrete
+        # answer grounded in them with citations.
+        if getattr(playbook, "pass_through_to_llm", False):
+            # Append the playbook output as a 'system' note in history
+            # so the LLM sees it for the NEXT chat() call but doesn't
+            # echo it back. Then fall through (return None) so the
+            # normal LLM loop runs.
+            preamble = (
+                f"[Playbook `{playbook.name}` ran web research for the "
+                "user's question. Use the sources below to write a "
+                "concrete, specific answer. Cite source URLs inline. "
+                "Do NOT add 'I can't verify' or 'test on different "
+                "devices' filler — the sources are real, current docs.]"
+            )
+            self.history.append(
+                Message(
+                    role="system",
+                    content=preamble + "\n\n" + response,
+                )
+            )
+            # Note: don't persist this to long-term memory — it's
+            # one-turn context. The LLM's final answer will be the
+            # persisted assistant message via the normal loop.
+            return None
 
         # Persist as a normal assistant turn so chat history stays consistent
         # — the LLM will see this on its next turn and won't be surprised.

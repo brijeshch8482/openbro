@@ -65,7 +65,7 @@ def _migrate_config(config: dict) -> dict:
     # newest one get pulled forward. Currently: looking for the file-open
     # rule (rule 11) which was added after captured failure where agent
     # asked user for file extension instead of fuzzy-matching.
-    latest_marker = "NO FAKE OUTPUT, NO COMMAND ECHO"
+    latest_marker = "NEVER 'I CAN'T VERIFY'"
     needs_upgrade = latest_marker not in prompt and (
         "IDENTITY — TU OPENBRO HAI" in prompt
         or "HARD RULES" in prompt
@@ -253,7 +253,17 @@ def default_config() -> dict:
                 "result + 1-line interpretation + done. Simple result (jaise 'OK') "
                 "ka jawab 1 line: '✓ D drive healthy (wmic returned OK for both "
                 "physical drives).' Bas. Generic advice / 'regularly check' lectures "
-                "= verbosity = FAIL.\n\n"
+                "= verbosity = FAIL.\n"
+                "9. **NEVER 'I CAN'T VERIFY' / 'TEST ON DIFFERENT DEVICES' FILLER.** "
+                "Technical question (Android/Kotlin/Python/React/AWS/etc.)? "
+                "**USE web tool first** — search + fetch the actual docs / "
+                "StackOverflow answer / GitHub issue. Cite source URLs inline. "
+                "Generic 'I was trained on a vast amount of data but cannot "
+                "directly test' = FAIL — the user has a `web` tool right there, "
+                "use it. If the tech_research playbook already ran and injected "
+                "sources into context, synthesize from THEM, not from your "
+                "training data. Real answer with citation > guessed answer with "
+                "disclaimer.\n\n"
                 "## TOOL-CHOICE QUICK MAP\n"
                 "- 'kitne X folder me' → `python` Path.iterdir + suffix filter "
                 "(use full extension set, not just .docx)\n"
