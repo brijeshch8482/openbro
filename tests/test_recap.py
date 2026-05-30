@@ -261,3 +261,159 @@ def test_rendered_tool_args_skipped_when_real_call_was_made():
 
     text = "I ran `network action='ip'` for you and got the result."
     assert detect_fabricated_tool_call(text, tool_calls_made=1) is None
+
+
+# ─── User-asked-for-code skips multi-block fabrication ────────────
+
+
+def test_multi_code_blocks_allowed_when_user_asked_for_code():
+    """Captured failure 2026-05-30: user said 'bro mujhe full
+    implementation chahiye to tum full code likho' for kiosk mode.
+    Model wrote 4 Java code blocks (Manifest, KioskActivity,
+    Configurator, MainActivity) — code IS the answer. Detector
+    incorrectly flagged → escalator fired → maverick unavailable →
+    local context overflow → user saw an error instead of an
+    answer."""
+    from openbro.playbooks.builtin.tech_research import detect_fabricated_tool_call
+
+    text = (
+        "Here's the kiosk mode setup:\n"
+        "```java\npublic class A {}\n```\n"
+        "And the receiver:\n"
+        "```java\npublic class B {}\n```\n"
+        "Manifest:\n"
+        "```xml\n<receiver/>\n```\n"
+    )
+    # User explicitly asked for full code.
+    assert (
+        detect_fabricated_tool_call(text, tool_calls_made=0, user_prompt="bro full code likho")
+        is None
+    )
+    assert (
+        detect_fabricated_tool_call(
+            text,
+            tool_calls_made=0,
+            user_prompt="mujhe full implementation chahiye",
+        )
+        is None
+    )
+    assert (
+        detect_fabricated_tool_call(
+            text,
+            tool_calls_made=0,
+            user_prompt="write me the code please",
+        )
+        is None
+    )
+    # WITHOUT user_prompt the old behavior is preserved → still
+    # flagged (back-compat for older callers).
+    assert detect_fabricated_tool_call(text, tool_calls_made=0) is not None
+
+
+def test_multi_code_blocks_still_flagged_for_non_code_questions():
+    """Even when user_prompt is supplied, multi-code-blocks must still
+    fire when the question wasn't a code request — that's the
+    original fabrication signal we don't want to silence."""
+    from openbro.playbooks.builtin.tech_research import detect_fabricated_tool_call
+
+    text = "Let me check.\n```python\nprint(1)\n```\nThen:\n```shell\nls\n```\n"
+    reason = detect_fabricated_tool_call(
+        text, tool_calls_made=0, user_prompt="what is on my desktop?"
+    )
+    assert reason is not None
+
+
+def test_user_asked_for_code_detector_positive_cases():
+    """Phrase variants we MUST recognise as a code request."""
+    from openbro.playbooks.builtin.tech_research import user_asked_for_code
+
+    for q in [
+        "write me a python function",
+        "full code likh",
+        "code likho please",
+        "mujhe full implementation chahiye",
+        "give me an example",
+        "show me the code",
+        "paste the snippet",
+        "how do I implement a singleton in Java",
+        "complete code de do",
+        "full source likh do",
+    ]:
+        assert user_asked_for_code(q), f"should detect: {q!r}"
+
+
+def test_user_asked_for_code_detector_negative_cases():
+    """Casual questions that mention 'code' or 'implementation' as a
+    noun, not as an ask, should not trip the detector."""
+    from openbro.playbooks.builtin.tech_research import user_asked_for_code
+
+    for q in [
+        "what is python",
+        "kya time hua",
+        "tell me about django",
+        "kiosk mode kya hai",
+    ]:
+        assert not user_asked_for_code(q), f"should NOT detect: {q!r}"
+
+
+# ─── History trim before local swap ───────────────────────────────
+
+
+def test_trim_history_for_local_swap_drops_transient_blocks():
+    """Captured failure: cloud-only history of 13K tokens went
+    unchanged to local llama3.2:3b → ValueError 'requested (13658) >
+    context (8192)'. The trim helper must strip [TRANSIENT_RESEARCH]
+    and [TRANSIENT_PLAN] blocks before falling back."""
+    from unittest.mock import MagicMock, patch
+
+    from openbro.core.agent import Agent
+    from openbro.llm.base import Message
+
+    fake_provider = MagicMock()
+    fake_provider.name.return_value = "fake"
+    fake_provider.supports_tools.return_value = True
+
+    with patch("openbro.core.agent.create_provider", return_value=fake_provider):
+        agent = Agent(interactive=False)
+        agent.playbook_registry._playbooks = []
+        # Synthetic history: system prompt + huge research block +
+        # planning block + a few user/assistant turns.
+        agent.history = [
+            Message(role="system", content="you are openbro"),
+            Message(role="system", content="[TRANSIENT_RESEARCH] " + "X" * 40000),
+            Message(role="system", content="[TRANSIENT_PLAN] make a plan"),
+            Message(role="user", content="what is the weather"),
+            Message(role="assistant", content="sunny"),
+        ]
+        agent._trim_history_for_local_swap(target_token_budget=2000)
+
+    kinds = [(m.role, (m.content or "")[:30]) for m in agent.history]
+    # Transient blocks must be gone.
+    assert not any("[TRANSIENT_RESEARCH]" in (m.content or "") for m in agent.history)
+    assert not any("[TRANSIENT_PLAN]" in (m.content or "") for m in agent.history)
+    # System prompt + recent turns kept.
+    assert agent.history[0].role == "system"
+    assert any(m.role == "user" for m in agent.history), kinds
+
+
+def test_trim_history_for_local_swap_keeps_under_budget():
+    """The trimmed history must respect the token budget (approx)."""
+    from unittest.mock import MagicMock, patch
+
+    from openbro.core.agent import Agent
+    from openbro.llm.base import Message
+
+    fake_provider = MagicMock()
+    fake_provider.name.return_value = "fake"
+    fake_provider.supports_tools.return_value = True
+
+    with patch("openbro.core.agent.create_provider", return_value=fake_provider):
+        agent = Agent(interactive=False)
+        agent.history = [Message(role="system", content="you are openbro")] + [
+            Message(role="user", content="X" * 400) for _ in range(40)
+        ]
+        agent._trim_history_for_local_swap(target_token_budget=1000)
+
+    # Approx 4 chars per token; total content <= ~4000 chars after trim.
+    total_chars = sum(len(m.content or "") for m in agent.history)
+    assert total_chars // 4 <= 1100, total_chars  # small margin

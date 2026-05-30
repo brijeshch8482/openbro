@@ -598,8 +598,46 @@ _PROMISE_WITHOUT_ACTION = re.compile(
     re.IGNORECASE,
 )
 
+# Captured 2026-05-30: user asked 'bro mujhe full implementation
+# chahiye to tum full code likho' for kiosk mode in Android Studio.
+# Model wrote 4-5 Java code blocks (Manifest, KioskActivity, etc.) —
+# THE ANSWER IS THE CODE. No tool call needed. The 2+ code blocks
+# rule false-positived → escalator fired → maverick unavailable →
+# local context overflow → error shown. Detector now skips the
+# multiple-code-blocks check when the user prompt explicitly asks
+# for code/implementation/example.
+_USER_ASKED_FOR_CODE = re.compile(
+    # 'write/show/give me [a python] function/code/example/...'
+    r"\b(write|show|give|paste|likh(o|do|na)?|de|do)\s+(me\s+)?"
+    r"(the\s+|a\s+|some\s+|complete\s+|full\s+)?(\w+\s+)?"
+    r"(code|implementation|example|snippet|script|function|class|file|"
+    r"sample|source)\b|"
+    # Direct phrases (English + Hindi)
+    r"\b(full\s+(code|implementation|example|snippet|source)|"
+    r"code\s+likh(o|do|na)?|implementation\s+chahiye|"
+    r"chahiye.*implementation|full\s+source|sample\s+code|"
+    r"example\s+code|complete\s+code|code\s+chahiye|code\s+do)\b|"
+    # 'how do I implement/write/build X'
+    r"\b(how (do|can) (i|we|you) (write|implement|build|create))\b",
+    re.IGNORECASE,
+)
 
-def detect_fabricated_tool_call(text: str, tool_calls_made: int) -> str | None:
+
+def user_asked_for_code(user_prompt: str | None) -> bool:
+    """Return True when the latest user prompt explicitly asks for
+    code/implementation/sample. Used to short-circuit the
+    multiple-code-blocks fabrication check (false positive captured
+    when user said 'full code likh' and model wrote 4 java files)."""
+    if not user_prompt:
+        return False
+    return bool(_USER_ASKED_FOR_CODE.search(user_prompt))
+
+
+def detect_fabricated_tool_call(
+    text: str,
+    tool_calls_made: int,
+    user_prompt: str | None = None,
+) -> str | None:
     """Detect responses that LOOK like a tool ran but actually didn't.
 
     Returns a reason string if detected, None otherwise. Skips the
@@ -607,11 +645,18 @@ def detect_fabricated_tool_call(text: str, tool_calls_made: int) -> str | None:
     the model is allowed to render its tool args as code-styled chat
     AFTER the tool actually ran.
 
-    Three shapes are caught:
+    `user_prompt` is the latest user message. When the user
+    explicitly asked for code/implementation/example, the multiple-
+    code-blocks rule is skipped — code IS the answer, not
+    fabrication.
+
+    Four shapes are caught:
       1. fence + fake `Output:` / `Result:` block (NDLS_FDB failure)
       2. rendered tool args like `network action='ip'` (phone-conn
          failure)
-      3. 'Let me check X' / 'dekhte hain' promise with no call (drop-
+      3. multiple chat-text code blocks with no call — unless the
+         user explicitly asked for code (kiosk-mode failure)
+      4. 'Let me check X' / 'dekhte hain' promise with no call (drop-
          and-run failure)
     """
     if not text or tool_calls_made > 0:
@@ -624,8 +669,10 @@ def detect_fabricated_tool_call(text: str, tool_calls_made: int) -> str | None:
     # model literally typed out the tool invocation.
     if _RENDERED_TOOL_ARGS.search(text):
         return "rendered tool-args (e.g. `network action='ip'`) without making the call"
-    # 3. Two+ code blocks with no real tool call = highly suspect.
-    if fence_count >= 2:
+    # 3. Two+ code blocks with no real tool call = highly suspect —
+    # UNLESS the user explicitly asked for code, in which case the
+    # code blocks ARE the answer (not a fabricated tool call).
+    if fence_count >= 2 and not user_asked_for_code(user_prompt):
         return "multiple chat-text code blocks with no tool calls made"
     # 4. 'Let me check X' promise without execution. Cap on length so
     # we don't flag long honest answers that happen to include the

@@ -35,12 +35,24 @@ def _detect_lazy_response_safe(text: str) -> list[str]:
         return []
 
 
-def _detect_fabricated_tool_call_safe(text: str, tool_calls_made: int) -> str | None:
-    """Wrap the fabrication detector — never crash the agent loop."""
+def _detect_fabricated_tool_call_safe(
+    text: str,
+    tool_calls_made: int,
+    user_prompt: str | None = None,
+) -> str | None:
+    """Wrap the fabrication detector — never crash the agent loop.
+
+    `user_prompt` is the latest user message — when present, the
+    detector skips the multiple-code-blocks rule if the user
+    explicitly asked for code/implementation/example. This avoids
+    the false positive captured 2026-05-30 where 'bro full
+    implementation chahiye' triggered an unnecessary escalation
+    cascade ending in a context overflow on local.
+    """
     try:
         from openbro.playbooks.builtin.tech_research import detect_fabricated_tool_call
 
-        return detect_fabricated_tool_call(text, tool_calls_made)
+        return detect_fabricated_tool_call(text, tool_calls_made, user_prompt=user_prompt)
     except Exception:
         return None
 
@@ -472,7 +484,9 @@ class Agent:
                 # See reflection_escalator.py for the chain.
                 lazy_markers = _detect_lazy_response_safe(response.content)
                 fabricated_reason = _detect_fabricated_tool_call_safe(
-                    response.content, turn_tool_calls_made
+                    response.content,
+                    turn_tool_calls_made,
+                    user_prompt=user_input,
                 )
                 needs_retry = bool(fabricated_reason or lazy_markers)
                 if needs_retry:
@@ -630,6 +644,67 @@ class Agent:
         self.memory.add("assistant", full_response)
         self.bus.emit("assistant", full_response)
 
+    def _trim_history_for_local_swap(self, target_token_budget: int) -> None:
+        """Aggressively trim history when escalating to a local model.
+
+        Local llama.cpp models default to 8K context vs Groq's 32K.
+        Captured failure 2026-05-30: cloud-only history of 13K tokens
+        was sent unchanged to local llama3.2:3b → ValueError
+        'requested (13658) exceed context window (8192)'. The user
+        saw an error instead of an answer.
+
+        Strategy:
+          1. Drop every [TRANSIENT_RESEARCH] / [TRANSIENT_PLAN]
+             system message (research bloats history with 15K+ char
+             source dumps).
+          2. Keep the original system prompt (index 0).
+          3. Walk the rest tail-first, keeping messages until the
+             estimated token count exceeds the budget.
+          4. Token estimate: 4 chars ≈ 1 token (good enough — better
+             to under-trim than blow the context).
+
+        Best-effort: if estimation fails for any reason, fall back to
+        keeping the system prompt + last 6 turns.
+        """
+        budget = max(1024, int(target_token_budget))
+        # Step 1: prune transient context blocks.
+        history = [
+            m
+            for m in self.history
+            if not (
+                m.role == "system"
+                and (
+                    "[TRANSIENT_RESEARCH]" in (m.content or "")
+                    or "[TRANSIENT_PLAN]" in (m.content or "")
+                )
+            )
+        ]
+        if not history:
+            return
+
+        def _approx_tokens(msg) -> int:
+            return max(1, len(msg.content or "") // 4)
+
+        # Step 2: keep the system prompt (index 0) — it carries
+        # identity + tools schema; trimming this confuses the model.
+        kept = [history[0]] if history[0].role == "system" else []
+        used = _approx_tokens(history[0]) if kept else 0
+        # Step 3: walk tail-first, keeping recent turns until budget.
+        tail: list = []
+        for msg in reversed(history[1:] if kept else history):
+            cost = _approx_tokens(msg)
+            if used + cost > budget:
+                break
+            tail.append(msg)
+            used += cost
+        tail.reverse()
+        self.history = kept + tail
+        self.bus.emit(
+            "system",
+            f"trimmed history for local swap: {len(self.history)} "
+            f"msgs, ~{used} tokens (budget {budget})",
+        )
+
     def _swap_model_for_retry(self, model_id: str) -> None:
         """Hot-swap the provider's model mid-turn for an escalation retry.
 
@@ -645,19 +720,24 @@ class Agent:
         from openbro.llm.fallback_provider import FallbackProvider
 
         if model_id == "LOCAL":
-            # Switch to the local provider by re-creating the provider
-            # with `provider_name="local"`. Best-effort: if local model
-            # isn't installed the call raises and we keep the current
-            # provider.
+            # Switch to the local provider. Local llama.cpp models
+            # default to 8K context vs Groq's 32K — after a few
+            # escalation rounds the cloud history can be 12K+ tokens
+            # which raises ValueError 'requested > context window'
+            # the moment we send it. Trim aggressively first.
             try:
                 from openbro.llm.router import create_provider
 
                 cfg = load_config()
                 local_cfg = cfg.get("providers", {}).get("local", {})
+                local_ctx = int(local_cfg.get("n_ctx", 8192) or 8192)
+                # Reserve ~1.5K for the response.
+                self._trim_history_for_local_swap(local_ctx - 1500)
                 self.provider = create_provider(provider_name="local")
                 self.bus.emit(
                     "system",
-                    f"escalator: swapped to local model ({local_cfg.get('model', '?')})",
+                    f"escalator: swapped to local model "
+                    f"({local_cfg.get('model', '?')}, ctx={local_ctx})",
                 )
             except Exception as e:
                 self.bus.emit("system", f"escalator: local swap failed — {e}")
