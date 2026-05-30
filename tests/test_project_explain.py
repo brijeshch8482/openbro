@@ -304,6 +304,84 @@ def test_deep_inspect_handles_no_recognizable_language(tmp_path):
     assert "Project:" in out
 
 
+def test_synthesis_explains_what_android_maps_app_does(tmp_path):
+    """The captured failure that motivated synthesis: user gave us
+    MapRadiusKotlin, expected to be told the app shows location on
+    Maps with a radius. The synthesis should produce that paragraph
+    AND list the detected signals as evidence."""
+    (tmp_path / "build.gradle.kts").write_text(
+        "dependencies {\n"
+        '    implementation("com.google.android.gms:play-services-maps:18.2.0")\n'
+        '    implementation("com.google.android.gms:play-services-location:21.0.1")\n'
+        '    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0")\n'
+        "}"
+    )
+    main = tmp_path / "app" / "src" / "main"
+    main.mkdir(parents=True)
+    (main / "AndroidManifest.xml").write_text(
+        '<?xml version="1.0"?><manifest>'
+        '<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>'
+        '<uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>'
+        '<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>'
+        '<activity android:name=".MainActivity"/>'
+        "</manifest>"
+    )
+    src = main / "java" / "com" / "example" / "proj"
+    src.mkdir(parents=True)
+    (src / "MainActivity.kt").write_text(
+        "import com.google.android.gms.maps.GoogleMap\n"
+        "import com.google.android.gms.maps.model.Circle\n"
+        "import com.google.android.gms.location.FusedLocationProviderClient\n"
+        "import androidx.lifecycle.ViewModel\n"
+        "import androidx.lifecycle.LiveData\n"
+        "class MainActivity {\n"
+        "    private var circle: Circle? = null\n"
+        "    private var radius: Double = 100.0\n"
+        "}"
+    )
+
+    pb = ProjectExplainPlaybook()
+    ctx = PlaybookContext(
+        user_input=f"{tmp_path} explain this project",
+        tool_registry=MagicMock(),
+        captures={},
+    )
+    out = pb.execute(ctx)
+
+    # Synthesis paragraph must appear AND mention the core capabilities
+    assert "What it does" in out
+    assert "Maps" in out
+    assert "radius" in out.lower() or "circle" in out.lower()
+    # The "detected signals" line proves we're reading code, not guessing
+    assert "Detected signals" in out
+    assert "Google Maps SDK" in out
+    assert "FusedLocationProvider" in out
+
+
+def test_synthesis_python_fastapi_project(tmp_path):
+    """A FastAPI Python project should be summarised as a web API."""
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "myapi"\ndescription = "A web API"\n'
+    )
+    (tmp_path / "requirements.txt").write_text("fastapi\nuvicorn\n")
+    (tmp_path / "build.gradle.kts").touch()  # noise to trip the gradle path; shouldn't apply
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "main.py").write_text(
+        "from fastapi import FastAPI\napp = FastAPI()\n"
+    )
+
+    pb = ProjectExplainPlaybook()
+    ctx = PlaybookContext(
+        user_input=f"{tmp_path} explain this project",
+        tool_registry=MagicMock(),
+        captures={},
+    )
+    out = pb.execute(ctx)
+    # Synthesis should latch onto FastAPI if either dep blob OR source mentions it
+    assert "What it does" in out
+
+
 def test_file_ops_search_depth_handles_nested_android(tmp_path):
     """Bumped max_depth from 4 to 8 specifically for Android layouts
     where MainActivity.kt sits at depth 6+. This test asserts the

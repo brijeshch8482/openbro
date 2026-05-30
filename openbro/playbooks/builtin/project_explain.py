@@ -266,14 +266,200 @@ def _summarize_android_manifest(raw: str) -> dict:
     return out
 
 
+def _synthesize_purpose(
+    language: str,
+    manifest_info: dict | None,
+    deps: list[str],
+    source_blob: str,
+) -> str:
+    """Heuristic 'what does this project DO' synthesis from gathered signals.
+
+    Captured failure (2026-05-29): user asked 'i told it for explaining..
+    but what it does?' — project_explain dumped source code but never
+    synthesized the obvious story (Maps + location + radius = location-
+    tracking app with proximity feature). This function turns the
+    detected imports/permissions/dependencies into a short paragraph.
+
+    Returns '' when there's nothing confident to say (no detected
+    signals). The full-deep-inspect output still surfaces the raw
+    facts so the user can read them.
+    """
+    info = manifest_info or {}
+    permissions = set(info.get("permissions") or [])
+    dep_blob = " ".join(deps).lower()
+    src = source_blob.lower()
+
+    signals: list[str] = []
+    purpose_chunks: list[str] = []
+
+    # Detection tags — order matters for the final sentence.
+    has_maps = (
+        "play-services-maps" in dep_blob
+        or "googlemap" in src
+        or "com.google.android.gms.maps" in src
+    )
+    has_location = (
+        "play-services-location" in dep_blob
+        or "fusedlocationprovider" in src
+        or "locationmanager" in src
+        or {"ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"} & permissions
+    )
+    has_circle_radius = "circle" in src and ("radius" in src or "maps.model.circle" in src)
+    has_background_loc = "ACCESS_BACKGROUND_LOCATION" in permissions
+    has_notifications = "POST_NOTIFICATIONS" in permissions or "notificationchannel" in src
+    has_mvvm = "viewmodel" in src and "livedata" in src
+    has_compose = "androidx.compose" in dep_blob or "@composable" in src
+    has_room = "androidx.room" in dep_blob or "@entity" in src
+    has_retrofit = "retrofit" in dep_blob
+    has_okhttp = "okhttp" in dep_blob
+    has_camera = "androidx.camera" in dep_blob or "camerax" in src or "CAMERA" in permissions
+    has_internet = "INTERNET" in permissions
+
+    # Web / TS detections
+    has_react = "react" in dep_blob
+    has_next = "next" in dep_blob and "nextjs" in dep_blob or "next" in dep_blob
+    has_express = "express" in dep_blob
+
+    # Python detections
+    has_fastapi = "fastapi" in dep_blob
+    has_flask = "flask" in dep_blob
+    has_django = "django" in dep_blob
+    has_click_cli = "click" in dep_blob or "argparse" in src
+    has_pandas = "pandas" in dep_blob
+    has_torch = "torch" in dep_blob or "tensorflow" in dep_blob
+
+    # Build the human sentence from signals.
+    if language in ("Kotlin", "Java") and (has_maps or has_location):
+        if has_maps and has_location and has_circle_radius:
+            purpose_chunks.append(
+                "Android app jo Google Maps pe user ki location track karta "
+                "aur ek radius/circle dikhata hai (likely proximity/geofence feature)"
+            )
+        elif has_maps and has_location:
+            purpose_chunks.append("Android app — Google Maps + location tracking")
+        elif has_location:
+            purpose_chunks.append("Android app jo user location track karta")
+        else:
+            purpose_chunks.append("Android Maps app")
+
+        extras = []
+        if has_background_loc:
+            extras.append("background location bhi (jab app close ho tab bhi)")
+        if has_notifications:
+            extras.append("notifications send karta")
+        if has_mvvm:
+            extras.append("MVVM pattern (ViewModel + LiveData)")
+        if has_compose:
+            extras.append("Jetpack Compose UI")
+        if has_room:
+            extras.append("local Room database")
+        if has_retrofit or has_okhttp:
+            extras.append("REST API client (Retrofit/OkHttp)")
+        if has_camera:
+            extras.append("camera access")
+        if extras:
+            purpose_chunks.append("Includes: " + ", ".join(extras) + ".")
+    elif language in ("Kotlin", "Java"):
+        # Generic Android without map/location signals
+        if has_compose:
+            purpose_chunks.append("Android app built with Jetpack Compose.")
+        else:
+            purpose_chunks.append("Android application (Kotlin/Java).")
+        if has_retrofit or has_okhttp:
+            purpose_chunks.append("Uses REST APIs (Retrofit/OkHttp).")
+
+    # ─── TypeScript / JavaScript ─────────────────────────────────
+    elif language == "TypeScript/JavaScript":
+        if has_next:
+            purpose_chunks.append("Next.js web application.")
+        elif has_react:
+            purpose_chunks.append("React frontend application.")
+        elif has_express:
+            purpose_chunks.append("Node.js backend (Express).")
+        else:
+            purpose_chunks.append("Node.js project.")
+
+    # ─── Python ─────────────────────────────────────────────────
+    elif language == "Python":
+        if has_fastapi:
+            purpose_chunks.append("Python web API (FastAPI).")
+        elif has_flask:
+            purpose_chunks.append("Python web app (Flask).")
+        elif has_django:
+            purpose_chunks.append("Python web app (Django).")
+        elif has_click_cli:
+            purpose_chunks.append("Python CLI tool.")
+        elif has_torch:
+            purpose_chunks.append("Python ML/AI project (PyTorch/TensorFlow detected).")
+        elif has_pandas:
+            purpose_chunks.append("Python data-processing project (pandas detected).")
+        else:
+            purpose_chunks.append("Python project.")
+
+    # Detection signals worth listing so the user sees evidence.
+    if has_maps:
+        signals.append("Google Maps SDK")
+    if has_location:
+        signals.append("FusedLocationProvider / LocationManager")
+    if has_circle_radius:
+        signals.append("Circle/radius on map")
+    if has_background_loc:
+        signals.append("Background location permission")
+    if has_notifications:
+        signals.append("Notification channel + POST_NOTIFICATIONS")
+    if has_mvvm:
+        signals.append("ViewModel + LiveData (MVVM)")
+    if has_compose:
+        signals.append("Jetpack Compose")
+    if has_room:
+        signals.append("Room database")
+    if has_retrofit:
+        signals.append("Retrofit")
+    if has_okhttp and not has_retrofit:
+        signals.append("OkHttp")
+    if has_camera:
+        signals.append("CameraX / camera permission")
+    if has_react:
+        signals.append("React")
+    if has_next:
+        signals.append("Next.js")
+    if has_fastapi:
+        signals.append("FastAPI")
+    if has_django:
+        signals.append("Django")
+    if has_torch:
+        signals.append("PyTorch / TensorFlow")
+    if has_internet and language in ("Kotlin", "Java"):
+        signals.append("Internet permission")
+
+    if not purpose_chunks:
+        return ""
+
+    out = ["### What it does (heuristic synthesis)", "", " ".join(purpose_chunks)]
+    if signals:
+        out.append("")
+        out.append("_Detected signals_: " + ", ".join(f"`{s}`" for s in signals))
+    return "\n".join(out)
+
+
 def _deep_inspect(target: str, language: str) -> str:
     """Read source files and manifests one level deep, return markdown.
 
     For Android/Gradle projects: AndroidManifest.xml + dependencies +
     MainActivity source. For Python: top-level entry __main__.py /
     main.py. For Node: index.{js,ts}. Adapts to whatever's present.
+
+    Output starts with a **synthesized 'What it does'** paragraph based
+    on detected signals (Maps SDK, ViewModel, Room, FastAPI, etc.) so
+    the user gets the answer to "kya karta hai" without having to read
+    the code excerpts themselves.
     """
     sections: list[str] = []
+
+    # State we gather so the synthesis at the end can reason from it.
+    manifest_info_gathered: dict = {}
+    all_deps_gathered: list[str] = []
+    source_blob_gathered: str = ""
 
     # ─── Android-specific ────────────────────────────────────────
     if language in ("Kotlin", "Java"):
@@ -281,6 +467,7 @@ def _deep_inspect(target: str, language: str) -> str:
         if manifest_path:
             raw = _read_safe(manifest_path, max_chars=8000)
             info = _summarize_android_manifest(raw)
+            manifest_info_gathered = dict(info)
             if info:
                 sections.append("### AndroidManifest.xml")
                 rel = os.path.relpath(manifest_path, target)
@@ -308,6 +495,7 @@ def _deep_inspect(target: str, language: str) -> str:
                 continue
             raw = _read_safe(gradle_path, max_chars=8000)
             deps = _parse_gradle_deps(raw)
+            all_deps_gathered.extend(deps)
             if deps:
                 sections.append("")
                 sections.append(
@@ -355,6 +543,7 @@ def _deep_inspect(target: str, language: str) -> str:
         for src in sources[:3]:
             rel = os.path.relpath(src, target)
             content = _read_safe(src, max_chars=1500)
+            source_blob_gathered += content + "\n"
             sections.append("")
             sections.append(f"**`{rel}`**")
             sections.append("```")
@@ -366,6 +555,19 @@ def _deep_inspect(target: str, language: str) -> str:
                 f"\n_({len(sources) - 3} more source file(s) — read with `file_ops read <path>`.)_"
             )
 
+    # ─── Synthesize 'What it does' from gathered evidence ────────
+    # Cap source blob so a regex pass stays cheap. The synthesis
+    # function looks for telltale imports/classes/permissions and
+    # writes a 1-2 line paragraph + signals list. Prepended to the
+    # detail sections so the user sees the answer FIRST.
+    synthesis = _synthesize_purpose(
+        language=language,
+        manifest_info=manifest_info_gathered,
+        deps=all_deps_gathered,
+        source_blob=source_blob_gathered[:8000],
+    )
+    if synthesis:
+        return synthesis + "\n\n" + "\n".join(sections)
     return "\n".join(sections)
 
 

@@ -17,14 +17,22 @@ class GeoLookupPlaybook(Playbook):
     name = "geo_lookup"
     description = "Where am I (IP-based geolocation)."
     triggers = [
-        (re.compile(r"\b(mai|main)\s+(kaha|kahan)\s+hu\b", re.IGNORECASE), 1.0),
-        (re.compile(r"\bmeri\s+(city|location|jagah)\b", re.IGNORECASE), 1.0),
+        # Captured failures: 'mai kha hu' (kha vs kaha), 'mai kaha hoon'
+        # (hoon vs hu) — accept all the common spellings/casuals.
+        (
+            re.compile(
+                r"\b(mai|main)\s+(kaha|kahan|kha|kahaa|kha-hu)\s*(hu|hoon|hun|huu)?\b",
+                re.IGNORECASE,
+            ),
+            1.0,
+        ),
+        (re.compile(r"\bmeri\s+(city|location|jagah|jagha)\b", re.IGNORECASE), 1.0),
         (re.compile(r"\bwhere\s+am\s+i\b", re.IGNORECASE), 1.0),
         (re.compile(r"\bmy\s+(location|city|country)\b", re.IGNORECASE), 0.9),
         (re.compile(r"\bcurrent\s+location\b", re.IGNORECASE), 0.9),
         (re.compile(r"\bgeoloc(ation|ate)\b", re.IGNORECASE), 0.8),
     ]
-    keywords = ["kaha hu", "kahan hu", "where am i", "my location"]
+    keywords = ["kaha hu", "kahan hu", "kha hu", "where am i", "my location"]
 
     def execute(self, context: PlaybookContext) -> str:
         # Step 1: get public IP via the network tool.
