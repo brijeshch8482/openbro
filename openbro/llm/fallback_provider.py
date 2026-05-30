@@ -115,7 +115,14 @@ class FallbackProvider(LLMProvider):
                 # Surface it so the user can fix the config.
                 raise
             self._notify(e)
-            response = self.fallback.chat(messages, tools)
+            # Pre-trim before delegating: cloud primary often has
+            # 32K+ context but the local fallback is usually 8K.
+            # Captured 2026-05-30: 'this is...app so you have to
+            # see' triggered Groq 503 → fallback to local llama3.2:3b
+            # → ValueError 'requested (10876) exceed context window
+            # of 8192' was the user's only response.
+            fb_messages = self._fit_to_fallback_context(messages)
+            response = self.fallback.chat(fb_messages, tools)
             self.last_used = "fallback"
             self.fallback_count += 1
             return response
@@ -145,7 +152,7 @@ class FallbackProvider(LLMProvider):
             self._notify(e)
             self.last_used = "fallback"
             self.fallback_count += 1
-            yield from self.fallback.stream(messages, tools)
+            yield from self.fallback.stream(self._fit_to_fallback_context(messages), tools)
             return
         self.last_used = "primary"
         yield first
@@ -166,6 +173,75 @@ class FallbackProvider(LLMProvider):
         return f"{self.primary.name()}+{self.fallback.name()}"
 
     # ─── Helpers ─────────────────────────────────────────────────────
+
+    def _fallback_context_limit(self) -> int | None:
+        """Return the fallback provider's max context in tokens, or
+        None if we can't determine it.
+
+        Reads from `fallback.engine.n_ctx` (LocalLLMProvider) or
+        `fallback.n_ctx` (custom configs). Returning None means 'no
+        trim' — safer than trimming aggressively against an unknown
+        budget.
+        """
+        eng = getattr(self.fallback, "engine", None)
+        if eng is not None and getattr(eng, "n_ctx", None):
+            return int(eng.n_ctx)
+        n = getattr(self.fallback, "n_ctx", None)
+        if isinstance(n, int) and n > 0:
+            return n
+        return None
+
+    def _fit_to_fallback_context(self, messages: list[Message]) -> list[Message]:
+        """Trim `messages` so the fallback's context window can hold them.
+
+        - Drops [TRANSIENT_RESEARCH] / [TRANSIENT_PLAN] system blocks
+          (these are usually 5K+ chars each — pruning them alone
+          often brings the request under budget).
+        - Keeps the initial system prompt at index 0.
+        - Tail-keeps the most recent messages until the budget is hit.
+        - Token estimate: 4 chars ≈ 1 token. Reserves ~1.5K for the
+          response so the model has room to reply.
+
+        Returns the original list when no trim is needed or when the
+        fallback's context can't be determined.
+        """
+        ctx = self._fallback_context_limit()
+        if ctx is None or not messages:
+            return messages
+        budget = max(1024, ctx - 1500)
+
+        # Step 1: drop transient context blocks.
+        trimmed = [
+            m
+            for m in messages
+            if not (
+                m.role == "system"
+                and (
+                    "[TRANSIENT_RESEARCH]" in (m.content or "")
+                    or "[TRANSIENT_PLAN]" in (m.content or "")
+                )
+            )
+        ]
+
+        def _approx(msg: Message) -> int:
+            return max(1, len(msg.content or "") // 4)
+
+        used = sum(_approx(m) for m in trimmed)
+        if used <= budget:
+            return trimmed
+
+        # Step 2: keep system[0] + walk tail-first within budget.
+        kept = [trimmed[0]] if trimmed and trimmed[0].role == "system" else []
+        used = _approx(trimmed[0]) if kept else 0
+        tail: list = []
+        for msg in reversed(trimmed[1:] if kept else trimmed):
+            cost = _approx(msg)
+            if used + cost > budget:
+                break
+            tail.append(msg)
+            used += cost
+        tail.reverse()
+        return kept + tail
 
     def _notify(self, e: Exception) -> None:
         """Fire the registered callback (UI uses it for status updates)."""

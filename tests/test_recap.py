@@ -458,6 +458,90 @@ def test_groq_provider_bare_tool_call_handles_nested_json():
     assert calls[0]["function"]["name"] == "python"
 
 
+def test_fallback_provider_trims_messages_to_fit_local_context():
+    """Captured 2026-05-30: 'this is...app so you have to see' →
+    Groq 503 → FallbackProvider cascade to local llama3.2:3b →
+    ValueError 'requested (10876) exceed context window of 8192'.
+    The FallbackProvider must pre-trim cloud history before
+    delegating to the local fallback."""
+    from unittest.mock import MagicMock
+
+    from openbro.llm.base import LLMResponse, Message
+    from openbro.llm.fallback_provider import FallbackProvider
+
+    primary = MagicMock()
+    primary.name.return_value = "groq/llama-3.3-70b-versatile"
+    primary.chat.side_effect = Exception("503 Service Unavailable")
+
+    fallback = MagicMock()
+    fallback.name.return_value = "local/llama3.2:3b"
+    # Simulate a llama.cpp engine with 8K context.
+    fallback.engine = MagicMock()
+    fallback.engine.n_ctx = 8192
+    fallback.chat.return_value = LLMResponse(
+        content="trimmed answer", usage={"input": 1000, "output": 100}
+    )
+
+    fb = FallbackProvider(primary=primary, fallback=fallback)
+    # Build a fake 13K-token history (system prompt + big research
+    # block + bunch of user/assistant turns).
+    messages = [
+        Message(role="system", content="you are openbro"),
+        Message(role="system", content="[TRANSIENT_RESEARCH] " + "X" * 40000),
+        Message(role="user", content="A" * 200),
+        Message(role="assistant", content="B" * 200),
+        Message(role="user", content="latest question"),
+    ]
+
+    out = fb.chat(messages)
+    assert out.content == "trimmed answer"
+    # The fallback was called with TRIMMED messages — not the full
+    # 40K-char research block.
+    sent = fallback.chat.call_args[0][0]
+    assert not any("[TRANSIENT_RESEARCH]" in (m.content or "") for m in sent)
+    # System prompt + recent turns survived.
+    assert sent[0].role == "system"
+    assert any("latest question" in (m.content or "") for m in sent)
+    # Total within budget (8192 - 1500 reserve ≈ 6700 token budget;
+    # 4 chars/token ≈ 26.8K chars max).
+    total_chars = sum(len(m.content or "") for m in sent)
+    assert total_chars < 30000
+
+
+def test_fallback_provider_no_trim_when_unknown_context():
+    """If the fallback provider doesn't expose n_ctx, don't trim —
+    safer than guessing a budget. Captures a custom-provider use
+    case where the user wires in a non-llama.cpp backend."""
+    from unittest.mock import MagicMock
+
+    from openbro.llm.base import LLMResponse, Message
+    from openbro.llm.fallback_provider import FallbackProvider
+
+    primary = MagicMock()
+    primary.name.return_value = "groq/x"
+    primary.chat.side_effect = Exception("rate limit 429")
+
+    # A provider object without an `engine` attr and without an
+    # `n_ctx` attr — represents a custom non-llama.cpp backend.
+    class _NoCtxProvider:
+        engine = None
+        n_ctx = None
+
+        def name(self):
+            return "custom/y"
+
+        def chat(self, messages, tools=None):
+            self._last = messages
+            return LLMResponse(content="ok", usage={"input": 1, "output": 1})
+
+    fallback = _NoCtxProvider()
+
+    fb = FallbackProvider(primary=primary, fallback=fallback)
+    big = [Message(role="user", content="X" * 100000)]
+    fb.chat(big)
+    assert fallback._last == big  # untouched
+
+
 def test_trim_history_for_local_swap_keeps_under_budget():
     """The trimmed history must respect the token budget (approx)."""
     from unittest.mock import MagicMock, patch
