@@ -34,8 +34,15 @@ CAPABILITY = {
     "gemini-1.5-pro": 92,
     "gemini-1.5-flash": 85,
     # Groq (open-source via fast cloud)
-    "groq-llama-4-scout": 94,  # cleanest tool calls on Groq
-    "groq-llama-3.3": 92,  # works but glued-arg bug, needs sanitizer
+    # Rankings re-tuned 2026-05-30 after captured failures: scout-17b
+    # fabricated tool outputs (NDLS_FDB), rendered tool args as chat
+    # text (`network action='ip'`), dumped meta-commentary instead of
+    # acting. llama-3.3-70b's 'glued-arg' bug is benign — the
+    # sanitizer in groq_provider rebuilds the JSON. 70B reasoning >
+    # 17B fabrication.
+    "groq-llama-3.3": 96,  # NEW PRIMARY — 70B, reliable tool calls
+    "groq-llama-4-maverick": 90,  # 128-expert variant of Llama 4
+    "groq-llama-4-scout": 78,  # DOWNGRADED — fabricates / lazy
     "groq-llama-3.1": 0,  # DECOMMISSIONED May 2026 — don't rank
     "groq-mixtral": 80,
     "groq-gemma": 70,
