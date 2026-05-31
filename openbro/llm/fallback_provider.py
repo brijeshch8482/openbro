@@ -140,13 +140,20 @@ class FallbackProvider(LLMProvider):
             self._notify(e)
             # Pre-trim before delegating: cloud primary often has
             # 32K+ context but the local fallback is usually 8K.
-            # The tools schema (~5-7K tokens for 23 tools) also
-            # counts against the input — without accounting for it
-            # the trim was insufficient and a 'fixed' history still
-            # overflowed.
-            fb_messages = self._fit_to_fallback_context(messages, tools=tools)
+            # The tools schema (~5-10K tokens for 23 tools) often
+            # exceeds half the local context BY ITSELF.
+            #
+            # Captured 2026-05-31: even after history trim, tools
+            # schema alone pushed the request to 11223 tokens > 8192
+            # context. Fix: when the tools schema is large relative
+            # to the fallback's context, drop tools entirely. The
+            # local model in this mode answers in plain text — less
+            # capable but not crashed. User sees a slightly degraded
+            # answer instead of a ValueError.
+            fb_tools = self._shrink_tools_for_fallback(tools)
+            fb_messages = self._fit_to_fallback_context(messages, tools=fb_tools)
             try:
-                response = self.fallback.chat(fb_messages, tools)
+                response = self.fallback.chat(fb_messages, fb_tools)
                 self.last_used = "fallback"
                 self.fallback_count += 1
                 return response
@@ -210,6 +217,36 @@ class FallbackProvider(LLMProvider):
         return f"{self.primary.name()}+{self.fallback.name()}"
 
     # ─── Helpers ─────────────────────────────────────────────────────
+
+    def _shrink_tools_for_fallback(self, tools: list[dict] | None) -> list[dict] | None:
+        """Decide whether to forward the tools schema to the fallback.
+
+        Local llama.cpp models typically have 8K context vs cloud's
+        32K+. OpenBro registers 23 tools whose JSON schema runs to
+        20-40K characters (~5-10K tokens). When that exceeds half
+        the fallback's context the request crashes BEFORE any
+        history is even considered.
+
+        Strategy: if the serialised tools cost > 30% of the fallback
+        context, drop tools entirely. The local model answers as
+        plain text — less capable than tool-using mode but it CAN
+        produce a response. Better degraded answer than a raw
+        ValueError shown to the user.
+        """
+        if not tools:
+            return tools
+        ctx = self._fallback_context_limit()
+        if ctx is None:
+            return tools
+        try:
+            import json as _json
+
+            tools_tokens = len(_json.dumps(tools)) // 4
+        except Exception:
+            return tools
+        if tools_tokens > ctx * 0.3:
+            return None  # drop schema; degraded text-only mode
+        return tools
 
     def _fallback_context_limit(self) -> int | None:
         """Return the fallback provider's max context in tokens, or

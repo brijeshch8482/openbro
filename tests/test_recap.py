@@ -681,6 +681,111 @@ def test_decompose_does_not_split_short_emotional_fragments():
     assert len(parts) == 1, f"should NOT split, got {parts}"
 
 
+def test_decompose_does_not_split_conjunction_with_question_fragment():
+    """Captured 2026-05-31: 'D:\\softwares\\Adobe Audition  to phir
+    ye kya hai?' was split on `phir` into a path-fragment and a
+    follow-up question. The question fragment got run as its own
+    sub-task and produced 'Adobe Audition is a digital audio
+    workstation' boilerplate — totally not what the user wanted.
+    Conjunction splits now apply the same conversational/content
+    guards as sentence splits."""
+    from openbro.core.decompose import decompose
+
+    q = "D:\\softwares\\Adobe Audition  to phir ye kya hai?"
+    parts = decompose(q)
+    assert len(parts) == 1, f"should not split, got {parts}"
+
+
+def test_open_app_playbook_rejects_conversational_target():
+    """Captured 2026-05-31: regex matched 'abhi bhi open nhi hua
+    hai' with target='nhi hua hai'. App tool tried to launch that
+    and reported '✓ Opened: nhi hua hai' as the answer. After the
+    fix the playbook must decline → falls through to the LLM."""
+    from openbro.playbooks.base import PlaybookContext
+    from openbro.playbooks.builtin.open_app import OpenAppPlaybook
+
+    pb = OpenAppPlaybook()
+    # Simulate the captured match (regex captured 'nhi hua hai' as
+    # target on 'abhi bhi open nhi hua hai').
+    ctx = PlaybookContext(
+        user_input="abhi bhi open nhi hua hai",
+        tool_registry=None,  # type: ignore[arg-type]
+        captures={"target": "nhi hua hai"},
+    )
+    out = pb.execute(ctx)
+    assert out == "", f"should decline (empty), got {out!r}"
+
+
+def test_open_app_playbook_still_handles_real_app_names():
+    """Regression: real app-name targets still run."""
+    from unittest.mock import MagicMock
+
+    from openbro.playbooks.base import PlaybookContext
+    from openbro.playbooks.builtin.open_app import OpenAppPlaybook
+
+    pb = OpenAppPlaybook()
+    fake_app_tool = MagicMock()
+    fake_app_tool.run.return_value = "Opened: chrome.exe"
+    fake_registry = MagicMock()
+    fake_registry.get_tool.return_value = fake_app_tool
+    ctx = PlaybookContext(
+        user_input="open chrome",
+        tool_registry=fake_registry,
+        captures={"target": "chrome"},
+    )
+    out = pb.execute(ctx)
+    assert "Opened" in out
+
+
+def test_file_ops_open_directory_finds_exe(tmp_path):
+    """Captured 2026-05-31: file_ops open D:\\softwares\\Adobe Audition
+    (a folder) ran os.startfile on the FOLDER and returned 'Opened
+    in default app'. File Explorer opened, Audition did not. New
+    behaviour: scan the folder for .exe / .lnk and launch the most
+    likely candidate; refuse honestly when none found."""
+    from unittest.mock import patch
+
+    from openbro.tools.file_tool import FileTool
+
+    # Folder with no .exe inside — must refuse, not silently succeed.
+    empty = tmp_path / "empty_folder"
+    empty.mkdir()
+    out = FileTool().run(action="open", path=str(empty))
+    assert "folder" in out.lower()
+    assert "exe" in out.lower()
+    assert "Opened" not in out
+
+    # Folder with one .exe — must launch it.
+    with_exe = tmp_path / "audition"
+    with_exe.mkdir()
+    (with_exe / "Audition.exe").write_text("fake")
+    with patch("openbro.tools.file_tool.os.startfile", create=True) as fake_start:
+        out2 = FileTool().run(action="open", path=str(with_exe))
+    assert "Launched" in out2
+    assert "Audition.exe" in out2
+    fake_start.assert_called_once()
+    called_with = fake_start.call_args[0][0]
+    assert "Audition.exe" in called_with
+
+
+def test_file_ops_open_directory_deprioritizes_installer_exe(tmp_path):
+    """When a folder has both Audition.exe and Setup.exe, prefer
+    the app exe over the installer."""
+    from unittest.mock import patch
+
+    from openbro.tools.file_tool import FileTool
+
+    d = tmp_path / "app"
+    d.mkdir()
+    (d / "Setup.exe").write_text("fake")
+    (d / "Audition.exe").write_text("fake")
+    (d / "Uninstall.exe").write_text("fake")
+    with patch("openbro.tools.file_tool.os.startfile", create=True) as fake_start:
+        FileTool().run(action="open", path=str(d))
+    called_with = fake_start.call_args[0][0]
+    assert "Audition.exe" in called_with
+
+
 def test_decompose_still_splits_real_compound_queries():
     """Regression: real compound queries still decompose. This is
     the test that protected the original behavior — must keep

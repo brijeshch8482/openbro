@@ -311,6 +311,27 @@ class Agent:
                 lines.append(f"- {key}: {paths[key]}")
         if "onedrive" in paths:
             lines.append(f"- onedrive_root: {paths['onedrive']}")
+        # Captured 2026-05-31: user asked to find Adobe Audition. Agent
+        # only searched C:\\ and C:\\Program Files. App was at
+        # D:\\softwares\\Adobe Audition. Agent gave up after the C-drive
+        # searches because it didn't know D: was available. Now we
+        # enumerate live drives so the model knows where to look.
+        try:
+            import string as _string
+            from pathlib import Path as _Path
+
+            drives = [f"{c}:\\" for c in _string.ascii_uppercase if _Path(f"{c}:\\").exists()]
+            if drives:
+                lines.append(f"- drives_available: {', '.join(drives)}")
+                lines.append(
+                    "When searching for installed apps, scan ALL listed "
+                    "drives — apps may live in `C:\\Program Files`, "
+                    "`C:\\Program Files (x86)`, `D:\\softwares`, etc. "
+                    "Also check `C:\\Users\\Public\\Desktop\\*.lnk` for "
+                    "shortcuts that resolve to outsourced installs."
+                )
+        except Exception:
+            pass
         lines.append(
             "When user says 'desktop' / 'documents' / etc., USE THE PATHS ABOVE "
             "(not '~/Desktop' which may resolve to an empty system folder)."

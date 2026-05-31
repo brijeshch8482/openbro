@@ -282,6 +282,56 @@ class FileTool(BaseTool):
                         "broader pattern, or pass the absolute path."
                     )
 
+            # Captured 2026-05-31: user said app lives at
+            # `D:\\softwares\\Adobe Audition` (a directory). We
+            # `os.startfile`-d the directory and returned 'Opened in
+            # default app' — File Explorer opened, Audition did not.
+            # Honest behaviour: when the path is a directory, scan it
+            # for .exe / .lnk and either launch the most likely one
+            # OR list the candidates so the model can pick. NEVER
+            # claim 'Opened in default app' for a folder when the
+            # user clearly wanted an application.
+            if path.is_dir():
+                exes = sorted(
+                    [
+                        p
+                        for p in path.rglob("*")
+                        if p.suffix.lower() in (".exe", ".lnk") and p.is_file()
+                    ],
+                    key=lambda p: (
+                        # Prefer .exe files in the immediate folder over
+                        # nested ones; deprioritise installers/updaters.
+                        0 if p.parent == path else 1,
+                        1
+                        if any(
+                            k in p.stem.lower()
+                            for k in ("setup", "install", "update", "uninstall", "helper")
+                        )
+                        else 0,
+                        len(str(p)),
+                    ),
+                )
+                if not exes:
+                    return (
+                        f"`{path}` is a folder with no .exe / .lnk "
+                        "inside. Did you mean a specific file? "
+                        "Try `file_ops list` first to see contents."
+                    )
+                target = exes[0]
+                try:
+                    if platform.system() == "Windows":
+                        os.startfile(str(target))  # type: ignore[attr-defined]
+                    elif platform.system() == "Darwin":
+                        subprocess.run(["open", str(target)], check=False)
+                    else:
+                        subprocess.run(["xdg-open", str(target)], check=False)
+                    extra = ""
+                    if len(exes) > 1:
+                        others = ", ".join(p.name for p in exes[1:5])
+                        extra = f" (chose first of {len(exes)} candidates; others: {others})"
+                    return f"Launched {target}{extra}"
+                except Exception as e:
+                    return f"Failed to launch {target}: {e}"
             try:
                 if platform.system() == "Windows":
                     os.startfile(str(path))  # type: ignore[attr-defined]

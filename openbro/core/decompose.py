@@ -82,8 +82,17 @@ def decompose(query: str, max_subtasks: int = MAX_SUBTASKS) -> list[str]:
     # Reject splits that produced a tiny fragment — usually a false
     # positive on 'aur' inside a noun ('aur kuch chahiye').
     parts = [p for p in parts if len(p) >= MIN_FRAGMENT_CHARS]
+    # Captured 2026-05-31: 'D:\\softwares\\Adobe Audition  to phir
+    # ye kya hai?' was split on 'phir' into ['D:\\softwares\\Adobe
+    # Audition  to', 'ye kya hai?']. The second fragment is a
+    # follow-up question, not a task. Reject the split if ANY
+    # fragment is conversational (ends with ??, has multiple
+    # question words, or is short + has a question word).
+    # 'git status check kar fir push kr' still splits because neither
+    # fragment is conversational.
     if len(parts) > 1:
-        return parts[:max_subtasks]
+        if not any(_is_conversational(p) for p in parts):
+            return parts[:max_subtasks]
 
     # 4. Sentence boundaries, but ONLY if both halves look imperative
     # (heuristic: contain a verb-ish word in known imperative set).
@@ -193,7 +202,7 @@ def _split_sentences(q: str) -> list[str]:
     # AND (b) have CONTENT TOKENS beyond verbs + fillers AND (c) not
     # be dominated by question/feedback words.
     if not all(
-        _looks_imperative(p) and _has_content_beyond_verbs(p) and not _is_conversational(p)
+        _looks_imperative(p) and not _is_conversational(p) and _has_content_beyond_verbs(p)
         for p in parts
     ):
         return []
@@ -245,9 +254,28 @@ def _has_content_beyond_verbs(fragment: str) -> bool:
 
 
 _QUESTION_OR_FEEDBACK_WORDS = re.compile(
+    # Hindi question words
     r"\b(kyo|kyu|kyon|kyaa|kya|kaise|kab|kaha|kahan|kaun|kis|"
+    # English question words
     r"why|what|how|when|where|which|"
-    r"nahi|nahin|hua|chek|check)\b",
+    # Negation often used in feedback: 'hua nhi', 'mila nahin', 'ho gaya nahi?'
+    r"nahi|nahin|nhi|hua)\b",
+    re.IGNORECASE,
+)
+
+# Conversational openers — fragment starts with one of these → it's
+# a question or feedback, not a task. 'ye kya hai?' starts with 'ye
+# kya'; 'kya tu chahta hai' starts with 'kya'.
+_STARTS_WITH_QUESTION = re.compile(
+    r"^\s*((ye|wo|yeh|woh|yh)\s+(kya|kyo|kyu|kaise|kab|kahan|kaun)|"
+    r"(kya|kyo|kyu|kaise|why|what|how|when|where)\b)",
+    re.IGNORECASE,
+)
+
+# 'X nahi?', 'mila nhi?', 'hua nhi?' → emphatically a feedback
+# question, not an action.
+_ENDS_WITH_NEGATION_QUESTION = re.compile(
+    r"\b(nahi|nahin|nhi)\s*\?+\s*$",
     re.IGNORECASE,
 )
 
@@ -256,9 +284,28 @@ def _is_conversational(text: str) -> bool:
     """Detect fragments that are complaints / clarifying questions /
     emotional emphasis rather than imperative tasks.
 
-    Heuristic: ends with `??` OR has >= 2 question/feedback words.
+    Order of cheap signals:
+      1. Ends with `??` (emphasis) → conversational
+      2. Ends with 'nhi?' / 'nahi?' (rhetorical negation) →
+         conversational
+      3. Starts with 'ye <question>' / 'kya' / 'why' / 'what' / ...
+         → it's a question, not a task
+      4. Long fragment with >= 2 question/feedback words →
+         conversational
+      5. Short fragment (< 25 chars) with any question word →
+         conversational
+    Otherwise: treat as a task.
     """
-    if text.rstrip().endswith("??"):
+    stripped = text.rstrip()
+    if stripped.endswith("??"):
+        return True
+    if _ENDS_WITH_NEGATION_QUESTION.search(text):
+        return True
+    if _STARTS_WITH_QUESTION.search(text):
         return True
     hits = _QUESTION_OR_FEEDBACK_WORDS.findall(text)
-    return len(hits) >= 2
+    if len(hits) >= 2:
+        return True
+    if len(text) < 25 and hits:
+        return True
+    return False

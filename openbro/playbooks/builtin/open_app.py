@@ -56,6 +56,22 @@ class OpenAppPlaybook(Playbook):
         "browser",  # 'open browser' is too vague — let LLM disambiguate or use file_ops
     )
 
+    # Captured 2026-05-31: regex matched 'abhi bhi open nhi hua hai' with
+    # target='nhi hua hai' → app tool tried to launch 'nhi hua hai' and
+    # reported '✓ Opened: nhi hua hai' as the answer. Bogus. Targets that
+    # are pure conversational tokens (no app-name content) must be
+    # rejected before dispatching.
+    _CONVERSATIONAL_TARGET_RE = re.compile(
+        r"^(nhi|nahi|nahin|hua|hai|ho|kya|kyo|kyu|"
+        r"yaar|bhai|bro|boss|na|to|please|"
+        r"ab|abhi|phir|bhi|"
+        r"\?|!|\.)+(\s+(nhi|nahi|nahin|hua|hai|ho|kya|kyo|kyu|"
+        r"yaar|bhai|bro|boss|na|to|please|"
+        r"ab|abhi|phir|bhi|"
+        r"\?|!|\.))*\s*\??\s*$",
+        re.IGNORECASE,
+    )
+
     def execute(self, context: PlaybookContext) -> str:
         target = (context.captures.get("target") or "").strip().lower()
         if not target:
@@ -65,6 +81,12 @@ class OpenAppPlaybook(Playbook):
         for deny in self._DENY_TARGET_SUBSTRINGS:
             if deny in target:
                 return ""  # empty -> registry treats as no match, falls back to LLM
+
+        # Reject conversational fragments like 'nhi hua hai' that the
+        # regex matched as a target. Let the LLM handle the actual
+        # follow-up — this is feedback, not a launch request.
+        if self._CONVERSATIONAL_TARGET_RE.match(target):
+            return ""
 
         # If the target has a file extension or a path separator, it's a
         # file open, not an app launch. Let file_ops handle it via LLM.
