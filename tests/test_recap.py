@@ -755,11 +755,15 @@ def test_file_ops_open_directory_finds_exe(tmp_path):
     assert "exe" in out.lower()
     assert "Opened" not in out
 
-    # Folder with one .exe — must launch it.
+    # Folder with one .exe — must launch it. Pin platform to Windows
+    # and stub startfile so the test runs identically on CI (Linux).
     with_exe = tmp_path / "audition"
     with_exe.mkdir()
     (with_exe / "Audition.exe").write_text("fake")
-    with patch("openbro.tools.file_tool.os.startfile", create=True) as fake_start:
+    with (
+        patch("openbro.tools.file_tool.platform.system", return_value="Windows"),
+        patch("openbro.tools.file_tool.os.startfile", create=True) as fake_start,
+    ):
         out2 = FileTool().run(action="open", path=str(with_exe))
     assert "Launched" in out2
     assert "Audition.exe" in out2
@@ -780,7 +784,10 @@ def test_file_ops_open_directory_deprioritizes_installer_exe(tmp_path):
     (d / "Setup.exe").write_text("fake")
     (d / "Audition.exe").write_text("fake")
     (d / "Uninstall.exe").write_text("fake")
-    with patch("openbro.tools.file_tool.os.startfile", create=True) as fake_start:
+    with (
+        patch("openbro.tools.file_tool.platform.system", return_value="Windows"),
+        patch("openbro.tools.file_tool.os.startfile", create=True) as fake_start,
+    ):
         FileTool().run(action="open", path=str(d))
     called_with = fake_start.call_args[0][0]
     assert "Audition.exe" in called_with
