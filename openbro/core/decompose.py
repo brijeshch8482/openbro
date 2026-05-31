@@ -239,9 +239,7 @@ def _has_content_beyond_verbs(fragment: str) -> bool:
     if not tokens:
         return False
     content = [
-        t
-        for t in tokens
-        if t not in _IMPERATIVE_TOKENS and t not in _FILLER_TOKENS and len(t) > 1
+        t for t in tokens if t not in _IMPERATIVE_TOKENS and t not in _FILLER_TOKENS and len(t) > 1
     ]
     return len(content) >= 1
 
