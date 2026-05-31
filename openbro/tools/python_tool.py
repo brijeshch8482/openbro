@@ -78,23 +78,31 @@ class PythonTool(BaseTool):
             )
             stdout = result.stdout or ""
             stderr = result.stderr or ""
-            # ─── Forceful framing when the snippet errored.
-            # Real-user incident: model wrote `print(len())` (no arg),
-            # got a TypeError on stderr, then reported '0 files mili'
-            # to the user. The plain stdout+stderr dump wasn't loud
-            # enough to stop the hallucination. The "ERROR — DO NOT
-            # use this as a result" prefix is meant to force the
-            # model to retry with corrected code on the next loop
-            # iteration instead of inventing an answer.
-            if result.returncode != 0 or stderr.strip():
+            # Distinguish:
+            #   exit_code != 0  → real failure, force a retry
+            #   exit_code == 0 with stderr → warning (openpyxl,
+            #     deprecation, etc.) — script succeeded, surface
+            #     stdout normally but include stderr as a note.
+            # Captured 2026-05-31: script returned exit 0 with a JSON
+            # result on stdout and an openpyxl UserWarning on stderr;
+            # the old code labelled the WHOLE thing 'ERROR — snippet
+            # did NOT produce a usable answer', which made the model
+            # discard a perfectly good result.
+            if result.returncode != 0:
                 return (
-                    "ERROR — snippet did NOT produce a usable answer. "
-                    "Fix the code and retry; DO NOT report a result yet.\n"
+                    "ERROR — snippet exited non-zero. Fix the code "
+                    "and retry; DO NOT report a result yet.\n"
                     f"exit_code: {result.returncode}\n"
                     f"stdout: {stdout.strip() or '(empty)'}\n"
                     f"stderr: {stderr.strip()[:1500]}"
                 )[:5000]
-            return (stdout or "(no output)")[:5000]
+            # exit_code == 0 → success. Surface stdout as the result;
+            # include stderr as a quiet warning footer only if it has
+            # genuine content (not just whitespace).
+            out = stdout or "(no output)"
+            if stderr.strip():
+                out = f"{out.rstrip()}\n\n[stderr warning, exit 0]\n{stderr.strip()[:600]}"
+            return out[:5000]
         except subprocess.TimeoutExpired:
             return (
                 f"Python snippet timed out ({timeout}s limit). "
@@ -120,14 +128,17 @@ class PythonTool(BaseTool):
                 )
                 stdout = result.stdout or ""
                 stderr = result.stderr or ""
-                if result.returncode != 0 or stderr.strip():
+                if result.returncode != 0:
                     return (
-                        "ERROR — snippet did NOT produce a usable answer.\n"
+                        "ERROR — snippet exited non-zero.\n"
                         f"exit_code: {result.returncode}\n"
                         f"stdout: {stdout.strip() or '(empty)'}\n"
                         f"stderr: {stderr.strip()[:1500]}"
                     )[:10000]
-                return (stdout or "(no output)")[:10000]
+                out = stdout or "(no output)"
+                if stderr.strip():
+                    out = f"{out.rstrip()}\n\n[stderr warning, exit 0]\n{stderr.strip()[:600]}"
+                return out[:10000]
             except subprocess.TimeoutExpired:
                 return f"Background snippet timed out after {timeout}s."
 

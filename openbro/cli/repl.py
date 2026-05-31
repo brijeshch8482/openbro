@@ -587,7 +587,45 @@ def start_repl(resume_session: str | None = None):
                 console.rule(style="grey23")
                 # Dim grey prompt glyph — Claude-style. Loud cyan was
                 # competing with the user's typed text for attention.
-                user_input = session.prompt(ANSI("\x1b[38;5;245m›\x1b[0m ")).strip()
+                try:
+                    user_input = session.prompt(ANSI("\x1b[38;5;245m›\x1b[0m ")).strip()
+                except Exception as prompt_err:
+                    # prompt_toolkit on Win32 / MinGW64 can throw
+                    # NoConsoleScreenBufferError after long-idle
+                    # operations (model load, big tool calls).
+                    # Captured 2026-05-31: 405-second mistral-nemo
+                    # load → REPL crash with 'Found xterm, while
+                    # expecting a Windows console'. Recover by
+                    # rebuilding the PromptSession + retrying. If
+                    # rebuild also fails, exit cleanly with a
+                    # helpful message instead of a stack trace.
+                    err_name = type(prompt_err).__name__
+                    is_console_err = (
+                        "NoConsoleScreenBufferError" in err_name
+                        or "ConsoleScreenBuffer" in str(prompt_err)
+                    )
+                    if not is_console_err:
+                        raise
+                    console.print(
+                        "[yellow]⚠ Terminal connection lost after long "
+                        "operation (Git Bash quirk). Rebuilding...[/yellow]"
+                    )
+                    try:
+                        session = PromptSession(
+                            history=FileHistory(str(history_file)),
+                            completer=completer,
+                            complete_while_typing=False,
+                            bottom_toolbar=status_bar,
+                        )
+                        continue  # try the next iteration with the new session
+                    except Exception:
+                        console.print(
+                            "[red]✗ Couldn't recover the terminal. "
+                            "Restart `openbro` from PowerShell or CMD for "
+                            "best results (Git Bash + prompt-toolkit is "
+                            "fragile after long operations).[/red]"
+                        )
+                        break
 
                 if not user_input:
                     continue
