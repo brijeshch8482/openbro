@@ -167,20 +167,21 @@ class Agent:
 
             self.provider.on_fallback = _on_fallback
 
-            # Eager-warm the local fallback so the first cascade isn't
-            # blocked by a 30-90s GGUF load. Background thread —
-            # REPL stays responsive while load happens. Captured
-            # 2026-05-31 user ask: 'jab openbro initialize ho tabhi
-            # model bhi initialize ho jaye...switching me delay na ho'.
+            # Optional eager-warm of the local fallback. Loading a
+            # GGUF (4-13 GB) into RAM takes 30-90s and llama-cpp's
+            # initial Python prep + intermittent GIL contention can
+            # make the REPL keyboard slow during boot. Real captured
+            # incident 2026-05-31: even with a 5s delay the user saw
+            # 'typing nahi ho rha' because the load competed with
+            # prompt-toolkit's event loop.
             #
-            # Escape hatch: when OPENBRO_SKIP_PREWARM=1 is set, skip
-            # the eager warm entirely. Useful when keyboard / voice /
-            # other threads compete with the load and the user wants
-            # a fully responsive REPL even at the cost of a slow
-            # first fallback.
+            # Default: OFF. Lazy-load on first fallback (no boot
+            # cost). Opt in by setting OPENBRO_PREWARM_LOCAL=1 — power
+            # users who know they'll hit local fallback can pay the
+            # boot cost for a faster first switch.
             import os as _os
 
-            if not _os.environ.get("OPENBRO_SKIP_PREWARM"):
+            if _os.environ.get("OPENBRO_PREWARM_LOCAL") == "1":
                 try:
                     fb_engine = getattr(self.provider.fallback, "engine", None)
                     if fb_engine is not None and hasattr(fb_engine, "prewarm"):
