@@ -67,6 +67,14 @@ _FUNCTION_TAG_BARE_RE = re.compile(
     r"<function\s*=\s*(?P<name>[a-zA-Z_][a-zA-Z0-9_]*)\s*>\s*(?P<args>\{[^<]*\})",
     re.DOTALL,
 )
+_FUNCTION_TAG_PAREN_RE = re.compile(
+    # Yet another variant captured 2026-05-31:
+    #   <function=app({"action": "open", "app_name": "Adobe Photoshop"})>
+    # Args wrapped in parens between the name and the closing `>`.
+    r"<function\s*=\s*(?P<name>[a-zA-Z_][a-zA-Z0-9_]*)\s*"
+    r"\(\s*(?P<args>\{.*?\})\s*\)\s*>",
+    re.DOTALL,
+)
 
 
 def _extract_function_tag_calls(content: str) -> list[dict]:
@@ -87,8 +95,11 @@ def _extract_function_tag_calls(content: str) -> list[dict]:
         return []
     out: list[dict] = []
     seen_spans: list[tuple[int, int]] = []
-    # Try the closed form first (cleaner), fall back to the bare form.
-    for regex in (_FUNCTION_TAG_RE, _FUNCTION_TAG_BARE_RE):
+    # Try the closed form first (cleaner), fall back to the bare and
+    # paren-wrapped forms. Paren form was captured 2026-05-31 when
+    # user asked to open Photoshop and the model emitted
+    # `<function=app({"action": "open", ...})>` as chat text.
+    for regex in (_FUNCTION_TAG_RE, _FUNCTION_TAG_BARE_RE, _FUNCTION_TAG_PAREN_RE):
         for m in regex.finditer(content):
             span = m.span()
             if any(s[0] <= span[0] < s[1] for s in seen_spans):

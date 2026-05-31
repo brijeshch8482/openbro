@@ -184,8 +184,83 @@ def _split_sentences(q: str) -> list[str]:
     parts = [p for p in parts if len(p) >= MIN_FRAGMENT_CHARS]
     if len(parts) < 2:
         return []
-    # Both halves must read as imperatives. This protects single-sentence
-    # questions that happen to contain a period.
-    if not all(_looks_imperative(p) for p in parts):
+    # Captured 2026-05-31: 'kholo na?? yrr to kaam krke chek kiya kro
+    # hua ki nhi?' got split into 'kholo na??' and 'yrr to kaam krke
+    # chek kiya kro hua ki nhi?'. Both contained imperative tokens
+    # but neither was a real task — the first is content-free emphasis
+    # ('open na??'), the second is feedback ('why didn't you
+    # check?'). Rules added: every fragment must (a) look imperative
+    # AND (b) have CONTENT TOKENS beyond verbs + fillers AND (c) not
+    # be dominated by question/feedback words.
+    if not all(
+        _looks_imperative(p) and _has_content_beyond_verbs(p) and not _is_conversational(p)
+        for p in parts
+    ):
         return []
     return parts
+
+
+# Filler words that don't carry intent. Stripped when checking
+# whether a fragment has 'content' beyond verbs.
+_FILLER_TOKENS = {
+    "na",
+    "to",
+    "bhai",
+    "yrr",
+    "yaar",
+    "bro",
+    "boss",
+    "sir",
+    "please",
+    "plz",
+    "ek",
+    "ke",
+    "ka",
+    "ki",
+    "se",
+    "me",
+    "mein",
+    "ko",
+    "ko",
+}
+
+
+def _has_content_beyond_verbs(fragment: str) -> bool:
+    """Returns True when the fragment has tokens beyond just
+    imperative verbs and fillers.
+
+    Captured cases:
+      'kholo na??'   → tokens = [kholo, na]  → all verb/filler  →
+                        False (don't split)
+      'Open chrome'  → tokens = [open, chrome] → 'chrome' is content
+                        → True (split)
+    """
+    tokens = re.findall(r"\w+", fragment.lower())
+    if not tokens:
+        return False
+    content = [
+        t
+        for t in tokens
+        if t not in _IMPERATIVE_TOKENS and t not in _FILLER_TOKENS and len(t) > 1
+    ]
+    return len(content) >= 1
+
+
+_QUESTION_OR_FEEDBACK_WORDS = re.compile(
+    r"\b(kyo|kyu|kyon|kyaa|kya|kaise|kab|kaha|kahan|kaun|kis|"
+    r"why|what|how|when|where|which|"
+    r"nahi|nahin|hua|chek|check)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_conversational(text: str) -> bool:
+    """Detect fragments that are complaints / clarifying questions /
+    emotional emphasis rather than imperative tasks.
+
+    Heuristic: ends with `??` OR has >= 2 question/feedback words.
+    """
+    if text.rstrip().endswith("??"):
+        return True
+    hits = _QUESTION_OR_FEEDBACK_WORDS.findall(text)
+    return len(hits) >= 2

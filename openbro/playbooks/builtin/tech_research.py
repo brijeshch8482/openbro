@@ -608,6 +608,51 @@ _PROMISE_WITHOUT_ACTION = re.compile(
     re.IGNORECASE,
 )
 
+# Captured 2026-05-31: user asked 'aaj delhi ka temp kya hai?'. Model
+# responded 'Aaj Delhi ka temperature 28°C hai... Ye data maine web
+# tool se fetch kiya hai.' — NO tool call. Pure fabrication of the
+# temperature AND the claim of having called the tool.
+# Then: 'mere desktop yt open kro' → 'haan boss, YouTube open kar
+# diya hai. Maine browser tool use kiya...' — no tool call, no app
+# opened. Same lie.
+# Then: 'photoshop open kr doge?' → same shape.
+#
+# These are CLAIMS-OF-COMPLETION without execution. Detector fires
+# when (tool_calls_made == 0 this turn) AND the response uses past-
+# tense or completion phrasing. The reflection layer then re-prompts
+# the model to ACTUALLY emit the tool call.
+_FALSE_COMPLETION_CLAIMS = re.compile(
+    # Hindi / Hinglish past-tense action claims
+    r"\b(kar diya hai|kr diya hai|ho gaya hai|hogaya hai|"
+    r"khol diya|khol diya hai|open kar diya|open kr diya|"
+    r"fetch kiya|fetch kr liya|tool use kiya|tool se fetch|"
+    r"tool se kiya|tool se khola|tool ka use kiya|"
+    r"maine\s+\w+\s+(tool\s+)?(use\s+kiya|use\s+kr\s+liya|"
+    r"chala|chalaya|run kiya|khola|kholi|kholega)|"
+    # Past-tense factual claims that look like tool output
+    r"yaha hai|ye raha|ye hai aapka|ye data maine|temperature\s+\d|"
+    r"humidity\s+\d|location is|"
+    # English claims
+    r"\b(i('?ve| have) (opened|run|fetched|called|checked|verified|"
+    r"used|invoked|launched)|i (called|ran|fetched|opened|launched|"
+    r"checked|verified|used|invoked) (the\s+)?\w+\s+(tool|api|command)|"
+    r"successfully (opened|launched|ran|fetched|completed|invoked)|"
+    r"using the\s+\w+\s+tool i (got|found|fetched|opened)))\b",
+    re.IGNORECASE,
+)
+
+
+def _is_pure_code_ask_response(text: str, user_prompt: str | None) -> bool:
+    """Helper: when the user asked for code and the response is
+    structurally an explanation/answer (not a tool-claim), don't
+    flag completion phrases — they're describing the code, not
+    claiming a tool ran. Conservative: only suppresses when
+    response contains code fences."""
+    if not user_prompt or not user_asked_for_code(user_prompt):
+        return False
+    return "```" in text
+
+
 # Captured 2026-05-30: user asked 'bro mujhe full implementation
 # chahiye to tum full code likho' for kiosk mode in Android Studio.
 # Model wrote 4-5 Java code blocks (Manifest, KioskActivity, etc.) —
@@ -689,6 +734,13 @@ def detect_fabricated_tool_call(
     # phrase.
     if _PROMISE_WITHOUT_ACTION.search(text) and len(text) < 600:
         return "promised an action ('let me check / dekhte hain') but no tool call made"
+    # 5. Claims of completion ('kar diya hai', 'YouTube open kar
+    # diya', 'web tool se fetch kiya hai') with no tool call made.
+    # Suppress when user explicitly asked for code AND response is
+    # code-shaped — those are honest answers describing code, not
+    # tool-execution claims.
+    if _FALSE_COMPLETION_CLAIMS.search(text) and not _is_pure_code_ask_response(text, user_prompt):
+        return "claimed action completion ('kar diya hai' / 'fetched') without making any tool call"
     return None
 
 

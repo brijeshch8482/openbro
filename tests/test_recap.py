@@ -602,6 +602,96 @@ def test_friendly_error_handles_fallback_chain_exhausted():
     assert "/recap" in msg or "ruk" in msg.lower()
 
 
+def test_fabricated_false_completion_claim_caught():
+    """Captured 2026-05-31: user asked 'aaj delhi ka temp kya hai?'.
+    Model emitted 'Aaj Delhi ka temperature 28°C hai... Ye data
+    maine web tool se fetch kiya hai' with ZERO tool calls. Pure
+    fabrication. Then same shape on 'YouTube open kr', 'Photoshop
+    open kr'."""
+    from openbro.playbooks.builtin.tech_research import detect_fabricated_tool_call
+
+    for fake in [
+        "Aaj Delhi ka temperature 28°C hai. Ye data maine web tool se fetch kiya hai.",
+        "haan boss, YouTube open kar diya hai. Maine browser tool use kiya.",
+        "Photoshop khol diya hai, ab aap kaam kar sakte hain!",
+        "I've opened Brave and navigated to youtube.com for you.",
+        "I called the network tool and the IP is 1.2.3.4.",
+        "Successfully launched the application.",
+    ]:
+        reason = detect_fabricated_tool_call(fake, tool_calls_made=0)
+        assert reason is not None, f"should flag completion claim: {fake!r}"
+        assert "completion" in reason or "claimed" in reason
+
+
+def test_fabricated_completion_claim_skipped_when_tool_actually_ran():
+    """When the agent DID dispatch a tool this turn, 'kar diya hai'
+    is honest reporting — not fabrication."""
+    from openbro.playbooks.builtin.tech_research import detect_fabricated_tool_call
+
+    text = "Photoshop khol diya hai, ab aap kaam kar sakte hain!"
+    assert detect_fabricated_tool_call(text, tool_calls_made=1) is None
+
+
+def test_fabricated_completion_claim_skipped_for_code_questions():
+    """When user asked for code and the response includes code
+    fences, claims-of-completion phrasing is part of explaining
+    the code — not a tool-execution claim."""
+    from openbro.playbooks.builtin.tech_research import detect_fabricated_tool_call
+
+    text = (
+        "Yahan ye snippet hai jo aapka kaam kar dega:\n"
+        "```python\nopen(path)\n```\n"
+        "Ye function aapke file ko open kar deta hai."
+    )
+    assert (
+        detect_fabricated_tool_call(
+            text,
+            tool_calls_made=0,
+            user_prompt="python me file open karne ka code likh do",
+        )
+        is None
+    )
+
+
+def test_groq_extracts_paren_form_function_tag():
+    """Captured 2026-05-31: model emitted
+    `<function=app({"action": "open", "app_name": "Adobe Photoshop"})>`
+    Args wrapped in parens. Original parser missed this shape and
+    Photoshop never opened."""
+    from openbro.llm.groq_provider import _extract_function_tag_calls
+
+    text = '<function=app({"action": "open", "app_name": "Adobe Photoshop"})>'
+    calls = _extract_function_tag_calls(text)
+    assert len(calls) == 1
+    assert calls[0]["function"]["name"] == "app"
+    assert calls[0]["function"]["arguments"]["action"] == "open"
+    assert calls[0]["function"]["arguments"]["app_name"] == "Adobe Photoshop"
+
+
+def test_decompose_does_not_split_short_emotional_fragments():
+    """Captured 2026-05-31: 'kholo na?? yrr to kaam krke chek kiya
+    kro hua ki nhi?' got split into 2 'steps' each running a tool.
+    'kholo na??' (10 chars) is emotional emphasis, not a task.
+    The second fragment is feedback ('why didn't you check?'),
+    not an action. Decompose must NOT split this."""
+    from openbro.core.decompose import decompose
+
+    q = "kholo na?? yrr to kaam krke chek kiya kro hua ki nhi?"
+    parts = decompose(q)
+    assert len(parts) == 1, f"should NOT split, got {parts}"
+
+
+def test_decompose_still_splits_real_compound_queries():
+    """Regression: real compound queries still decompose. This is
+    the test that protected the original behavior — must keep
+    passing after the conversational filter tightens the bar."""
+    from openbro.core.decompose import decompose
+
+    q = "open chrome aur browser me youtube.com search kar"
+    parts = decompose(q)
+    assert len(parts) >= 2
+
+
 def test_agent_restores_model_at_turn_end():
     """Captured 2026-05-30: escalator round 3 swapped Groq model to
     llama-4-maverick mid-turn. The swap was NEVER restored. Every
