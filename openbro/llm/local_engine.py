@@ -59,8 +59,16 @@ class LocalEngine:
         self._load_lock = _threading.Lock()
         self._prewarm_thread: _threading.Thread | None = None
 
-    def prewarm(self) -> None:
-        """Start loading the model in a background thread.
+    def prewarm(self, delay_seconds: float = 5.0) -> None:
+        """Start loading the model in a background thread after a
+        short delay.
+
+        Captured 2026-05-31: an immediate eager-load competed with
+        the REPL keyboard handler (llama-cpp's Python prep holds the
+        GIL during initial setup, then the C++ load runs for 30-90s).
+        User saw a frozen prompt where typing didn't register. The
+        `delay_seconds` (default 5s) gives the REPL time to fully
+        render and become responsive before the heavy load starts.
 
         Safe to call multiple times — only one load runs at a time.
         Failures are swallowed (the engine will retry on the first
@@ -75,6 +83,10 @@ class LocalEngine:
 
         def _bg_load() -> None:
             try:
+                if delay_seconds > 0:
+                    import time as _time
+
+                    _time.sleep(delay_seconds)
                 self._load()
             except Exception as e:  # noqa: BLE001 — best-effort
                 try:
