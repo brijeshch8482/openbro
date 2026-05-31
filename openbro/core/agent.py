@@ -172,12 +172,21 @@ class Agent:
             # REPL stays responsive while load happens. Captured
             # 2026-05-31 user ask: 'jab openbro initialize ho tabhi
             # model bhi initialize ho jaye...switching me delay na ho'.
-            try:
-                fb_engine = getattr(self.provider.fallback, "engine", None)
-                if fb_engine is not None and hasattr(fb_engine, "prewarm"):
-                    fb_engine.prewarm()
-            except Exception:
-                pass  # best-effort — chat() will load on demand if this fails
+            #
+            # Escape hatch: when OPENBRO_SKIP_PREWARM=1 is set, skip
+            # the eager warm entirely. Useful when keyboard / voice /
+            # other threads compete with the load and the user wants
+            # a fully responsive REPL even at the cost of a slow
+            # first fallback.
+            import os as _os
+
+            if not _os.environ.get("OPENBRO_SKIP_PREWARM"):
+                try:
+                    fb_engine = getattr(self.provider.fallback, "engine", None)
+                    if fb_engine is not None and hasattr(fb_engine, "prewarm"):
+                        fb_engine.prewarm()
+                except Exception:
+                    pass  # best-effort — chat() will load on demand if this fails
 
         self.memory = memory or MemoryManager()
         self.interactive = interactive
