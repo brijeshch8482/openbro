@@ -38,9 +38,7 @@ def all_builtin_playbooks() -> list[type]:
         FileSearchPlaybook,
         # Last two — context injectors that pass through to the LLM.
         # Planner adds 'plan before acting' for complex queries; tech
-        # research adds real web sources for technical Q&A. Both run
-        # AFTER specific playbooks because those produce final answers;
-        # these only augment context for the LLM that follows.
+        # research adds real web sources for technical Q&A.
         PlannerPlaybook,
         TechResearchPlaybook,
     ]

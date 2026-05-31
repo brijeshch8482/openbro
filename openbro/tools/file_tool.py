@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 
 from openbro.tools.base import BaseTool, RiskLevel
-from openbro.utils.paths import resolve_user_path
+from openbro.utils.paths import resolve_user_path, resolve_with_candidates
 
 # Where to look when user gives a filename without a directory ("open aadhar"
 # or "open T&P fees"). Walked in order; first hit wins. Keeps the agent from
@@ -170,10 +170,13 @@ class FileTool(BaseTool):
     risk = RiskLevel.MODERATE
 
     def run(self, action: str, path: str = ".", content: str = "", pattern: str = "") -> str:
-        # OneDrive-aware: '~/Desktop' resolves to the real Desktop the user
-        # sees in Explorer (which is under OneDrive on most Windows installs
-        # with sync enabled).
-        path = resolve_user_path(path)
+        # OneDrive-aware path resolution. Tries multiple candidates
+        # before declaring 'not found': straight resolve, then
+        # C:\\OneDrive ↔ C:\\Users\\<u>\\OneDrive symlink variants,
+        # then case-insensitive parent walk. Captured 2026-05-31:
+        # 'C:\\OneDrive\\Desktop\\Testing logs\\30th log' was a real
+        # symlink that resolve_user_path missed via expanduser alone.
+        path = resolve_with_candidates(path)
 
         if action == "read":
             if not path.exists():

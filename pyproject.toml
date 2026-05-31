@@ -32,6 +32,15 @@ dependencies = [
     "pyyaml>=6.0",
     "click>=8.0",
     "pydantic>=2.0",
+    # Data analysis stack — needed for the python tool to comprehend
+    # tabular data. Captured 2026-05-31: user asked 'battery backup
+    # kitne ghante' over Excel time series; agent tried `import
+    # pandas` and crashed ModuleNotFoundError, then the fallback
+    # model denied the column existed. With pandas + openpyxl in
+    # the runtime, the agent can actually compute deltas.
+    "pandas>=2.0",
+    "openpyxl>=3.1",
+    "numpy>=1.24",
 ]
 
 [project.optional-dependencies]

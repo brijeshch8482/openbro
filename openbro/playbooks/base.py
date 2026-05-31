@@ -19,12 +19,18 @@ class PlaybookContext:
     playbook can call tools without dragging in the whole Agent object.
     Also carries the detected captures from regex matching so the
     playbook knows e.g. WHICH app the user wants to close.
+
+    `provider` is optionally injected so a playbook can make a one-off
+    LLM call (ExpansiveResearchPlaybook uses it for round-7 query
+    rephrasing). Optional because most playbooks are deterministic
+    and don't need it.
     """
 
     user_input: str
     tool_registry: ToolRegistry
     captures: dict[str, str] = field(default_factory=dict)
     language: str = "hinglish"
+    provider: object | None = None
 
 
 @dataclass

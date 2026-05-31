@@ -398,10 +398,55 @@ class Agent:
                 return self._chat_impl(user_input)
             return self._chat_multi(user_input, sub_queries)
 
-    # Max LLM round-trips per user message. Real Claude Code loops 5-20+
-    # times for non-trivial requests. Cap protects against runaway loops
-    # but is loose enough that legit multi-step work completes.
-    MAX_TOOL_ITERATIONS = 10
+    # Max LLM round-trips per user message. Cap protects against
+    # runaway loops but is loose enough that legit multi-step work
+    # completes. Two ceilings:
+    #
+    #   MAX_TOOL_ITERATIONS_CLOUD = 25  — cloud calls cost real tokens
+    #                                     + rate limit, so a tighter
+    #                                     cap is appropriate. Real
+    #                                     Claude Code loops 5-20+
+    #                                     times on hard tasks; 25 is
+    #                                     enough headroom for that
+    #                                     while still terminating on
+    #                                     genuine loops.
+    #
+    #   MAX_TOOL_ITERATIONS_LOCAL = 80  — captured 2026-05-31 user
+    #                                     ask: 'unlimited tokens lene
+    #                                     do offline se...jab tak
+    #                                     cheeje solve na ho jaise
+    #                                     claude krta'. Local runs in-
+    #                                     process so no rate limit;
+    #                                     let it grind through. Hard
+    #                                     ceiling of 80 keeps a real
+    #                                     infinite loop from running
+    #                                     forever; user can Ctrl+C
+    #                                     anytime.
+    #
+    # `_iteration_cap()` picks the right one based on the active
+    # provider type.
+    MAX_TOOL_ITERATIONS_CLOUD = 25
+    MAX_TOOL_ITERATIONS_LOCAL = 80
+    # Kept for back-compat — older tests / external integrations
+    # read this attribute. Defaults to the cloud cap.
+    MAX_TOOL_ITERATIONS = 25
+
+    def _iteration_cap(self) -> int:
+        """Return the per-turn iteration ceiling for the active provider.
+
+        Local llama.cpp gets the higher cap (offline = no rate limit,
+        let it keep trying). Cloud (Groq / Anthropic / OpenAI) gets
+        the lower cap to protect token budget.
+        """
+        from openbro.llm.fallback_provider import FallbackProvider
+
+        provider = self.provider
+        if isinstance(provider, FallbackProvider):
+            provider = getattr(provider, "primary", provider)
+        name = (provider.name() if hasattr(provider, "name") else "").lower()
+        if name.startswith("local") or "llama_cpp" in name or "llamacpp" in name:
+            return self.MAX_TOOL_ITERATIONS_LOCAL
+        return self.MAX_TOOL_ITERATIONS_CLOUD
 
     def _chat_multi(self, original_input: str, sub_queries: list[str]) -> str:
         """Run a TaskList of sub-queries in order, return combined response.
@@ -560,12 +605,13 @@ class Agent:
         # answers after one tool returned nothing). Loop till LLM stops
         # calling tools and emits a final text response — same shape as
         # Claude Code / OpenAI Assistants API ReAct loop.
-        for iteration in range(self.MAX_TOOL_ITERATIONS):
+        max_iterations = self._iteration_cap()
+        for iteration in range(max_iterations):
             self.bus.emit(
                 "llm_start",
                 "calling LLM",
                 step=iteration + 1,
-                max_steps=self.MAX_TOOL_ITERATIONS,
+                max_steps=max_iterations,
             )
             llm_t0 = _time.monotonic()
             try:
@@ -911,6 +957,7 @@ class Agent:
             tool_registry=self.tool_registry,
             captures=match.captures,
             language=self.last_language,
+            provider=self.provider,
         )
         try:
             response = playbook.execute(ctx)

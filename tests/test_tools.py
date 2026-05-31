@@ -257,12 +257,14 @@ def test_web_search_handles_empty_response():
 
 def test_web_tool_run_no_max_results_kwarg():
     """Regression guard: tech_research playbook used to pass max_results=8
-    which crashed the tool silently. Tool signature must remain
-    (action, url, query) only."""
+    which crashed the tool silently. Tool signature must remain the
+    documented set — `engine` was added 2026-05-31 for Bing/Reddit/
+    archive support but `max_results` must never come back."""
     import inspect
 
     sig = inspect.signature(WebTool.run)
-    assert set(sig.parameters.keys()) == {"self", "action", "url", "query"}
+    assert set(sig.parameters.keys()) == {"self", "action", "url", "query", "engine"}
+    assert "max_results" not in sig.parameters
 
 
 def test_app_tool_schema():

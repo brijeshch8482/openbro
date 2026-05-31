@@ -8,6 +8,14 @@ import httpx
 
 from openbro.tools.base import BaseTool, RiskLevel
 
+# Browsers used as User-Agent. Some search engines (Bing especially)
+# return 403/empty when they detect a Python httpx client.
+_BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/120.0.0.0 Safari/537.36"
+)
+
 # DDG HTML SERP markup: each result block has class 'result__title'
 # containing a link to the actual page, and class 'result__snippet' with
 # the excerpt. The URL inside the link is wrapped in a redirect: e.g.
@@ -64,6 +72,158 @@ def _parse_ddg_html(html: str) -> list[tuple[str, str, str]]:
     return out
 
 
+# ─── Bing search ──────────────────────────────────────────────────────
+#
+# Captured 2026-05-31 user ask: 'agar user ne koi task diya hai...aur
+# use 4-5 website par nhi mila...to self wo khud se decide krna ki
+# task poora krna hai...llm se baat krke..aur phir new other websites
+# par khoje'. The ExpansiveResearchPlaybook orchestrates the rounds;
+# the engine functions below give it more places to look.
+
+_BING_RESULT_RE = re.compile(
+    # Each Bing result lives in <li class="b_algo"> containing:
+    #   <h2><a href="URL">Title</a></h2>
+    #   <p class="b_lineclamp..."><span>Snippet</span></p>
+    r'<li[^>]*class="b_algo"[^>]*>'
+    r'.*?<h2[^>]*><a[^>]+href="(?P<url>[^"]+)"[^>]*>(?P<title>.*?)</a></h2>'
+    r"(?:.*?<p[^>]*>(?P<snippet>.*?)</p>)?",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def _parse_bing_html(html: str) -> list[tuple[str, str, str]]:
+    """Extract (title, url, snippet) tuples from a Bing SERP page."""
+    out: list[tuple[str, str, str]] = []
+    if not html:
+        return out
+    for m in _BING_RESULT_RE.finditer(html):
+        url = m.group("url")
+        if not url or not url.startswith("http"):
+            continue
+        title = _strip_tags(m.group("title") or "")
+        snippet = _strip_tags(m.group("snippet") or "")
+        if title or snippet:
+            out.append((title, url, snippet))
+        if len(out) >= 20:
+            break
+    return out
+
+
+def _bing_search(query: str) -> list[tuple[str, str, str]]:
+    """Run a Bing search and return (title, url, snippet) tuples."""
+    try:
+        resp = httpx.get(
+            "https://www.bing.com/search",
+            params={"q": query},
+            headers={"User-Agent": _BROWSER_UA},
+            timeout=15,
+            follow_redirects=True,
+        )
+    except Exception:
+        return []
+    return _parse_bing_html(resp.text)
+
+
+# ─── Reddit search ────────────────────────────────────────────────────
+
+
+def _reddit_search(query: str) -> list[tuple[str, str, str]]:
+    """Search Reddit via its public JSON endpoint. Returns top items
+    as (title, url, snippet) tuples. Reddit's search ranks by
+    relevance + recency; useful for community/anecdotal sources the
+    main engines downrank."""
+    try:
+        resp = httpx.get(
+            "https://www.reddit.com/search.json",
+            params={"q": query, "limit": 15, "sort": "relevance"},
+            headers={"User-Agent": _BROWSER_UA},
+            timeout=15,
+            follow_redirects=True,
+        )
+        data = resp.json()
+    except Exception:
+        return []
+    out: list[tuple[str, str, str]] = []
+    for child in (data.get("data", {}).get("children") or [])[:20]:
+        d = child.get("data") or {}
+        title = d.get("title") or ""
+        permalink = d.get("permalink") or ""
+        if permalink:
+            url = f"https://www.reddit.com{permalink}"
+        else:
+            url = d.get("url") or ""
+        snippet = (d.get("selftext") or "")[:300]
+        if title and url:
+            out.append((title, url, snippet))
+    return out
+
+
+# ─── archive.org search ───────────────────────────────────────────────
+
+
+def _archive_search(query: str) -> list[tuple[str, str, str]]:
+    """Search archive.org's advanced search over its full collection
+    of items (books, captured webpages, papers). Useful when modern
+    engines have buried old or dead-but-archived sources."""
+    try:
+        resp = httpx.get(
+            "https://archive.org/advancedsearch.php",
+            params={
+                "q": query,
+                "fl[]": ["identifier", "title", "description", "mediatype"],
+                "rows": 15,
+                "page": 1,
+                "output": "json",
+            },
+            headers={"User-Agent": _BROWSER_UA},
+            timeout=15,
+            follow_redirects=True,
+        )
+        data = resp.json()
+    except Exception:
+        return []
+    out: list[tuple[str, str, str]] = []
+    for doc in (data.get("response", {}).get("docs") or [])[:20]:
+        ident = doc.get("identifier") or ""
+        title = doc.get("title") or ident
+        snippet = (doc.get("description") or "")[:300]
+        if isinstance(title, list):
+            title = " ".join(str(t) for t in title)
+        if isinstance(snippet, list):
+            snippet = " ".join(str(s) for s in snippet)
+        if not ident:
+            continue
+        url = f"https://archive.org/details/{ident}"
+        out.append((str(title), url, str(snippet)))
+    return out
+
+
+# ─── engine registry ──────────────────────────────────────────────────
+
+
+_ENGINE_FUNCS = {
+    "ddg": None,  # handled inline in _search (existing DDG path)
+    "bing": _bing_search,
+    "reddit": _reddit_search,
+    "archive": _archive_search,
+}
+
+
+def _render_results(query: str, results: list[tuple[str, str, str]], engine: str = "ddg") -> str:
+    """Render a result list (title, url, snippet) as the numbered
+    text format tech_research / expansive_research expect. Returns
+    a friendly 'no results' line when empty."""
+    if not results:
+        return f"No web results for '{query}' on {engine}."
+    lines = [f"[{engine}]"]
+    for i, (title, url, snippet) in enumerate(results[:8], 1):
+        lines.append(f"{i}. {title}")
+        lines.append(f"   {url}")
+        if snippet:
+            lines.append(f"   {snippet[:200]}")
+    return "\n".join(lines)
+
+
 def _fallback_instant_answer(query: str) -> str:
     """If the HTML SERP scrape returned nothing (DDG blocked us, or
     the query is too obscure), fall back to the instant-answer API.
@@ -97,15 +257,22 @@ class WebTool(BaseTool):
     description = "Search the web or fetch content from a URL"
     risk = RiskLevel.SAFE
 
-    def run(self, action: str, url: str | None = "", query: str | None = "") -> str:
+    def run(
+        self,
+        action: str,
+        url: str | None = "",
+        query: str | None = "",
+        engine: str | None = "",
+    ) -> str:
         # Coerce None -> "" so we don't crash when the LLM sends `null`
         # (Groq rejects null up front, but some providers don't).
         url = url or ""
         query = query or ""
+        engine = (engine or "ddg").lower()
         if action == "fetch":
             return self._fetch(url)
         elif action == "search":
-            return self._search(query)
+            return self._search(query, engine=engine)
         else:
             return f"Unknown action: {action}. Available: fetch, search"
 
@@ -120,26 +287,21 @@ class WebTool(BaseTool):
         except Exception as e:
             return f"Fetch error: {e}"
 
-    def _search(self, query: str) -> str:
+    def _search(self, query: str, engine: str = "ddg") -> str:
         if not query:
             return "Query required for search"
-        # Real web search via DuckDuckGo's HTML-lite endpoint. The
-        # instant-answer API (api.duckduckgo.com) only returns Abstract
-        # + RelatedTopics with no actual result URLs — useless for
-        # agents that want to fetch and synthesize real documentation.
-        # html.duckduckgo.com/html returns a SERP-style page with
-        # real titles + URLs + snippets that we parse out below.
+        # Dispatch to the engine. DDG is the default historical path
+        # (kept inline so the existing test surface doesn't shift);
+        # Bing/Reddit/archive are handled via the _ENGINE_FUNCS map.
+        if engine in _ENGINE_FUNCS and _ENGINE_FUNCS[engine] is not None:
+            results = _ENGINE_FUNCS[engine](query)
+            return _render_results(query, results, engine=engine)
+        # Default: DuckDuckGo HTML-lite SERP scrape.
         try:
             resp = httpx.post(
                 "https://html.duckduckgo.com/html/",
                 data={"q": query},
-                headers={
-                    "User-Agent": (
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/120.0.0.0 Safari/537.36"
-                    )
-                },
+                headers={"User-Agent": _BROWSER_UA},
                 timeout=15,
                 follow_redirects=True,
             )
@@ -151,17 +313,7 @@ class WebTool(BaseTool):
             # Fallback to instant-answer (might still surface SOMETHING
             # like a Wikipedia disambiguation).
             return _fallback_instant_answer(query)
-
-        # Format as numbered list — that's what _extract_urls in the
-        # tech_research playbook expects (it greps URLs out of any
-        # line-based text).
-        lines = []
-        for i, (title, url, snippet) in enumerate(results[:8], 1):
-            lines.append(f"{i}. {title}")
-            lines.append(f"   {url}")
-            if snippet:
-                lines.append(f"   {snippet[:200]}")
-        return "\n".join(lines)
+        return _render_results(query, results, engine="ddg")
 
     def schema(self) -> dict:
         return {
@@ -192,6 +344,17 @@ class WebTool(BaseTool):
                         "description": (
                             "Search query — REQUIRED for action=search, "
                             "OMIT entirely for action=fetch (do not pass null)."
+                        ),
+                    },
+                    "engine": {
+                        "type": "string",
+                        "enum": ["ddg", "bing", "reddit", "archive"],
+                        "description": (
+                            "Search engine. Default 'ddg' (DuckDuckGo, "
+                            "broad web). 'bing' = second opinion, 'reddit' "
+                            "= community/anecdotal, 'archive' = archive.org "
+                            "items (old/dead-but-archived). For action=fetch "
+                            "this is ignored."
                         ),
                     },
                 },
