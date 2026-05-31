@@ -66,6 +66,29 @@ def _friendly_error(e: Exception) -> str:
     schema mismatch. Each branch below picks the most actionable
     Hinglish phrasing + concrete next step.
     """
+    # Both-providers-failed → smooth, calm message instead of raw
+    # ValueError. Captured 2026-05-30: user saw 'ValueError:
+    # Requested tokens (11293) exceed context window of 8192' as the
+    # entire response — felt like a crash, not a degraded answer.
+    try:
+        from openbro.llm.fallback_provider import _FallbackChainExhausted
+
+        if isinstance(e, _FallbackChainExhausted):
+            return (
+                "⏱️ Cloud aur local dono temporarily reach nahi ho "
+                f"paaye. Cloud: `{e.primary}` ne `{e.primary_error[:80]}`"
+                f" diya; local `{e.fallback}` ne "
+                f"`{e.fallback_error[:80]}`.\n"
+                "Fix options:\n"
+                "  • 30-60 sec ruk ke phir try kar — cloud usually "
+                "recover ho jata\n"
+                "  • `/recap` se goal state dekh\n"
+                "  • Local model upgrade kar (`openbro model "
+                "download mistral-nemo`) — context bigger hai"
+            )
+    except ImportError:
+        pass
+
     msg = str(e)
     low = msg.lower()
     # Auth — recoverable by setting API key
@@ -385,6 +408,33 @@ class Agent:
         return tasklist.render_markdown() + "\n\n" + "\n\n---\n\n".join(results)
 
     def _chat_impl(self, user_input: str) -> str:
+        # Snapshot the model + provider type so we can restore at the
+        # end of the turn. Captured 2026-05-30: escalator round 3
+        # swapped Groq from llama-3.3 to llama-4-maverick — the swap
+        # persisted across turns because we never restored. Every
+        # subsequent turn ran on maverick → maverick unavailable →
+        # fallback to local → context overflow. Snapshot here, restore
+        # in the finally so the next turn always starts from the
+        # user-configured model.
+        original_provider = self.provider
+        original_model = getattr(self.provider, "model", None)
+        try:
+            return self._chat_impl_inner(user_input)
+        finally:
+            if self.provider is not original_provider:
+                self.provider = original_provider
+                self.bus.emit("system", "turn end: restored original provider")
+            elif (
+                original_model is not None
+                and getattr(self.provider, "model", None) != original_model
+            ):
+                try:
+                    self.provider.model = original_model
+                    self.bus.emit("system", f"turn end: restored model to {original_model}")
+                except Exception:
+                    pass
+
+    def _chat_impl_inner(self, user_input: str) -> str:
         import time as _time
 
         from openbro.core.reflection_escalator import ReflectionEscalator

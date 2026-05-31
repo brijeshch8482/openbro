@@ -508,6 +508,139 @@ def test_fallback_provider_trims_messages_to_fit_local_context():
     assert total_chars < 30000
 
 
+def test_fallback_provider_reserves_budget_for_tools_schema():
+    """Captured 2026-05-30: trim was firing but the tools schema
+    (~5-7K tokens for 23 tools) wasn't accounted for in the budget.
+    Local llama.cpp counts tools JSON as input, so an 'in-budget'
+    history still overflowed when tools were attached. The trim
+    must subtract estimated tools-schema cost from the budget."""
+    from unittest.mock import MagicMock
+
+    from openbro.llm.base import LLMResponse, Message
+    from openbro.llm.fallback_provider import FallbackProvider
+
+    primary = MagicMock()
+    primary.name.return_value = "groq/x"
+    primary.chat.side_effect = Exception("503 unavailable")
+
+    fallback = MagicMock()
+    fallback.name.return_value = "local/y"
+    fallback.engine = MagicMock()
+    fallback.engine.n_ctx = 8192
+    fallback.chat.return_value = LLMResponse(content="ok", usage={"input": 1, "output": 1})
+
+    fb = FallbackProvider(primary=primary, fallback=fallback)
+    # Build a big-ish tools schema (~30 tools).
+    tools = [
+        {
+            "name": f"tool_{i}",
+            "description": "X" * 200,
+            "parameters": {"type": "object", "properties": {}},
+        }
+        for i in range(30)
+    ]
+    # 4K-char history per message × 10 messages = 40K chars.
+    messages = [Message(role="system", content="you are openbro")] + [
+        Message(role="user", content="A" * 4000) for _ in range(10)
+    ]
+    fb.chat(messages, tools=tools)
+    sent_msgs = fallback.chat.call_args[0][0]
+    total_chars = sum(len(m.content or "") for m in sent_msgs)
+    # ctx=8192, 1500 response reserve, ~1500 tools reserve → budget
+    # ~= 5200 tokens × 4 chars = 20800 chars max. Allow some
+    # rounding slack — must be tighter than the no-tools case.
+    assert total_chars < 25000, total_chars
+
+
+def test_fallback_chain_exhausted_raises_typed_exception():
+    """When both primary AND fallback fail, raise _FallbackChainExhausted
+    so the agent can turn it into a calm message instead of leaking
+    'ValueError: Requested tokens exceed...' to the user."""
+    from unittest.mock import MagicMock
+
+    import pytest
+
+    from openbro.llm.base import Message
+    from openbro.llm.fallback_provider import (
+        FallbackProvider,
+        _FallbackChainExhausted,
+    )
+
+    primary = MagicMock()
+    primary.name.return_value = "groq/x"
+    primary.chat.side_effect = Exception("503 unavailable")
+
+    fallback = MagicMock()
+    fallback.name.return_value = "local/y"
+    fallback.engine = MagicMock()
+    fallback.engine.n_ctx = 8192
+    fallback.chat.side_effect = ValueError("Requested tokens (11000) exceed 8192")
+
+    fb = FallbackProvider(primary=primary, fallback=fallback)
+    with pytest.raises(_FallbackChainExhausted) as excinfo:
+        fb.chat([Message(role="user", content="x")])
+    assert "groq/x" in str(excinfo.value)
+    assert "local/y" in str(excinfo.value)
+
+
+def test_friendly_error_handles_fallback_chain_exhausted():
+    """The agent's _friendly_error must catch _FallbackChainExhausted
+    and produce a calm Hinglish message — not a raw ValueError."""
+    from openbro.core.agent import _friendly_error
+    from openbro.llm.fallback_provider import _FallbackChainExhausted
+
+    e = _FallbackChainExhausted(
+        primary="groq/llama-3.3",
+        primary_error="503 Service Unavailable",
+        fallback="local/llama3.2:3b",
+        fallback_error="Requested tokens (11293) exceed context window",
+    )
+    msg = _friendly_error(e)
+    assert "ValueError" not in msg, msg
+    assert "groq/llama-3.3" in msg
+    assert "local/llama3.2:3b" in msg
+    assert "/recap" in msg or "ruk" in msg.lower()
+
+
+def test_agent_restores_model_at_turn_end():
+    """Captured 2026-05-30: escalator round 3 swapped Groq model to
+    llama-4-maverick mid-turn. The swap was NEVER restored. Every
+    subsequent turn ran on maverick → maverick unavailable →
+    fallback chain → context overflow. The agent must snapshot the
+    provider's model at turn start and restore it in finally."""
+    from unittest.mock import MagicMock, patch
+
+    from openbro.core.agent import Agent
+    from openbro.llm.base import LLMResponse
+
+    fake_provider = MagicMock()
+    fake_provider.name.return_value = "fake"
+    fake_provider.supports_tools.return_value = True
+    fake_provider.model = "llama-3.3-70b-versatile"
+    fake_provider.chat.return_value = LLMResponse(
+        content="answer", usage={"input": 10, "output": 5}
+    )
+
+    with patch("openbro.core.agent.create_provider", return_value=fake_provider):
+        agent = Agent(interactive=False)
+        agent.playbook_registry._playbooks = []
+        # Simulate a mid-turn model swap (as the escalator would do).
+        # We can't easily trigger escalator, but the restoration logic
+        # is in the outer try/finally so we exercise it directly: mutate
+        # model during the call via a chat side-effect that swaps it.
+        original = fake_provider.model
+
+        def chat_then_swap(*args, **kwargs):
+            fake_provider.model = "meta-llama/llama-4-maverick-17b-128e-instruct"
+            return LLMResponse(content="ok", usage={"input": 1, "output": 1})
+
+        fake_provider.chat.side_effect = chat_then_swap
+        agent.chat("hello")
+
+    # After the turn ends, the provider's model must be the original.
+    assert fake_provider.model == original
+
+
 def test_fallback_provider_no_trim_when_unknown_context():
     """If the fallback provider doesn't expose n_ctx, don't trim —
     safer than guessing a budget. Captures a custom-provider use

@@ -25,6 +25,29 @@ from typing import Any
 
 from openbro.llm.base import LLMProvider, LLMResponse, Message
 
+
+class _FallbackChainExhausted(Exception):
+    """Both primary and fallback failed — agent.py turns this into a
+    calm user-facing message instead of leaking ValueError text."""
+
+    def __init__(
+        self,
+        primary: str,
+        primary_error: str,
+        fallback: str,
+        fallback_error: str,
+    ):
+        self.primary = primary
+        self.primary_error = primary_error
+        self.fallback = fallback
+        self.fallback_error = fallback_error
+        super().__init__(
+            f"both providers failed — primary {primary}: "
+            f"{primary_error[:200]}; fallback {fallback}: "
+            f"{fallback_error[:200]}"
+        )
+
+
 # Error patterns that justify cascading to the fallback. Each substring
 # is checked case-insensitively against str(exc) AND the type name.
 # Kept conservative — when in doubt, raise, so the user knows.
@@ -117,15 +140,29 @@ class FallbackProvider(LLMProvider):
             self._notify(e)
             # Pre-trim before delegating: cloud primary often has
             # 32K+ context but the local fallback is usually 8K.
-            # Captured 2026-05-30: 'this is...app so you have to
-            # see' triggered Groq 503 → fallback to local llama3.2:3b
-            # → ValueError 'requested (10876) exceed context window
-            # of 8192' was the user's only response.
-            fb_messages = self._fit_to_fallback_context(messages)
-            response = self.fallback.chat(fb_messages, tools)
-            self.last_used = "fallback"
-            self.fallback_count += 1
-            return response
+            # The tools schema (~5-7K tokens for 23 tools) also
+            # counts against the input — without accounting for it
+            # the trim was insufficient and a 'fixed' history still
+            # overflowed.
+            fb_messages = self._fit_to_fallback_context(messages, tools=tools)
+            try:
+                response = self.fallback.chat(fb_messages, tools)
+                self.last_used = "fallback"
+                self.fallback_count += 1
+                return response
+            except Exception as fb_err:
+                # Both primary AND fallback failed. Don't surface a
+                # raw ValueError to the user. Compose a clear, calm
+                # message explaining what was tried so they can pick
+                # a recovery action. Captured 2026-05-30: user saw
+                # 'ValueError: Requested tokens (11293) exceed context
+                # window of 8192' as the entire response.
+                raise _FallbackChainExhausted(
+                    primary=self.primary.name(),
+                    primary_error=str(e),
+                    fallback=self.fallback.name(),
+                    fallback_error=str(fb_err),
+                ) from fb_err
 
     def stream(
         self,
@@ -191,7 +228,11 @@ class FallbackProvider(LLMProvider):
             return n
         return None
 
-    def _fit_to_fallback_context(self, messages: list[Message]) -> list[Message]:
+    def _fit_to_fallback_context(
+        self,
+        messages: list[Message],
+        tools: list[dict] | None = None,
+    ) -> list[Message]:
         """Trim `messages` so the fallback's context window can hold them.
 
         - Drops [TRANSIENT_RESEARCH] / [TRANSIENT_PLAN] system blocks
@@ -199,8 +240,9 @@ class FallbackProvider(LLMProvider):
           often brings the request under budget).
         - Keeps the initial system prompt at index 0.
         - Tail-keeps the most recent messages until the budget is hit.
-        - Token estimate: 4 chars ≈ 1 token. Reserves ~1.5K for the
-          response so the model has room to reply.
+        - Token estimate: 4 chars ≈ 1 token. Reserves room for both
+          the response AND the tools-schema input (~5-7K tokens for
+          23 tools — Llama.cpp counts the tools JSON as input).
 
         Returns the original list when no trim is needed or when the
         fallback's context can't be determined.
@@ -208,7 +250,19 @@ class FallbackProvider(LLMProvider):
         ctx = self._fallback_context_limit()
         if ctx is None or not messages:
             return messages
-        budget = max(1024, ctx - 1500)
+        # Reserve: 1500 for response + estimated tools schema cost.
+        # Tools schema serialised as JSON costs ~250 chars per tool
+        # (name + description + 3-5 params). 23 tools ≈ 5750 chars
+        # ≈ 1450 tokens. Budget the worst case.
+        tools_tokens = 0
+        if tools:
+            try:
+                import json as _json
+
+                tools_tokens = len(_json.dumps(tools)) // 4
+            except Exception:
+                tools_tokens = 1500
+        budget = max(1024, ctx - 1500 - tools_tokens)
 
         # Step 1: drop transient context blocks.
         trimmed = [
