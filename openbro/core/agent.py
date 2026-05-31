@@ -370,17 +370,27 @@ class Agent:
         completed/failed after. The TaskList is published on the bus so
         the REPL can render a live checklist alongside per-turn output.
 
+        Captured 2026-05-31 user feedback: 'ye question ko hi plan me
+        daalta hai...maine jo poocha hai usko solve kaise krna hai wo
+        plan hota hai?'. Right — the previous title was 'Plan: ...'
+        which was misleading: this isn't a solution plan, it's the
+        compound request split into its parts. The TITLE now reflects
+        that. The actual solution planning (LLM-emitted numbered
+        steps + reasoning) happens inside each sub-turn via
+        PlannerPlaybook, not here.
+
         Combined response shape:
-          ### Plan: <original input>
+          ### Compound request (2 parts): <original input>
           1. [✓] sub-query A — <answer A>
           2. [✓] sub-query B — <answer B>
 
         If any sub-query fails (raises or returns a friendly error
         prefix), subsequent tasks are still attempted — we don't bail
-        on the whole plan just because one step had trouble. The
+        on the whole list just because one part had trouble. The
         TaskList carries per-task status so the UI shows what worked.
         """
-        tasklist = TaskList(title=f"Plan: {original_input[:80]}")
+        n = len(sub_queries)
+        tasklist = TaskList(title=f"Compound request ({n} parts): {original_input[:70]}")
         for sq in sub_queries:
             tasklist.add(description=sq, payload=sq)
         # Surface the plan so the REPL renderer can draw it up-front.

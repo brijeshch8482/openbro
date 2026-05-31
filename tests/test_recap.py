@@ -716,6 +716,62 @@ def test_open_app_playbook_rejects_conversational_target():
     assert out == "", f"should decline (empty), got {out!r}"
 
 
+def test_open_app_playbook_rejects_past_tense_narration():
+    """Captured 2026-05-31: 'maine battey backup time pucha hai...
+    ki toatal kitne ghante chala hai?' matched the launch verb
+    `chala` and captured target = 'maine battey backup time pucha
+    hai...ki toatal kitne ghante'. Tool reported '✓ Opened: maine
+    battey backup time pucha hai...ki toatal kitne ghante'.
+    Bogus."""
+    from openbro.playbooks.base import PlaybookContext
+    from openbro.playbooks.builtin.open_app import OpenAppPlaybook
+
+    pb = OpenAppPlaybook()
+    ctx = PlaybookContext(
+        user_input="maine battey backup time pucha hai...ki toatal kitne ghante chala hai?",
+        tool_registry=None,  # type: ignore[arg-type]
+        captures={"target": "maine battey backup time pucha hai...ki toatal kitne ghante"},
+    )
+    out = pb.execute(ctx)
+    assert out == "", f"should decline (empty), got {out!r}"
+
+
+def test_open_app_playbook_rejects_long_target():
+    """Real app names are 1-3 words. Long captured targets are
+    almost certainly sentence content matched accidentally."""
+    from openbro.playbooks.base import PlaybookContext
+    from openbro.playbooks.builtin.open_app import OpenAppPlaybook
+
+    pb = OpenAppPlaybook()
+    ctx = PlaybookContext(
+        user_input="open chrome with some really long argument that goes on",
+        tool_registry=None,  # type: ignore[arg-type]
+        captures={"target": "chrome with some really long argument that goes on"},
+    )
+    assert pb.execute(ctx) == ""
+
+
+def test_open_app_playbook_rejects_targets_with_punctuation():
+    """Targets containing `?`, `...`, `!`, `,` are sentence content,
+    not app names."""
+    from openbro.playbooks.base import PlaybookContext
+    from openbro.playbooks.builtin.open_app import OpenAppPlaybook
+
+    pb = OpenAppPlaybook()
+    for bogus in [
+        "chrome?",
+        "audio...",
+        "browser, please",
+        "app!",
+    ]:
+        ctx = PlaybookContext(
+            user_input=f"open {bogus}",
+            tool_registry=None,  # type: ignore[arg-type]
+            captures={"target": bogus},
+        )
+        assert pb.execute(ctx) == "", f"should reject: {bogus!r}"
+
+
 def test_open_app_playbook_still_handles_real_app_names():
     """Regression: real app-name targets still run."""
     from unittest.mock import MagicMock

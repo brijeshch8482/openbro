@@ -342,7 +342,15 @@ class _ToolCallRenderer:
                 tl = ev.meta.get("tasklist")
                 if tl is not None:
                     step_count = len(tl.all())
-                    title = f"[bold green]◆ Plan[/bold green] [dim]· {step_count} steps[/dim]"
+                    # 'Compound request' is the honest label — these
+                    # are sub-parts of a single user query split by
+                    # decompose (X aur Y), NOT a solution plan. Real
+                    # solution plans are emitted by the LLM as part
+                    # of its response when PlannerPlaybook fires.
+                    title = (
+                        f"[bold green]◆ Compound request[/bold green] "
+                        f"[dim]· {step_count} parts[/dim]"
+                    )
                     self.con.print(
                         Panel(
                             tl.render_markdown(),
@@ -376,7 +384,7 @@ class _ToolCallRenderer:
                     color = "green" if ok else "yellow"
                     glyph = "✓" if ok else "⚠"
                     self.con.print(
-                        f"\n[bold {color}]{glyph} Plan finished[/bold {color}] "
+                        f"\n[bold {color}]{glyph} Compound request finished[/bold {color}] "
                         f"[dim]· {done}/{total} steps[/dim]\n",
                         highlight=False,
                     )

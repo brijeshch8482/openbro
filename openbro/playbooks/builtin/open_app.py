@@ -72,6 +72,28 @@ class OpenAppPlaybook(Playbook):
         re.IGNORECASE,
     )
 
+    # Past-tense narration tokens. When the captured target STARTS with
+    # one of these, the user is describing a past event (not asking
+    # for a launch). Captured 2026-05-31: 'maine battey backup time
+    # pucha hai...ki toatal kitne ghante chala hai?' captured target
+    # = 'maine battey backup time pucha hai...ki toatal kitne ghante'
+    # because `chala` matched the launch verb pattern.
+    _PAST_TENSE_PREFIXES = (
+        "maine",
+        "tune",
+        "tumne",
+        "aapne",
+        "apne",
+        "humne",
+        "isne",
+        "usne",
+        "i ",
+        "you ",
+        "he ",
+        "she ",
+        "we ",
+    )
+
     def execute(self, context: PlaybookContext) -> str:
         target = (context.captures.get("target") or "").strip().lower()
         if not target:
@@ -86,6 +108,29 @@ class OpenAppPlaybook(Playbook):
         # regex matched as a target. Let the LLM handle the actual
         # follow-up — this is feedback, not a launch request.
         if self._CONVERSATIONAL_TARGET_RE.match(target):
+            return ""
+
+        # Reject implausibly long targets. Real app names are 1-3
+        # words. 'maine battey backup time pucha hai...ki toatal
+        # kitne ghante' is sentence content, not an app name.
+        if len(target) > 40 or len(target.split()) > 4:
+            return ""
+
+        # Reject targets containing punctuation that doesn't belong in
+        # app names (`?`, `...`, `,`, `!`). A real launch command
+        # ends cleanly: 'open chrome' / 'chrome kholo'.
+        if any(ch in target for ch in ("?", "!", ",", "...")):
+            return ""
+
+        # Reject targets that START with a past-tense pronoun —
+        # 'maine X kiya', 'tune Y dekha' — user is narrating, not
+        # commanding.
+        first_token = target.split()[0] if target.split() else ""
+        if first_token in self._PAST_TENSE_PREFIXES:
+            return ""
+        # English shape: 'i pucha', 'you opened' etc — also captured
+        # via the prefix list above (i ', you ').
+        if any(target.startswith(prefix) for prefix in self._PAST_TENSE_PREFIXES):
             return ""
 
         # If the target has a file extension or a path separator, it's a

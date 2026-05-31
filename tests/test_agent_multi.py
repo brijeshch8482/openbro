@@ -53,7 +53,10 @@ def test_multi_intent_runs_each_subquery_in_order():
 def test_multi_intent_renders_tasklist_header():
     agent, _ = _build_agent()
     out = agent.chat("step a aur step b")
-    assert "Plan" in out
+    # Title now reflects what this UI actually is: a compound user
+    # request split by decompose, NOT a solution plan. Real solution
+    # plans come from the LLM via PlannerPlaybook.
+    assert "Compound request" in out
     assert "[✓]" in out
 
 
