@@ -228,6 +228,7 @@ class Agent:
             ),
             self._world_facts_block(),
             self._workspace_block(),
+            self._intent_check_block(),
         ]
         if memory_context:
             parts.append("\n" + memory_context)
@@ -282,6 +283,46 @@ class Agent:
         except Exception:
             return ""
         return ws.render_prompt_block()
+
+    def _intent_check_block(self) -> str:
+        """Per-turn reminder: classify the user's intent BEFORE answering
+        and verify the response matches that intent type.
+
+        Captured 2026-05-31: user asked 'battery backup kitne ghante'
+        (DURATION question). Agent ran WMIC battery → got 100% (current
+        STATE). Final answer was '97%' — wrong intent type. User said
+        'mai isse battery backup pooch rha hu...to ye kya bta rha???'.
+
+        The model has the data — it just didn't realise its answer
+        type didn't match the question type. Adding an explicit
+        intent → answer-shape mapping here makes the model self-check
+        before finalising.
+        """
+        return (
+            "\n## INTENT CHECK BEFORE FINAL ANSWER\n"
+            "Before emitting a final text response (no more tool calls),"
+            " verify your answer matches the user's intent type:\n"
+            "  • QUANTITY (`kitna`/`how much`/`how many` of one thing)"
+            " → answer is a single number / amount.\n"
+            "  • DURATION (`kitne ghante`/`kitna time`/`how long`/"
+            "`backup time`/`for how long`) → answer is a TIME DELTA:"
+            " compute (end_timestamp - start_timestamp) from a time"
+            " series. NOT the current state.\n"
+            "  • TIME (`kab`/`when`/`at what time`) → answer is a"
+            " timestamp.\n"
+            "  • LIST (`kya kya`/`which`/`list`) → answer is items.\n"
+            "  • COMPARISON (`compare`/`difference`/`vs`) → answer"
+            " contrasts two things.\n"
+            "  • METHOD (`kaise`/`how do I`/`steps to`) → answer is"
+            " ordered steps.\n"
+            "  • REASON (`kyun`/`why`) → answer is an explanation.\n"
+            "If your answer type DOESN'T match the question type, KEEP"
+            " CALLING TOOLS — do the missing computation. For example,"
+            " if user asked DURATION but you have a current-state"
+            " number, read the time-series data and compute the delta."
+            " Never report a current value as the answer to a duration"
+            " question."
+        )
 
     def _world_facts_block(self) -> str:
         """User-environment facts the LLM needs every turn (e.g. OneDrive paths).
