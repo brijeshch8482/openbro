@@ -211,7 +211,7 @@ _ENGINE_FUNCS = {
 
 def _render_results(query: str, results: list[tuple[str, str, str]], engine: str = "ddg") -> str:
     """Render a result list (title, url, snippet) as the numbered
-    text format tech_research / expansive_research expect. Returns
+    text format an LLM consumer expects. Returns
     a friendly 'no results' line when empty."""
     if not results:
         return f"No web results for '{query}' on {engine}."

@@ -22,39 +22,6 @@ from openbro.utils.language import detect_language, language_instruction
 console = Console()
 
 
-def _detect_lazy_response_safe(text: str) -> list[str]:
-    """Wrap the tech_research playbook's detector so a refactor of that
-    module can't crash the agent loop. Returns [] on any import error."""
-    try:
-        from openbro.playbooks.builtin.tech_research import detect_lazy_response
-
-        return detect_lazy_response(text)
-    except Exception:
-        return []
-
-
-def _detect_fabricated_tool_call_safe(
-    text: str,
-    tool_calls_made: int,
-    user_prompt: str | None = None,
-) -> str | None:
-    """Wrap the fabrication detector — never crash the agent loop.
-
-    `user_prompt` is the latest user message — when present, the
-    detector skips the multiple-code-blocks rule if the user
-    explicitly asked for code/implementation/example. This avoids
-    the false positive captured 2026-05-30 where 'bro full
-    implementation chahiye' triggered an unnecessary escalation
-    cascade ending in a context overflow on local.
-    """
-    try:
-        from openbro.playbooks.builtin.tech_research import detect_fabricated_tool_call
-
-        return detect_fabricated_tool_call(text, tool_calls_made, user_prompt=user_prompt)
-    except Exception:
-        return None
-
-
 def _friendly_error(e: Exception) -> str:
     """User-facing error message with category + fix hint.
 
@@ -565,8 +532,6 @@ class Agent:
     def _chat_impl_inner(self, user_input: str) -> str:
         import time as _time
 
-        from openbro.core.reflection_escalator import ReflectionEscalator
-
         self.last_language = detect_language(user_input)
         self._refresh_system_prompt(self.last_language)
 
@@ -586,14 +551,6 @@ class Agent:
         # without the agent having to thread them through every emit.
         self._turn_tokens_in = 0
         self._turn_tokens_out = 0
-
-        # Per-turn escalator: when the LLM produces a fabricated /
-        # lazy response, advance to the next strategy (harder prompt,
-        # model swap, local fallback, simplify, honest stop). Replaces
-        # the old 1-retry cap. See reflection_escalator.py for the
-        # default chain of 6 rounds. Fresh instance per turn so the
-        # next turn starts clean.
-        escalator = ReflectionEscalator()
 
         # ─── Playbook fast path ──────────────────────────────────────
         # Try matching the query to a pre-built playbook. If we get a
@@ -653,118 +610,16 @@ class Agent:
             )
 
             if not response.tool_calls:
-                # ─── Reflection: escalating strategy chain ────────────
-                # When the LLM produces a fabricated/lazy response, the
-                # ReflectionEscalator advances to the next strategy:
-                # harder prompt → model swap → local fallback →
-                # simplify context → honest stop. Each retry tries
-                # something DIFFERENT — unbounded same-retry is
-                # useless on a weak model (always same fabrication).
-                # See reflection_escalator.py for the chain.
-                lazy_markers = _detect_lazy_response_safe(response.content)
-                fabricated_reason = _detect_fabricated_tool_call_safe(
-                    response.content,
-                    turn_tool_calls_made,
-                    user_prompt=user_input,
-                )
-                needs_retry = bool(fabricated_reason or lazy_markers)
-                if needs_retry:
-                    trigger = fabricated_reason or (f"lazy markers: {', '.join(lazy_markers[:3])}")
-                    strategy = escalator.next_strategy(trigger=trigger)
-                    # Either chain exhausted OR landed on honest_stop —
-                    # surface the failure transparently instead of
-                    # showing the user another fabricated answer.
-                    if strategy is None or strategy.is_honest_stop:
-                        self.bus.emit(
-                            "fabrication_persisted",
-                            f"escalator exhausted after {escalator.rounds_used()} rounds",
-                            tried=escalator.history,
-                            last_trigger=trigger,
-                        )
-                        honest = escalator.build_honest_stop_message(last_trigger=trigger)
-                        self.history.append(Message(role="assistant", content=honest))
-                        self.memory.add("assistant", honest)
-                        self.history = [
-                            m
-                            for m in self.history
-                            if not (
-                                m.role == "system"
-                                and (
-                                    "[TRANSIENT_RESEARCH]" in (m.content or "")
-                                    or "[TRANSIENT_PLAN]" in (m.content or "")
-                                )
-                            )
-                        ]
-                        self.bus.emit(
-                            "assistant",
-                            honest,
-                            turn_elapsed=_time.monotonic() - turn_started,
-                            turn_tokens_in=self._turn_tokens_in,
-                            turn_tokens_out=self._turn_tokens_out,
-                            steps=iteration + 1,
-                        )
-                        return honest
-                    # Apply the strategy: emit event, optionally swap
-                    # model, optionally simplify, then inject prompt
-                    # and loop.
-                    self.bus.emit(
-                        "escalation_round",
-                        f"Round {escalator.rounds_used() + 1}/6 — {strategy.description}",
-                        round=escalator.rounds_used(),
-                        strategy=strategy.name,
-                        description=strategy.description,
-                        trigger=trigger,
-                    )
-                    if strategy.model_swap:
-                        try:
-                            self._swap_model_for_retry(strategy.model_swap)
-                        except Exception as e:  # pragma: no cover — defensive
-                            self.bus.emit(
-                                "system",
-                                f"model swap failed ({strategy.model_swap}): {e}",
-                            )
-                    if strategy.simplify:
-                        # Drop transient context blocks so the retry
-                        # sees only the original user question + any
-                        # real tool results.
-                        self.history = [
-                            m
-                            for m in self.history
-                            if not (
-                                m.role == "system"
-                                and (
-                                    "[TRANSIENT_RESEARCH]" in (m.content or "")
-                                    or "[TRANSIENT_PLAN]" in (m.content or "")
-                                )
-                            )
-                        ]
-                    if strategy.prompt_injection:
-                        self.history.append(
-                            Message(role="system", content=strategy.prompt_injection)
-                        )
-                    continue  # re-run the LLM with the new strategy
-
-                # Final answer — model decided no more tools needed.
+                # Trust the model: no more tool calls = it's done. The
+                # Thinking Principles in the system prompt cover
+                # 'verify before claiming', 'retry on tool errors',
+                # 'use python for tabular data' etc. — the model is
+                # responsible for its own quality. No fabrication
+                # detection regex, no escalation strategies; the user
+                # explicitly asked to drop the patch layer
+                # (2026-05-31).
                 self.history.append(Message(role="assistant", content=response.content))
                 self.memory.add("assistant", response.content)
-                # Prune any [TRANSIENT_RESEARCH] / [TRANSIENT_PLAN]
-                # system messages now that the synthesis is done. They were one-turn context for
-                # the LLM; keeping them across turns bloats every future
-                # request (captured: 12K-token retries / 413 cascades /
-                # local context overflow). The assistant's final answer
-                # IS persisted as a normal turn so the conversation flow
-                # is unaffected.
-                self.history = [
-                    m
-                    for m in self.history
-                    if not (
-                        m.role == "system"
-                        and (
-                            "[TRANSIENT_RESEARCH]" in (m.content or "")
-                            or "[TRANSIENT_PLAN]" in (m.content or "")
-                        )
-                    )
-                ]
                 self.bus.emit(
                     "assistant",
                     response.content,
@@ -822,116 +677,6 @@ class Agent:
         self.history.append(Message(role="assistant", content=full_response))
         self.memory.add("assistant", full_response)
         self.bus.emit("assistant", full_response)
-
-    def _trim_history_for_local_swap(self, target_token_budget: int) -> None:
-        """Aggressively trim history when escalating to a local model.
-
-        Local llama.cpp models default to 8K context vs Groq's 32K.
-        Captured failure 2026-05-30: cloud-only history of 13K tokens
-        was sent unchanged to local llama3.2:3b → ValueError
-        'requested (13658) exceed context window (8192)'. The user
-        saw an error instead of an answer.
-
-        Strategy:
-          1. Drop every [TRANSIENT_RESEARCH] / [TRANSIENT_PLAN]
-             system message (research bloats history with 15K+ char
-             source dumps).
-          2. Keep the original system prompt (index 0).
-          3. Walk the rest tail-first, keeping messages until the
-             estimated token count exceeds the budget.
-          4. Token estimate: 4 chars ≈ 1 token (good enough — better
-             to under-trim than blow the context).
-
-        Best-effort: if estimation fails for any reason, fall back to
-        keeping the system prompt + last 6 turns.
-        """
-        budget = max(1024, int(target_token_budget))
-        # Step 1: prune transient context blocks.
-        history = [
-            m
-            for m in self.history
-            if not (
-                m.role == "system"
-                and (
-                    "[TRANSIENT_RESEARCH]" in (m.content or "")
-                    or "[TRANSIENT_PLAN]" in (m.content or "")
-                )
-            )
-        ]
-        if not history:
-            return
-
-        def _approx_tokens(msg) -> int:
-            return max(1, len(msg.content or "") // 4)
-
-        # Step 2: keep the system prompt (index 0) — it carries
-        # identity + tools schema; trimming this confuses the model.
-        kept = [history[0]] if history[0].role == "system" else []
-        used = _approx_tokens(history[0]) if kept else 0
-        # Step 3: walk tail-first, keeping recent turns until budget.
-        tail: list = []
-        for msg in reversed(history[1:] if kept else history):
-            cost = _approx_tokens(msg)
-            if used + cost > budget:
-                break
-            tail.append(msg)
-            used += cost
-        tail.reverse()
-        self.history = kept + tail
-        self.bus.emit(
-            "system",
-            f"trimmed history for local swap: {len(self.history)} "
-            f"msgs, ~{used} tokens (budget {budget})",
-        )
-
-    def _swap_model_for_retry(self, model_id: str) -> None:
-        """Hot-swap the provider's model mid-turn for an escalation retry.
-
-        `model_id` is either a concrete Groq model id (e.g.
-        `meta-llama/llama-4-maverick-17b-128e-instruct`) or the
-        sentinel `"LOCAL"` which means switch to the configured local
-        fallback provider.
-
-        Best-effort: if the swap fails (provider doesn't support live
-        model change, local model not installed, etc.) the caller
-        logs and continues with the current provider. No raise.
-        """
-        from openbro.llm.fallback_provider import FallbackProvider
-
-        if model_id == "LOCAL":
-            # Switch to the local provider. Local llama.cpp models
-            # default to 8K context vs Groq's 32K — after a few
-            # escalation rounds the cloud history can be 12K+ tokens
-            # which raises ValueError 'requested > context window'
-            # the moment we send it. Trim aggressively first.
-            try:
-                from openbro.llm.router import create_provider
-
-                cfg = load_config()
-                local_cfg = cfg.get("providers", {}).get("local", {})
-                local_ctx = int(local_cfg.get("n_ctx", 8192) or 8192)
-                # Reserve ~1.5K for the response.
-                self._trim_history_for_local_swap(local_ctx - 1500)
-                self.provider = create_provider(provider_name="local")
-                self.bus.emit(
-                    "system",
-                    f"escalator: swapped to local model "
-                    f"({local_cfg.get('model', '?')}, ctx={local_ctx})",
-                )
-            except Exception as e:
-                self.bus.emit("system", f"escalator: local swap failed — {e}")
-            return
-
-        # Concrete model id — update the underlying provider's model.
-        # The FallbackProvider doesn't have a `.model` attr; it
-        # delegates to its primary. Most providers store the model
-        # as `self.model`; if not, the swap is silently skipped.
-        target = self.provider
-        if isinstance(target, FallbackProvider):
-            target = getattr(target, "primary", target)
-        if hasattr(target, "model"):
-            target.model = model_id
-            self.bus.emit("system", f"escalator: swapped model to {model_id}")
 
     def _try_playbook(self, user_input: str, turn_started: float) -> str | None:
         """Run a matching playbook if confidence is high enough.
@@ -1009,48 +754,13 @@ class Agent:
             playbook=playbook.name,
         )
 
-        # `pass_through_to_llm=True` playbooks (e.g. tech_research) inject
-        # their output as a TOOL-LIKE context turn and let the LLM run
-        # one more synthesis pass with the real source content. This
-        # avoids returning a raw 'here are 3 web pages' dump to the
-        # user — the model sees the sources, then writes a concrete
-        # answer grounded in them with citations.
+        # pass_through_to_llm playbooks were deleted in the 2026-05-31
+        # LLM-first refactor — the LLM uses the underlying tools
+        # directly instead of going through a regex-orchestrated
+        # injection layer. Kept the support attribute for any future
+        # deterministic playbook that wants pass-through behaviour.
         if getattr(playbook, "pass_through_to_llm", False):
-            # Append the playbook output as a 'system' note in history
-            # so the LLM sees it for the NEXT chat() call but doesn't
-            # echo it back. Then fall through (return None) so the
-            # normal LLM loop runs.
-            #
-            # Two marker shapes are supported:
-            #   [TRANSIENT_RESEARCH]  — tech_research (web sources)
-            #   [TRANSIENT_PLAN]      — planner (planning instruction)
-            # Both are pruned after the final answer via the same
-            # post-synthesis prune logic in _chat_impl. Without
-            # pruning, 15K-char research blocks accumulate in history
-            # and every subsequent turn drags the same bloat → context
-            # overflow, rate-limit cascade, fallback failure.
-            #
-            # If the playbook's response already starts with a
-            # TRANSIENT marker, append as-is (the playbook controls
-            # its own preamble). Otherwise wrap with the default
-            # research preamble so older playbooks keep working.
-            if response.lstrip().startswith("[TRANSIENT_"):
-                content = response
-            else:
-                preamble = (
-                    "[TRANSIENT_RESEARCH] "
-                    f"Playbook `{playbook.name}` ran web research for "
-                    "the user's question. Use the sources below to "
-                    "write a concrete, specific answer. Cite source "
-                    "URLs inline. Do NOT add 'I can't verify' or "
-                    "'test on different devices' filler — the sources "
-                    "are real, current docs."
-                )
-                content = preamble + "\n\n" + response
-            self.history.append(Message(role="system", content=content))
-            # Note: don't persist this to long-term memory — it's
-            # one-turn context. The LLM's final answer will be the
-            # persisted assistant message via the normal loop.
+            self.history.append(Message(role="system", content=response))
             return None
 
         # Persist as a normal assistant turn so chat history stays consistent

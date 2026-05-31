@@ -280,52 +280,6 @@ class _ToolCallRenderer:
                         padding=(0, 1),
                     )
                 )
-            elif ev.kind == "research_step":
-                # tech_research playbook is doing real work (search,
-                # fetch, synthesize). Render each step as a quiet bullet
-                # line so the user SEES progress instead of staring at a
-                # frozen spinner for 20 seconds.
-                self.con.print(
-                    f"[dim]  ↳ [cyan]research[/cyan] · {ev.text}[/dim]",
-                    highlight=False,
-                )
-            elif ev.kind == "reflection_retry":
-                # The agent's reflection layer caught a lazy response
-                # ('I cannot directly test', etc.) and is retrying with
-                # a stronger instruction. Surface it so the user knows
-                # WHY the turn is slower this time.
-                markers = ev.meta.get("markers") or []
-                first = markers[0] if markers else "lazy pattern"
-                self.con.print(
-                    f"\n[yellow]🔄 Retrying — caught lazy phrase "
-                    f'"{first}". Forcing source-grounded answer.[/yellow]',
-                    highlight=False,
-                )
-            elif ev.kind == "escalation_round":
-                # ReflectionEscalator advanced to the next strategy
-                # (harder prompt → model swap → local fallback →
-                # simplify → honest stop). Render each round as a
-                # short labelled line so the user sees WHAT is being
-                # tried, not just a spinner.
-                round_num = ev.meta.get("round", 0) + 1
-                strategy = ev.meta.get("strategy", "?")
-                desc = ev.meta.get("description", "")
-                self.con.print(
-                    f"\n[yellow]🔄 Round {round_num}/6 — "
-                    f"[bold]{strategy}[/bold] · [dim]{desc}[/dim][/yellow]",
-                    highlight=False,
-                )
-            elif ev.kind == "fabrication_persisted":
-                # Escalator chain exhausted — model couldn't produce a
-                # real answer despite 6 rounds. Surface what was tried
-                # so the user knows we didn't just stop quietly.
-                tried = ev.meta.get("tried") or []
-                if tried:
-                    self.con.print(
-                        f"\n[red]✗ Escalator exhausted after "
-                        f"{len(tried)} rounds: {', '.join(tried)}[/red]",
-                        highlight=False,
-                    )
             elif ev.kind == "provider_fallback":
                 # Primary LLM hit an error, falling back to local.
                 # Surface it loud enough that the user knows why the
@@ -338,56 +292,6 @@ class _ToolCallRenderer:
                     f"{fallback} for this turn.[/yellow]",
                     highlight=False,
                 )
-            elif ev.kind == "plan_started":
-                tl = ev.meta.get("tasklist")
-                if tl is not None:
-                    step_count = len(tl.all())
-                    # 'Compound request' is the honest label — these
-                    # are sub-parts of a single user query split by
-                    # decompose (X aur Y), NOT a solution plan. Real
-                    # solution plans are emitted by the LLM as part
-                    # of its response when PlannerPlaybook fires.
-                    title = (
-                        f"[bold green]◆ Compound request[/bold green] "
-                        f"[dim]· {step_count} parts[/dim]"
-                    )
-                    self.con.print(
-                        Panel(
-                            tl.render_markdown(),
-                            title=title,
-                            title_align="left",
-                            border_style="green",
-                            padding=(0, 1),
-                        )
-                    )
-            elif ev.kind == "plan_step_start":
-                desc = ev.meta.get("task_id", "")  # not used in label
-                step_desc = ev.text
-                self.con.print(
-                    f"\n[bold cyan]⏵ Step:[/bold cyan] {step_desc}",
-                    highlight=False,
-                )
-                # silence unused-var warning
-                _ = desc
-            elif ev.kind == "plan_step_end":
-                ok = ev.meta.get("ok", True)
-                marker = "[green]✓[/green]" if ok else "[red]✗[/red]"
-                self.con.print(
-                    f"[dim]  {marker} step done · {ev.text}[/dim]",
-                    highlight=False,
-                )
-            elif ev.kind == "plan_finished":
-                tl = ev.meta.get("tasklist")
-                if tl is not None:
-                    done, total = tl.progress()
-                    ok = tl.succeeded()
-                    color = "green" if ok else "yellow"
-                    glyph = "✓" if ok else "⚠"
-                    self.con.print(
-                        f"\n[bold {color}]{glyph} Compound request finished[/bold {color}] "
-                        f"[dim]· {done}/{total} steps[/dim]\n",
-                        highlight=False,
-                    )
             elif ev.kind == "tool_end":
                 name = ev.meta.get("tool", "?")
                 ok = ev.meta.get("ok", True)
