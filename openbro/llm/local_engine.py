@@ -32,7 +32,13 @@ DEPS_HINT = (
 
 class LocalEngine:
     """Lazy-loaded llama.cpp engine. Model isn't actually loaded into RAM
-    until the first chat() / stream() call — keeps imports cheap."""
+    until the first chat() / stream() call — keeps imports cheap.
+
+    Call `prewarm()` to start loading in a background thread (e.g. from
+    Agent.__init__) so the model is ready BEFORE the first fallback
+    triggers. Captured 2026-05-31 user ask: 'jab openbro initialize ho
+    tabhi model bhi initialize ho jaye...switching me delay na ho'.
+    """
 
     def __init__(
         self,
@@ -46,8 +52,52 @@ class LocalEngine:
         self.n_gpu_layers = n_gpu_layers
         self.chat_format = chat_format
         self._llm = None
+        # Thread + lock for background prewarm so a concurrent
+        # chat() call doesn't trigger a second load.
+        import threading as _threading
+
+        self._load_lock = _threading.Lock()
+        self._prewarm_thread: _threading.Thread | None = None
+
+    def prewarm(self) -> None:
+        """Start loading the model in a background thread.
+
+        Safe to call multiple times — only one load runs at a time.
+        Failures are swallowed (the engine will retry on the first
+        real chat() call and surface the error then). Idempotent.
+        """
+        import threading as _threading
+
+        if self._llm is not None:
+            return  # already loaded
+        if self._prewarm_thread is not None and self._prewarm_thread.is_alive():
+            return  # already loading
+
+        def _bg_load() -> None:
+            try:
+                self._load()
+            except Exception as e:  # noqa: BLE001 — best-effort
+                try:
+                    from openbro.core.activity import get_bus
+
+                    get_bus().emit(
+                        "system",
+                        f"local prewarm failed (will retry on first call): {e}",
+                    )
+                except Exception:
+                    pass
+
+        self._prewarm_thread = _threading.Thread(target=_bg_load, daemon=True, name="local-prewarm")
+        self._prewarm_thread.start()
 
     def _load(self) -> None:
+        # Hold the lock so a concurrent chat() and prewarm() don't
+        # both start a load simultaneously. Re-check inside the lock
+        # in case the other path already finished.
+        with self._load_lock:
+            self._load_locked()
+
+    def _load_locked(self) -> None:
         if self._llm is not None:
             return
         if not self.model_path.exists():

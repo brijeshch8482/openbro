@@ -8,9 +8,7 @@ from rich.console import Console
 
 from openbro.core import session_memory
 from openbro.core.activity import get_bus
-from openbro.core.decompose import decompose
 from openbro.core.permissions import PermissionGate, PermissionRequest
-from openbro.core.tasklist import TaskList
 from openbro.core.workspace import detect_cached as detect_workspace
 from openbro.llm.base import LLMResponse, Message
 from openbro.llm.router import create_provider
@@ -169,6 +167,18 @@ class Agent:
 
             self.provider.on_fallback = _on_fallback
 
+            # Eager-warm the local fallback so the first cascade isn't
+            # blocked by a 30-90s GGUF load. Background thread —
+            # REPL stays responsive while load happens. Captured
+            # 2026-05-31 user ask: 'jab openbro initialize ho tabhi
+            # model bhi initialize ho jaye...switching me delay na ho'.
+            try:
+                fb_engine = getattr(self.provider.fallback, "engine", None)
+                if fb_engine is not None and hasattr(fb_engine, "prewarm"):
+                    fb_engine.prewarm()
+            except Exception:
+                pass  # best-effort — chat() will load on demand if this fails
+
         self.memory = memory or MemoryManager()
         self.interactive = interactive
         self.bus = get_bus()
@@ -285,43 +295,96 @@ class Agent:
         return ws.render_prompt_block()
 
     def _intent_check_block(self) -> str:
-        """Per-turn reminder: classify the user's intent BEFORE answering
-        and verify the response matches that intent type.
+        """Per-turn THINKING PRINCIPLES injected into the system prompt.
 
-        Captured 2026-05-31: user asked 'battery backup kitne ghante'
-        (DURATION question). Agent ran WMIC battery → got 100% (current
-        STATE). Final answer was '97%' — wrong intent type. User said
-        'mai isse battery backup pooch rha hu...to ye kya bta rha???'.
+        Reframed 2026-05-31 from a narrow 'intent type check' to a
+        comprehensive set of reasoning principles. Captured user
+        vision: 'no hardcode...sab thinking hoga llm se...jab tak
+        solve nhi hota..agent baat krega..llm se kaise solve krna
+        plan bnega..everthing..plan usi time hoga'.
 
-        The model has the data — it just didn't realise its answer
-        type didn't match the question type. Adding an explicit
-        intent → answer-shape mapping here makes the model self-check
-        before finalising.
+        The agent layer stays minimal; intelligence is the LLM's job
+        guided by these principles. No regex orchestration, no
+        hardcoded decompose, no fixed planner instruction. Just
+        clear rules the model applies to its own reasoning.
         """
         return (
-            "\n## INTENT CHECK BEFORE FINAL ANSWER\n"
-            "Before emitting a final text response (no more tool calls),"
-            " verify your answer matches the user's intent type:\n"
-            "  • QUANTITY (`kitna`/`how much`/`how many` of one thing)"
-            " → answer is a single number / amount.\n"
-            "  • DURATION (`kitne ghante`/`kitna time`/`how long`/"
-            "`backup time`/`for how long`) → answer is a TIME DELTA:"
-            " compute (end_timestamp - start_timestamp) from a time"
-            " series. NOT the current state.\n"
-            "  • TIME (`kab`/`when`/`at what time`) → answer is a"
-            " timestamp.\n"
-            "  • LIST (`kya kya`/`which`/`list`) → answer is items.\n"
-            "  • COMPARISON (`compare`/`difference`/`vs`) → answer"
-            " contrasts two things.\n"
-            "  • METHOD (`kaise`/`how do I`/`steps to`) → answer is"
-            " ordered steps.\n"
-            "  • REASON (`kyun`/`why`) → answer is an explanation.\n"
-            "If your answer type DOESN'T match the question type, KEEP"
-            " CALLING TOOLS — do the missing computation. For example,"
-            " if user asked DURATION but you have a current-state"
-            " number, read the time-series data and compute the delta."
-            " Never report a current value as the answer to a duration"
-            " question."
+            "\n## THINKING PRINCIPLES (apply these on every turn)\n"
+            "\n"
+            "### 1. Plan emerges at runtime — don't follow a fixed script\n"
+            "When the user's request takes more than one step, first"
+            " state YOUR plan as a numbered list (1-5 concrete steps,"
+            " each = one tool call or specific reasoning). Then"
+            " execute step 1. After each tool result, restate what"
+            " you just did and what's next. Don't pad with steps you"
+            " won't actually do.\n"
+            "\n"
+            "### 2. Tool error → analyse + retry with a fix, never random switch\n"
+            "When ANY tool returns an error / permission denied /"
+            " not found / module-not-found / wrong path:\n"
+            "  a. READ the error message carefully.\n"
+            "  b. Diagnose: was the arg wrong? path syntax? missing"
+            " dep? typo?\n"
+            "  c. RETRY the SAME tool with corrected args (path"
+            " variants, different action, escaped quotes, etc.).\n"
+            "  d. Only after 3 failed retries with different fixes,"
+            " try a different tool / approach.\n"
+            "Never give up after one error. Never switch tools"
+            " randomly just because the first failed.\n"
+            "\n"
+            "### 3. Verify before claiming success — never lie\n"
+            "After any action that CLAIMS state change ('opened',"
+            " 'created', 'installed', 'wrote', 'launched', 'kar"
+            " diya', 'khol diya'), the NEXT step MUST be a"
+            " verification:\n"
+            "  • After `app open X` → call `process` to confirm X is"
+            " running, OR `file_ops list` to check the .lnk/.exe"
+            " was found.\n"
+            "  • After `file_ops write` → call `file_ops read` to"
+            " confirm contents.\n"
+            "  • After `shell <install>` → call a check command"
+            " (e.g. `pip show pkg`).\n"
+            "Only after verification succeeds, report success to"
+            " the user. Tool result said 'Opened X' is NOT proof X"
+            " actually opened — Windows can return success for a"
+            " non-existent app.\n"
+            "\n"
+            "### 4. Numeric / tabular questions → python + pandas, never reason over snippet\n"
+            "When the user asks a quantitative question over a"
+            " file (CSV, Excel, JSON, log):\n"
+            "  • DON'T eyeball a truncated snippet and guess.\n"
+            "  • DO call the `python` tool with pandas to load the"
+            " full data and compute:\n"
+            "        import pandas as pd\n"
+            "        df = pd.read_excel(PATH)  # or read_csv / read_json\n"
+            "        # Then min/max/first/last/delta/sum/mean as"
+            " needed\n"
+            "  • For DURATION questions: compute"
+            " (last_timestamp - first_timestamp) from the time"
+            " column.\n"
+            "  • For RANGE: min, max, delta.\n"
+            "  • For RATE: delta_value / delta_time.\n"
+            "Report the actual computed number, not a guess from"
+            " the head of the file.\n"
+            "\n"
+            "### 5. Match answer type to question type\n"
+            "  • `kitna`/`how much` of ONE thing → number\n"
+            "  • `kitne ghante`/`kitna time`/`how long`/`backup time`"
+            " → TIME DELTA (not current state)\n"
+            "  • `kab`/`when` → timestamp\n"
+            "  • `kya kya`/`which`/`list` → items\n"
+            "  • `kaise`/`how do I`/`steps` → ordered steps\n"
+            "  • `kyun`/`why` → reasoned explanation\n"
+            "If your answer's TYPE doesn't match the question's"
+            " TYPE, keep calling tools until it does. Don't report"
+            " a current % when asked for backup duration.\n"
+            "\n"
+            "### 6. Loop until solved (within the iteration cap)\n"
+            "Keep calling tools until the user's task is COMPLETE,"
+            " not just until the first plausible answer arrives. On"
+            " local model (offline) the iteration cap is large — use"
+            " it. The user explicitly asked for unbounded effort on"
+            " local: 'jab tak cheeje solve na ho jaise claude'."
         )
 
     def _world_facts_block(self) -> str:
@@ -383,20 +446,22 @@ class Agent:
         self.history[0] = Message(role="system", content=self._build_system_prompt(lang))
 
     def chat(self, user_input: str) -> str:
-        """Single user turn. Decomposes compound queries into ordered
-        sub-queries, runs each via _chat_impl, and merges the responses
-        through a TaskList for live progress tracking.
+        """Single user turn — one LLM-driven loop.
 
-        Single-intent input (the common case) takes the fast path —
-        decompose returns one item, we run _chat_impl once, no overhead.
-        Compound input ('X kar aur Y kar') runs each part sequentially
-        with a visible TaskList the REPL can render.
+        Captured 2026-05-31 user vision: 'sab thinking hoga llm se...
+        plan usi time hoga'. The old code force-split compound
+        queries via hardcoded regex (decompose module) and rendered
+        them as a 'Compound request' TaskList. That treated the
+        user's words as the plan instead of asking the LLM to
+        synthesise one.
+
+        New behaviour: ONE turn = ONE _chat_impl call. The LLM reads
+        the full user message, emits its own plan (Principle #1 in
+        the system prompt), and executes it via tool calls in the
+        same loop. No hardcoded decomposition; the LLM decides.
         """
         with self._lock:
-            sub_queries = decompose(user_input)
-            if len(sub_queries) <= 1:
-                return self._chat_impl(user_input)
-            return self._chat_multi(user_input, sub_queries)
+            return self._chat_impl(user_input)
 
     # Max LLM round-trips per user message. Cap protects against
     # runaway loops but is loose enough that legit multi-step work
@@ -447,82 +512,6 @@ class Agent:
         if name.startswith("local") or "llama_cpp" in name or "llamacpp" in name:
             return self.MAX_TOOL_ITERATIONS_LOCAL
         return self.MAX_TOOL_ITERATIONS_CLOUD
-
-    def _chat_multi(self, original_input: str, sub_queries: list[str]) -> str:
-        """Run a TaskList of sub-queries in order, return combined response.
-
-        Each sub-query becomes one Task. The agent calls _chat_impl for
-        each in sequence, marking the task in_progress before and
-        completed/failed after. The TaskList is published on the bus so
-        the REPL can render a live checklist alongside per-turn output.
-
-        Captured 2026-05-31 user feedback: 'ye question ko hi plan me
-        daalta hai...maine jo poocha hai usko solve kaise krna hai wo
-        plan hota hai?'. Right — the previous title was 'Plan: ...'
-        which was misleading: this isn't a solution plan, it's the
-        compound request split into its parts. The TITLE now reflects
-        that. The actual solution planning (LLM-emitted numbered
-        steps + reasoning) happens inside each sub-turn via
-        PlannerPlaybook, not here.
-
-        Combined response shape:
-          ### Compound request (2 parts): <original input>
-          1. [✓] sub-query A — <answer A>
-          2. [✓] sub-query B — <answer B>
-
-        If any sub-query fails (raises or returns a friendly error
-        prefix), subsequent tasks are still attempted — we don't bail
-        on the whole list just because one part had trouble. The
-        TaskList carries per-task status so the UI shows what worked.
-        """
-        n = len(sub_queries)
-        tasklist = TaskList(title=f"Compound request ({n} parts): {original_input[:70]}")
-        for sq in sub_queries:
-            tasklist.add(description=sq, payload=sq)
-        # Surface the plan so the REPL renderer can draw it up-front.
-        self.bus.emit("plan_started", original_input, tasklist=tasklist)
-
-        results: list[str] = []
-        for task in tasklist.all():
-            tasklist.mark_in_progress(task.id)
-            self.bus.emit(
-                "plan_step_start",
-                task.description,
-                task_id=task.id,
-                tasklist=tasklist,
-            )
-            try:
-                answer = self._chat_impl(task.payload)
-            except Exception as e:  # pragma: no cover — defensive
-                tasklist.mark_failed(task.id, str(e))
-                results.append(f"**{task.description}** — error: {e}")
-                self.bus.emit(
-                    "plan_step_end",
-                    f"{task.description}: failed",
-                    task_id=task.id,
-                    ok=False,
-                    tasklist=tasklist,
-                )
-                continue
-            # Recognise the agent's friendly-error prefixes as failures
-            # so the task list shows ✗ instead of ✓ on rate-limit / auth
-            # / network issues.
-            failed = answer.startswith(("⏱️", "❌", "🌐", "🔧"))
-            if failed:
-                tasklist.mark_failed(task.id, answer[:120])
-            else:
-                tasklist.mark_completed(task.id, result=answer[:120])
-            results.append(f"**{task.description}**\n\n{answer}")
-            self.bus.emit(
-                "plan_step_end",
-                f"{task.description}: {'failed' if failed else 'done'}",
-                task_id=task.id,
-                ok=not failed,
-                tasklist=tasklist,
-            )
-
-        self.bus.emit("plan_finished", original_input, tasklist=tasklist)
-        return tasklist.render_markdown() + "\n\n" + "\n\n---\n\n".join(results)
 
     def _chat_impl(self, user_input: str) -> str:
         # Snapshot the model + provider type so we can restore at the

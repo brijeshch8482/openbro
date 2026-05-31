@@ -668,32 +668,14 @@ def test_groq_extracts_paren_form_function_tag():
     assert calls[0]["function"]["arguments"]["app_name"] == "Adobe Photoshop"
 
 
-def test_decompose_does_not_split_short_emotional_fragments():
-    """Captured 2026-05-31: 'kholo na?? yrr to kaam krke chek kiya
-    kro hua ki nhi?' got split into 2 'steps' each running a tool.
-    'kholo na??' (10 chars) is emotional emphasis, not a task.
-    The second fragment is feedback ('why didn't you check?'),
-    not an action. Decompose must NOT split this."""
-    from openbro.core.decompose import decompose
-
-    q = "kholo na?? yrr to kaam krke chek kiya kro hua ki nhi?"
-    parts = decompose(q)
-    assert len(parts) == 1, f"should NOT split, got {parts}"
-
-
-def test_decompose_does_not_split_conjunction_with_question_fragment():
-    """Captured 2026-05-31: 'D:\\softwares\\Adobe Audition  to phir
-    ye kya hai?' was split on `phir` into a path-fragment and a
-    follow-up question. The question fragment got run as its own
-    sub-task and produced 'Adobe Audition is a digital audio
-    workstation' boilerplate — totally not what the user wanted.
-    Conjunction splits now apply the same conversational/content
-    guards as sentence splits."""
-    from openbro.core.decompose import decompose
-
-    q = "D:\\softwares\\Adobe Audition  to phir ye kya hai?"
-    parts = decompose(q)
-    assert len(parts) == 1, f"should not split, got {parts}"
+# NOTE: decompose-based tests were removed when the decompose module
+# was deleted in Phase B1 of the LLM-first refactor (captured
+# 2026-05-31). The agent now hands the full user message to the LLM
+# in one turn; the LLM decides whether to emit a plan or answer in
+# one shot. The captured edge cases (conversational fragments,
+# emotional emphasis, question fragments) are handled by the
+# Thinking Principles in the system prompt instead of regex
+# heuristics in code.
 
 
 def test_open_app_playbook_rejects_conversational_target():
@@ -849,15 +831,11 @@ def test_file_ops_open_directory_deprioritizes_installer_exe(tmp_path):
     assert "Audition.exe" in called_with
 
 
-def test_decompose_still_splits_real_compound_queries():
-    """Regression: real compound queries still decompose. This is
-    the test that protected the original behavior — must keep
-    passing after the conversational filter tightens the bar."""
-    from openbro.core.decompose import decompose
-
-    q = "open chrome aur browser me youtube.com search kar"
-    parts = decompose(q)
-    assert len(parts) >= 2
+# test_decompose_still_splits_real_compound_queries was removed when
+# decompose was deleted in Phase B1. Real compound queries are now
+# handled by the LLM emitting a numbered plan in its response and
+# executing steps via the tool loop, instead of being pre-split by
+# regex into separate sub-turns.
 
 
 def test_agent_restores_model_at_turn_end():
