@@ -292,6 +292,21 @@ class _ToolCallRenderer:
                     f"{fallback} for this turn.[/yellow]",
                     highlight=False,
                 )
+            elif ev.kind == "system":
+                # System notices — model loading progress, escalator
+                # state changes, internal swaps. Captured 2026-05-31:
+                # local-engine emitted 'Loading mistral-nemo (7.5 GB)
+                # — 30-90s on first run...' but the REPL had no
+                # renderer so the user saw a frozen 'step 3/25
+                # thinking' for 60 seconds and assumed the agent was
+                # stuck. Now surfaced as a dim cyan note so the user
+                # sees what's happening.
+                msg = ev.text or ""
+                if msg:
+                    self.con.print(
+                        f"[dim cyan]  ◌ {msg}[/dim cyan]",
+                        highlight=False,
+                    )
             elif ev.kind == "tool_end":
                 name = ev.meta.get("tool", "?")
                 ok = ev.meta.get("ok", True)
