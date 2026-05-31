@@ -152,6 +152,16 @@ class FallbackProvider(LLMProvider):
             # answer instead of a ValueError.
             fb_tools = self._shrink_tools_for_fallback(tools)
             fb_messages = self._fit_to_fallback_context(messages, tools=fb_tools)
+            # Mistral and some other local chat templates require
+            # strict user/assistant alternation after the optional
+            # system prompt. OpenBro's history often has multiple
+            # system messages (reflection retries, transient blocks)
+            # and tool/tool_result turns that break alternation.
+            # Captured 2026-05-31: mistral-nemo raised 'After the
+            # optional system message, conversation roles must
+            # alternate user/assist'. Merge system blocks + collapse
+            # adjacent same-role turns.
+            fb_messages = self._normalize_for_strict_alternation(fb_messages)
             try:
                 response = self.fallback.chat(fb_messages, fb_tools)
                 self.last_used = "fallback"
@@ -247,6 +257,69 @@ class FallbackProvider(LLMProvider):
         if tools_tokens > ctx * 0.3:
             return None  # drop schema; degraded text-only mode
         return tools
+
+    def _normalize_for_strict_alternation(self, messages: list[Message]) -> list[Message]:
+        """Reshape history so it satisfies strict user/assistant
+        alternation after at most one system message at the start.
+
+        Required by Mistral-family chat templates (mistral-nemo,
+        mixtral) and some other local models. OpenBro's normal
+        history can contain:
+          • Multiple `system` messages (initial + reflection retries +
+            transient context blocks)
+          • `tool` role messages (results piped back to the model)
+          • Sequences of same-role messages
+
+        Normalisation:
+          1. Concatenate every `system` message into ONE at index 0.
+          2. Convert `tool` role into `user` (tool results read as
+             follow-up user input from the model's perspective).
+          3. Collapse adjacent same-role messages into one.
+          4. Ensure the first non-system message is `user` (drop a
+             leading orphan assistant).
+        """
+        if not messages:
+            return messages
+
+        sys_chunks: list[str] = []
+        rest: list[Message] = []
+        for m in messages:
+            if m.role == "system":
+                if m.content:
+                    sys_chunks.append(m.content)
+            else:
+                rest.append(m)
+
+        # tool → user
+        normalised: list[Message] = []
+        for m in rest:
+            role = "user" if m.role == "tool" else m.role
+            normalised.append(Message(role=role, content=m.content, tool_calls=m.tool_calls))
+
+        # Drop leading assistant (no user before it would violate
+        # alternation — Mistral expects user-first after system).
+        while normalised and normalised[0].role == "assistant":
+            normalised.pop(0)
+
+        # Collapse adjacent same-role messages.
+        collapsed: list[Message] = []
+        for m in normalised:
+            if collapsed and collapsed[-1].role == m.role:
+                prev = collapsed[-1]
+                merged_content = (prev.content or "") + "\n\n" + (m.content or "")
+                collapsed[-1] = Message(
+                    role=prev.role,
+                    content=merged_content,
+                    tool_calls=prev.tool_calls or m.tool_calls,
+                )
+            else:
+                collapsed.append(m)
+
+        out: list[Message] = []
+        if sys_chunks:
+            out.append(Message(role="system", content="\n\n".join(sys_chunks)))
+        out.extend(collapsed)
+        return out
 
     def _fallback_context_limit(self) -> int | None:
         """Return the fallback provider's max context in tokens, or

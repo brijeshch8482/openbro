@@ -72,17 +72,20 @@ def _friendly_error(e: Exception) -> str:
         from openbro.llm.fallback_provider import _FallbackChainExhausted
 
         if isinstance(e, _FallbackChainExhausted):
+            # Plain-text formatting (no backticks) — captured
+            # 2026-05-31: backticks caused the markdown renderer
+            # to collapse spaces around them, mangling the error
+            # text into 'instantin organizationordiya' etc.
             return (
-                "⏱️ Cloud aur local dono temporarily reach nahi ho "
-                f"paaye. Cloud: `{e.primary}` ne `{e.primary_error[:80]}`"
-                f" diya; local `{e.fallback}` ne "
-                f"`{e.fallback_error[:80]}`.\n"
+                "⏱️ Cloud aur local dono temporarily reach nahi ho paaye.\n"
+                f"  Cloud ({e.primary}): {e.primary_error[:120]}\n"
+                f"  Local ({e.fallback}): {e.fallback_error[:120]}\n"
+                "\n"
                 "Fix options:\n"
-                "  • 30-60 sec ruk ke phir try kar — cloud usually "
-                "recover ho jata\n"
-                "  • `/recap` se goal state dekh\n"
-                "  • Local model upgrade kar (`openbro model "
-                "download mistral-nemo`) — context bigger hai"
+                "  • 30-60 sec ruk ke phir try kar — cloud usually recovers\n"
+                "  • /recap se goal state dekh\n"
+                "  • Local model swap kar (openbro config set "
+                "providers.local.model <name>) — bigger context helps"
             )
     except ImportError:
         pass
