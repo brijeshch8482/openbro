@@ -254,31 +254,38 @@ class _ToolCallRenderer:
                         highlight=False,
                     )
             elif ev.kind == "tool_start":
+                # Claude Code style — no box, just a header line +
+                # dim indented args. Less visual noise, more
+                # professional.
                 name = ev.meta.get("tool", "?")
                 risk = ev.meta.get("risk", "safe")
                 args = ev.meta.get("args", {})
                 color = _RISK_COLORS.get(risk, "white")
                 lexer, body = _format_args(name, args)
-                if lexer == "json":
-                    rendered = Syntax(
-                        body, "json", theme="monokai", line_numbers=False, word_wrap=True
-                    )
-                elif lexer in ("python", "powershell"):
-                    rendered = Syntax(
-                        body, lexer, theme="monokai", line_numbers=False, word_wrap=True
+                self.con.print(
+                    f"  [bold {color}]⏵ {name}[/bold {color}] [dim]({risk})[/dim]",
+                    highlight=False,
+                )
+                # Args: dim, indented; syntax-highlight code, plain
+                # the rest. Long args get truncated for display only —
+                # the LLM still sent the full args.
+                body_show = body
+                if len(body_show) > 800:
+                    body_show = body_show[:800] + f"\n… (+{len(body) - 800} chars)"
+                if lexer in ("python", "powershell", "json"):
+                    self.con.print(
+                        Syntax(
+                            body_show,
+                            lexer,
+                            theme="monokai",
+                            line_numbers=False,
+                            word_wrap=True,
+                            background_color="default",
+                        )
                     )
                 else:
-                    rendered = body
-                title = f"[bold {color}]⏵ {name}[/bold {color}] [dim]· {risk}[/dim]"
-                self.con.print(
-                    Panel(
-                        rendered,
-                        title=title,
-                        title_align="left",
-                        border_style=color,
-                        padding=(0, 1),
-                    )
-                )
+                    for line in body_show.splitlines() or [""]:
+                        self.con.print(f"    [dim]{line}[/dim]", highlight=False)
             elif ev.kind == "provider_fallback":
                 # Primary LLM hit an error, falling back to local.
                 # Surface it loud enough that the user knows why the
@@ -307,31 +314,28 @@ class _ToolCallRenderer:
                         highlight=False,
                     )
             elif ev.kind == "tool_end":
+                # Claude Code style — no box for results. A marker
+                # line shows status + elapsed; the preview is dim
+                # indented text below.
                 name = ev.meta.get("tool", "?")
                 ok = ev.meta.get("ok", True)
                 preview = ev.meta.get("preview", "") or ""
                 full_length = ev.meta.get("full_length", len(preview))
                 elapsed = ev.meta.get("elapsed", 0)
-                # Trim very long results — the LLM gets the full thing,
-                # the user just needs a confirmation glance.
                 preview_short = preview
                 if len(preview_short) > 600:
                     preview_short = preview_short[:600] + f"\n… (+{full_length - 600} chars)"
                 marker = "[green]✓[/green]" if ok else "[red]✗[/red]"
                 if preview_short.strip():
                     self.con.print(
-                        Panel(
-                            preview_short,
-                            title=f"{marker} [dim]{name} result · {elapsed:.1f}s[/dim]",
-                            title_align="left",
-                            border_style="grey42",
-                            padding=(0, 1),
-                        ),
+                        f"    {marker} [dim]{name} · {elapsed:.1f}s[/dim]",
                         highlight=False,
                     )
+                    for line in preview_short.splitlines():
+                        self.con.print(f"    [dim]{line}[/dim]", highlight=False)
                 else:
                     self.con.print(
-                        f"  {marker} [dim]{name} done · {elapsed:.1f}s · (no output)[/dim]",
+                        f"    {marker} [dim]{name} · {elapsed:.1f}s · (no output)[/dim]",
                         highlight=False,
                     )
         except Exception:
