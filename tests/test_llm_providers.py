@@ -33,18 +33,24 @@ def test_google_to_gemini_messages_extracts_system():
     assert contents[1]["role"] == "model"
 
 
-def test_google_chat_handles_http_error():
+def test_google_chat_raises_on_http_error():
+    """HTTPStatusError must PROPAGATE so the FallbackProvider can
+    categorise it (recoverable → retry+cascade, non-recoverable →
+    surface to user via _friendly_error). Captured 2026-05-31: the
+    old code swallowed errors into a fake LLMResponse, breaking the
+    retry/cascade chain."""
+    import httpx
+    import pytest
+
     p = GoogleProvider(api_key="bad")
     with patch("openbro.llm.google_provider.httpx.post") as mock_post:
-        import httpx
-
         resp = MagicMock()
-        resp.status_code = 401
+        resp.status_code = 429
         mock_post.return_value.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "401", request=MagicMock(), response=resp
+            "429", request=MagicMock(), response=resp
         )
-        out = p.chat([Message(role="user", content="hi")])
-    assert "401" in out.content
+        with pytest.raises(httpx.HTTPStatusError):
+            p.chat([Message(role="user", content="hi")])
 
 
 def test_google_chat_parses_text_response():

@@ -92,7 +92,21 @@ class GoogleProvider(LLMProvider):
                             }
                         }
                     )
-        return LLMResponse(content="\n".join(text_parts).strip(), tool_calls=tool_calls)
+        # Gemini reports tokens via usageMetadata. Captured 2026-05-31:
+        # status bar showed '0↓ 0↑ tokens' for every Gemini turn
+        # because we weren't passing the usage dict into LLMResponse.
+        # Now mapped to the same {input, output} shape the rest of
+        # the agent (token counter, fallback context fit) expects.
+        usage_meta = data.get("usageMetadata", {}) or {}
+        usage = {
+            "input": int(usage_meta.get("promptTokenCount", 0) or 0),
+            "output": int(usage_meta.get("candidatesTokenCount", 0) or 0),
+        }
+        return LLMResponse(
+            content="\n".join(text_parts).strip(),
+            tool_calls=tool_calls,
+            usage=usage,
+        )
 
     def stream(self, messages: list[Message], tools: list[dict] | None = None) -> Iterator[str]:
         # Gemini supports streaming via :streamGenerateContent — use SSE
