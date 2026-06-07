@@ -151,52 +151,6 @@ def _fuzzy_find(path: Path, max_results: int = 25) -> list[Path]:
     return hits[:max_results]
 
 
-def _spreadsheet_preview(path: Path) -> str:
-    """Return a one-line column + row-count preview for a tabular file.
-
-    Used by `file_ops list` so the LLM sees the schema at list time
-    and writes correct queries on the first try instead of guessing
-    column names. Best-effort — returns empty string when the file
-    can't be inspected (locked, password-protected, malformed).
-
-    The preview format is:
-      '       columns: A, B, C (12 total) · rows: 480'
-    """
-    try:
-        suffix = path.suffix.lower()
-        if suffix == ".csv":
-            import csv
-
-            with path.open(encoding="utf-8", errors="replace", newline="") as f:
-                reader = csv.reader(f)
-                header = next(reader, [])
-                row_count = sum(1 for _ in reader)
-            cols = [c.strip() for c in header if c and c.strip()]
-        else:
-            import openpyxl
-
-            wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-            ws = wb.active
-            # Find the header row — first row with > 1 non-empty cell.
-            header_row = None
-            for row in ws.iter_rows(min_row=1, max_row=5, values_only=True):
-                non_empty = sum(1 for c in row if c not in (None, ""))
-                if non_empty >= 2:
-                    header_row = row
-                    break
-            cols = [str(c).strip() for c in (header_row or []) if c not in (None, "")]
-            # Cheap row count via max_row; subtract header rows.
-            row_count = max(0, (ws.max_row or 0) - 1)
-            wb.close()
-        if not cols:
-            return ""
-        col_preview = ", ".join(cols[:8])
-        suffix_note = f" (+{len(cols) - 8} more)" if len(cols) > 8 else ""
-        return f"        columns: {col_preview}{suffix_note} · rows: {row_count}"
-    except Exception:
-        return ""
-
-
 class FileTool(BaseTool):
     name = "file_ops"
     description = (
@@ -261,19 +215,7 @@ class FileTool(BaseTool):
             entries = []
             for item in sorted(path.iterdir()):
                 prefix = "DIR " if item.is_dir() else "FILE"
-                line = f"  {prefix}  {item.name}"
-                # Captured 2026-05-31: agent listed a folder of xlsx
-                # files, then guessed column names ('Battery backup')
-                # instead of inspecting the actual schema. To make
-                # the tool self-explaining, inline the columns + row
-                # count for tabular files at list time. The LLM sees
-                # the schema upfront and writes correct code on the
-                # first try.
-                if item.is_file() and item.suffix.lower() in (".xlsx", ".xls", ".csv"):
-                    preview = _spreadsheet_preview(item)
-                    if preview:
-                        line = line + "\n" + preview
-                entries.append(line)
+                entries.append(f"  {prefix}  {item.name}")
             return f"Contents of {path}:\n" + "\n".join(entries) if entries else "Empty directory"
 
         elif action == "search":
