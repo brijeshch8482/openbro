@@ -94,20 +94,30 @@ def test_chat_returns_primary_when_primary_succeeds():
     assert fp.fallback_count == 0
 
 
-def test_chat_cascades_on_rate_limit():
+def test_chat_cascades_on_rate_limit(monkeypatch):
+    """Primary retries 3 times with backoff before cascading to
+    fallback. Patch time.sleep so the test stays fast (don't actually
+    wait 1s + 3s for each test)."""
+    import openbro.llm.fallback_provider as fb_mod
+
+    monkeypatch.setattr(fb_mod.time, "sleep", lambda *_: None)
     primary = _make_provider("primary", error=Exception("429 Rate limit hit"))
     fallback = _make_provider("fallback")
     fp = FallbackProvider(primary=primary, fallback=fallback)
 
     resp = fp.chat([Message(role="user", content="hi")])
     assert resp.content == "from fallback"
-    primary.chat.assert_called_once()
+    # Primary attempted 3 times (1 initial + 2 retries) before cascading.
+    assert primary.chat.call_count == 3
     fallback.chat.assert_called_once()
     assert fp.last_used == "fallback"
     assert fp.fallback_count == 1
 
 
-def test_chat_cascades_on_network_error():
+def test_chat_cascades_on_network_error(monkeypatch):
+    import openbro.llm.fallback_provider as fb_mod
+
+    monkeypatch.setattr(fb_mod.time, "sleep", lambda *_: None)
     primary = _make_provider("primary", error=ConnectionError("network down"))
     fallback = _make_provider("fallback")
     fp = FallbackProvider(primary=primary, fallback=fallback)

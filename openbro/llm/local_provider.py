@@ -107,7 +107,7 @@ class LocalLLMProvider(LLMProvider):
         self,
         model_path: str | Path,
         model_name: str | None = None,
-        n_ctx: int = 8192,
+        n_ctx: int = 16384,
         n_gpu_layers: int = -1,
         chat_format: str | None = None,
     ):

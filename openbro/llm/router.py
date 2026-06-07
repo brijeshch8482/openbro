@@ -100,7 +100,7 @@ def _build_one(provider_name: str, config: dict, providers_config: dict) -> LLMP
         return LocalLLMProvider(
             model_path=model_path,
             model_name=model_name,
-            n_ctx=local_cfg.get("n_ctx", 8192),
+            n_ctx=local_cfg.get("n_ctx", 16384),
             n_gpu_layers=local_cfg.get("n_gpu_layers", -1),
         )
 

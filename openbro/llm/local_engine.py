@@ -19,7 +19,13 @@ from __future__ import annotations
 from collections.abc import Iterator
 from pathlib import Path
 
-DEFAULT_CTX = 8192
+DEFAULT_CTX = 16384  # 16K — enough headroom for tools schema + history on
+# modern local models. Mistral-Nemo trains to 1M, Llama-3.1 to 128K,
+# Llama-3.2 to 128K — 16K is well within all of them. Previous 8K
+# default left only ~2-3K for history once the 23-tool schema (~5-7K
+# tokens) was attached, causing 'request too large' cascades when
+# the cloud fell back to local. Bumped 2026-05-31; user can override
+# in config (providers.local.n_ctx).
 DEFAULT_GPU_LAYERS = -1  # -1 = offload everything that fits to GPU; 0 = CPU only
 
 DEPS_HINT = (

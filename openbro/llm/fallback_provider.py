@@ -20,6 +20,7 @@ fallback to the UI (`status bar: 'cloud rate-limited, using local'`).
 
 from __future__ import annotations
 
+import time
 from collections.abc import Iterator
 from typing import Any
 
@@ -128,58 +129,47 @@ class FallbackProvider(LLMProvider):
     # ─── Interface methods ────────────────────────────────────────────
 
     def chat(self, messages: list[Message], tools: list[dict] | None = None) -> LLMResponse:
+        # Primary retry chain with backoff. Most cloud 5xx errors
+        # clear within a few seconds; cascading to a slow local model
+        # on the very first hiccup wastes a 30-90s GGUF load when a
+        # 1-2s wait would have succeeded. Captured 2026-05-31: Groq
+        # threw 503 frequently during a stress test; the local cascade
+        # made every flap feel like a hard failure.
+        e = self._try_primary_with_retry(messages, tools)
+        if e is None:
+            return self._last_primary_response  # type: ignore[return-value]
+        self._notify(e)
+        # Pre-trim before delegating: cloud primary often has 32K+
+        # context but the local fallback is usually 8K. The tools
+        # schema (~5-10K tokens for 23 tools) can exceed half the
+        # local context BY ITSELF, so we shrink it first. The local
+        # model then answers in plain text — less capable but it
+        # produces a response instead of crashing.
+        fb_tools = self._shrink_tools_for_fallback(tools)
+        fb_messages = self._fit_to_fallback_context(messages, tools=fb_tools)
+        # Mistral and some other local chat templates require strict
+        # user/assistant alternation after the optional system prompt.
+        # OpenBro's normal history can have multiple system messages
+        # and tool/tool_result turns that break alternation. Captured
+        # 2026-05-31: mistral-nemo raised 'After the optional system
+        # message, conversation roles must alternate user/assist'.
+        # Merge system blocks + collapse adjacent same-role turns.
+        fb_messages = self._normalize_for_strict_alternation(fb_messages)
         try:
-            response = self.primary.chat(messages, tools)
-            self.last_used = "primary"
+            response = self.fallback.chat(fb_messages, fb_tools)
+            self.last_used = "fallback"
+            self.fallback_count += 1
             return response
-        except Exception as e:
-            if not _is_recoverable(e):
-                # Non-recoverable (auth, schema, model not found, etc.)
-                # Surface it so the user can fix the config.
-                raise
-            self._notify(e)
-            # Pre-trim before delegating: cloud primary often has
-            # 32K+ context but the local fallback is usually 8K.
-            # The tools schema (~5-10K tokens for 23 tools) often
-            # exceeds half the local context BY ITSELF.
-            #
-            # Captured 2026-05-31: even after history trim, tools
-            # schema alone pushed the request to 11223 tokens > 8192
-            # context. Fix: when the tools schema is large relative
-            # to the fallback's context, drop tools entirely. The
-            # local model in this mode answers in plain text — less
-            # capable but not crashed. User sees a slightly degraded
-            # answer instead of a ValueError.
-            fb_tools = self._shrink_tools_for_fallback(tools)
-            fb_messages = self._fit_to_fallback_context(messages, tools=fb_tools)
-            # Mistral and some other local chat templates require
-            # strict user/assistant alternation after the optional
-            # system prompt. OpenBro's history often has multiple
-            # system messages (reflection retries, transient blocks)
-            # and tool/tool_result turns that break alternation.
-            # Captured 2026-05-31: mistral-nemo raised 'After the
-            # optional system message, conversation roles must
-            # alternate user/assist'. Merge system blocks + collapse
-            # adjacent same-role turns.
-            fb_messages = self._normalize_for_strict_alternation(fb_messages)
-            try:
-                response = self.fallback.chat(fb_messages, fb_tools)
-                self.last_used = "fallback"
-                self.fallback_count += 1
-                return response
-            except Exception as fb_err:
-                # Both primary AND fallback failed. Don't surface a
-                # raw ValueError to the user. Compose a clear, calm
-                # message explaining what was tried so they can pick
-                # a recovery action. Captured 2026-05-30: user saw
-                # 'ValueError: Requested tokens (11293) exceed context
-                # window of 8192' as the entire response.
-                raise _FallbackChainExhausted(
-                    primary=self.primary.name(),
-                    primary_error=str(e),
-                    fallback=self.fallback.name(),
-                    fallback_error=str(fb_err),
-                ) from fb_err
+        except Exception as fb_err:
+            # Both primary AND fallback failed. Surface a typed
+            # exception so the agent's _friendly_error can render a
+            # calm message instead of leaking a raw stack trace.
+            raise _FallbackChainExhausted(
+                primary=self.primary.name(),
+                primary_error=str(e),
+                fallback=self.fallback.name(),
+                fallback_error=str(fb_err),
+            ) from fb_err
 
     def stream(
         self,
@@ -257,6 +247,40 @@ class FallbackProvider(LLMProvider):
         if tools_tokens > ctx * 0.3:
             return None  # drop schema; degraded text-only mode
         return tools
+
+    # Backoff delays (seconds) before each primary attempt. First
+    # attempt is immediate (0.0), then 1s, then 3s. Tests patch
+    # `time.sleep` to no-op so they don't wait 4s per cascade.
+    _PRIMARY_RETRY_DELAYS = (0.0, 1.0, 3.0)
+
+    def _try_primary_with_retry(
+        self,
+        messages: list[Message],
+        tools: list[dict] | None,
+    ) -> Exception | None:
+        """Try the primary up to len(_PRIMARY_RETRY_DELAYS) times.
+
+        On success: stashes the response in `self._last_primary_response`
+        and returns None.
+        On final recoverable failure: returns the last exception so
+        the caller can decide whether to cascade to the fallback.
+        On non-recoverable failure: raises immediately (auth, schema
+        errors aren't worth retrying or falling back on).
+        """
+        last_err: Exception | None = None
+        for delay in self._PRIMARY_RETRY_DELAYS:
+            if delay > 0:
+                time.sleep(delay)
+            try:
+                response = self.primary.chat(messages, tools)
+                self.last_used = "primary"
+                self._last_primary_response = response
+                return None
+            except Exception as e:
+                if not _is_recoverable(e):
+                    raise
+                last_err = e
+        return last_err
 
     def _normalize_for_strict_alternation(self, messages: list[Message]) -> list[Message]:
         """Reshape history so it satisfies strict user/assistant
