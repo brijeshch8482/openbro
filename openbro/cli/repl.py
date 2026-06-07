@@ -140,7 +140,6 @@ class _LiveStatus:
         phase_elapsed = now - self._state["activity_started"]
         turn_elapsed = now - self._state["turn_started"]
         step = self._state["step"]
-        max_steps = self._state["max_steps"]
         in_t = getattr(agent, "_turn_tokens_in", 0)
         out_t = getattr(agent, "_turn_tokens_out", 0)
         activity = self._state["activity"]
@@ -164,7 +163,7 @@ class _LiveStatus:
         table.add_column(no_wrap=True)
         table.add_row(
             Spinner("dots", style="cyan"),
-            f"[dim]step {step}/{max_steps}[/dim]",
+            f"[dim]step {step}[/dim]",
             f"[{activity_style}]{activity}[/{activity_style}] [dim]· {phase_elapsed:.1f}s[/dim]",
             f"[dim]turn:[/dim] [grey50]{turn_elapsed:.1f}s[/grey50]",
             f"[grey50]{in_t}↓ {out_t}↑[/grey50]",
