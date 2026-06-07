@@ -62,14 +62,18 @@ class GoogleProvider(LLMProvider):
             ]
 
         url = f"{API_BASE}/models/{self.model}:generateContent?key={self.api_key}"
-        try:
-            r = httpx.post(url, json=payload, timeout=60)
-            r.raise_for_status()
-            data = r.json()
-        except httpx.HTTPStatusError as e:
-            return LLMResponse(content=f"Gemini API error {e.response.status_code}", tool_calls=[])
-        except Exception as e:
-            return LLMResponse(content=f"Gemini error: {e}", tool_calls=[])
+        # Let HTTP and connection errors RAISE so the FallbackProvider
+        # can categorise them (429/5xx as recoverable → retry +
+        # cascade to local; 401/403/400 as non-recoverable → surface
+        # so the user fixes config). Captured 2026-05-31: previously
+        # we caught and returned a fake LLMResponse with
+        # 'Gemini API error 429' as content, which the FallbackProvider
+        # treated as a successful turn — so neither the 1+2 retry chain
+        # nor the local cascade fired. User saw the literal error text
+        # as the final answer.
+        r = httpx.post(url, json=payload, timeout=60)
+        r.raise_for_status()
+        data = r.json()
 
         # Extract text + tool calls from Gemini's response
         text_parts = []
