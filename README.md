@@ -145,6 +145,7 @@ Drop a `.openbro/workspace.yaml` in your project root to add hand-curated hints 
 | 🔐 | **Privacy First** | Everything local. Audit log of every action. No telemetry |
 | 💾 | **Custom Storage** | Pick any drive / folder for data + models. Single-click migrate |
 | 🔄 | **Single-Click Models** | `model add claude`, `model switch qwen` — old offline model auto-cleanup |
+| 🧪 | **Custom Fine-Tune** | `openbro train` to build your own `openbro.gguf` from public data; `openbro model update` to pull the maintainer's latest. See [docs/TRAINING.md](docs/TRAINING.md) |
 | 🖥️ | **Cross-Platform** | Windows, Linux, macOS — same commands everywhere |
 
 ## Quick Start
@@ -311,7 +312,36 @@ openbro config set providers.groq.model llama-3.3-70b-versatile
 openbro config set providers.anthropic.api_key sk-ant-...
 openbro model list                                     # see installed + available models
 openbro model download llama3.1:8b                     # pull a local GGUF
+openbro model download openbro:1b                      # pull the maintainer's openbro.gguf
+openbro model update                                   # refresh openbro.gguf to latest
+openbro model info                                     # show current local model + path
+openbro train                                          # MAINTAINER: train a new openbro.gguf
+openbro train --no-publish                             # MAINTAINER: train without pushing
 ```
+
+### Training your own model
+
+OpenBro ships with `openbro train` — a complete pipeline that fetches
+public training data (Stack Overflow, GitHub, Wikipedia, Reddit,
+ArXiv), LoRA-fine-tunes `Llama-3.2-1B-Instruct` on your laptop's GPU,
+converts to GGUF, and auto-publishes to HuggingFace.
+
+**For maintainers** (you run training):
+```bash
+pip install 'openbro[training]' --extra-index-url https://download.pytorch.org/whl/cu121
+openbro train
+# ~5 hours on RTX 3050 4 GB VRAM
+# Produces openbro.gguf (~700 MB) + auto-PR to brijeshch8482/openbro-model
+```
+
+**For end users** (you only consume the model):
+```bash
+openbro model update
+# Pulls the latest openbro.gguf from HuggingFace (~700 MB, free CDN)
+```
+
+Full architecture, data sources, hardware requirements, and stage-by-
+stage details are in [docs/TRAINING.md](docs/TRAINING.md).
 
 ### Playbooks — instant, LLM-free answers for common queries
 

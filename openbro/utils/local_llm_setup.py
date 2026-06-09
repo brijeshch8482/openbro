@@ -33,6 +33,16 @@ console = Console()
 # bartowski/* = community-standard quantizations on HuggingFace; Q4_K_M is
 # the best size/quality trade-off for most users.
 MODELS: dict[str, dict] = {
+    # OpenBro's own fine-tuned model. Built by the maintainer via
+    # `openbro train`, distributed via HuggingFace Hub. When present
+    # on disk, the local provider auto-prefers it over generic models.
+    "openbro:1b": {
+        "repo": "brijeshch8482/openbro-1b-instruct",
+        "file": "openbro.gguf",
+        "size": "0.7 GB",
+        "ram": "2 GB",
+        "desc": "OpenBro's custom Llama-3.2-1B fine-tune (recommended default)",
+    },
     "llama3.2:3b": {
         "repo": "bartowski/Llama-3.2-3B-Instruct-GGUF",
         "file": "Llama-3.2-3B-Instruct-Q4_K_M.gguf",

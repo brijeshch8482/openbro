@@ -87,16 +87,29 @@ def _build_one(provider_name: str, config: dict, providers_config: dict) -> LLMP
         )
         model_path = local_cfg.get("model_path")
         if not model_path:
-            p = find_installed_match(model_name)
-            if not p:
-                raise ValueError(
-                    f"No local model found for '{model_name}'. "
-                    "Download one with:\n"
-                    "  openbro model download llama3.1:8b\n"
-                    "Or import a GGUF file you already have:\n"
-                    "  openbro model import D:/path/to/model.gguf"
-                )
-            model_path = str(p)
+            # Auto-prefer openbro.gguf when present — it's the
+            # maintainer-fine-tuned model. Falls through to whatever
+            # `model_name` resolves to if openbro.gguf isn't there.
+            from openbro.utils.local_llm_setup import models_dir
+
+            openbro_gguf = models_dir() / "openbro.gguf"
+            if openbro_gguf.exists() and local_cfg.get("model") in (None, "", "openbro:1b"):
+                model_path = str(openbro_gguf)
+                model_name = "openbro:1b"
+            else:
+                p = find_installed_match(model_name)
+                if not p:
+                    raise ValueError(
+                        f"No local model found for '{model_name}'. "
+                        "Download one with:\n"
+                        "  openbro model download openbro:1b   "
+                        "(maintainer-fine-tuned, recommended)\n"
+                        "  openbro model download llama3.1:8b  "
+                        "(generic fallback)\n"
+                        "Or import a GGUF file you already have:\n"
+                        "  openbro model import D:/path/to/model.gguf"
+                    )
+                model_path = str(p)
         return LocalLLMProvider(
             model_path=model_path,
             model_name=model_name,

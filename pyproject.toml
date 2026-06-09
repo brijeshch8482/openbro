@@ -55,6 +55,27 @@ local = [
 anthropic = ["anthropic>=0.40"]
 openai = ["openai>=1.50"]
 telegram = ["python-telegram-bot>=21.0"]
+training = [
+    # Heavy ML stack for `openbro train`. NOT installed by default —
+    # only maintainers who run the custom-model fine-tune pipeline
+    # need these. End users who only `openbro model update` need just
+    # `huggingface_hub` which is already in [local].
+    #
+    # CUDA wheels: PyTorch publishes per-CUDA-version wheels at
+    # https://download.pytorch.org/whl/cu121 (or cu118). Install via:
+    #   pip install openbro[training] \
+    #     --extra-index-url https://download.pytorch.org/whl/cu121
+    "torch>=2.2",
+    "transformers>=4.45",
+    "peft>=0.12",
+    "bitsandbytes>=0.43",
+    "datasets>=2.20",
+    "accelerate>=0.34",
+    "huggingface-hub>=0.24",
+    # llama-cpp-python is reused from [local] for the validation step
+    # (smoke-test the freshly built openbro.gguf before installing).
+    "llama-cpp-python>=0.3.0",
+]
 voice = [
     # Offline-by-default voice. faster-whisper for local STT; Groq cloud STT is opt-in.
     # Requires Python 3.10-3.13 (wheels not yet available for 3.14+).

@@ -215,6 +215,126 @@ def model_remove(name: str):
     click.echo(f"Removed: {target.name}")
 
 
+@model.command("update")
+@click.option(
+    "--repo",
+    default="brijeshch8482/openbro-1b-instruct",
+    show_default=True,
+    help="HuggingFace repo id hosting openbro.gguf.",
+)
+@click.option(
+    "--file",
+    default="openbro.gguf",
+    show_default=True,
+    help="Filename inside the HF repo.",
+)
+@click.option("--force", is_flag=True, help="Re-download even if local copy already current.")
+def model_update(repo: str, file: str, force: bool):
+    """Pull the latest openbro.gguf from HuggingFace.
+
+    End users run this when they want to refresh OpenBro's custom
+    model. The maintainer's weekly training cycle publishes a new
+    openbro.gguf to the HuggingFace repo; this command downloads it
+    and replaces the local copy (backing up the previous version).
+    """
+    import shutil
+    import time as _time
+
+    from openbro.utils.local_llm_setup import models_dir
+
+    md = models_dir()
+    md.mkdir(parents=True, exist_ok=True)
+    local_path = md / file
+
+    try:
+        from huggingface_hub import HfApi, hf_hub_download
+    except ImportError:
+        click.echo(
+            "huggingface_hub is required. Install it:\n  pip install 'openbro[local]'",
+            err=True,
+        )
+        raise SystemExit(1) from None
+
+    # Resolve the remote file's sha256 (lets us skip if unchanged).
+    api = HfApi()
+    try:
+        remote_info = api.model_info(repo, files_metadata=True)
+    except Exception as e:
+        click.echo(f"Couldn't reach HuggingFace ({repo}): {e}", err=True)
+        raise SystemExit(1) from e
+
+    remote_sha = None
+    for sib in remote_info.siblings or []:
+        if sib.rfilename == file:
+            remote_sha = getattr(sib, "lfs", None) and sib.lfs.get("sha256")
+            break
+    if remote_sha is None:
+        click.echo(f"Remote file '{file}' not found in {repo}", err=True)
+        raise SystemExit(1)
+
+    if local_path.exists() and not force:
+        # Quick sha check — compare just the head of the file as a
+        # cheap signal; sha256 of multi-GB files is slow.
+        import hashlib
+
+        h = hashlib.sha256()
+        with local_path.open("rb") as f:
+            while chunk := f.read(8 * 1024 * 1024):
+                h.update(chunk)
+        if h.hexdigest() == remote_sha:
+            click.echo(f"Already up to date: {file}")
+            return
+
+    backup_dir = md / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    if local_path.exists():
+        stamp = _time.strftime("%Y%m%d-%H%M%S")
+        bak = backup_dir / f"{file}.{stamp}.bak"
+        shutil.move(str(local_path), str(bak))
+        click.echo(f"Backup: {bak.name}")
+
+    click.echo(f"Downloading {file} from {repo} …")
+    try:
+        downloaded = hf_hub_download(
+            repo_id=repo,
+            filename=file,
+            cache_dir=str(md / ".hf_cache"),
+            local_dir=str(md),
+            local_dir_use_symlinks=False,
+        )
+    except Exception as e:
+        click.echo(f"Download failed: {e}", err=True)
+        raise SystemExit(1) from e
+
+    # hf_hub_download writes into models_dir; verify the target exists.
+    if not local_path.exists():
+        # If the downloader put it elsewhere, copy in.
+        shutil.copy2(downloaded, str(local_path))
+    size_mb = round(local_path.stat().st_size / (1024 * 1024), 1)
+    click.echo(f"Updated: {file} ({size_mb} MB)")
+    click.echo("Next REPL start will use the new model.")
+
+
+@model.command("info")
+def model_info():
+    """Show current local model and its source."""
+    from openbro.utils.config import load_config
+    from openbro.utils.local_llm_setup import models_dir
+
+    cfg = load_config()
+    local_cfg = cfg.get("providers", {}).get("local", {})
+    name = local_cfg.get("model", "?")
+    md = models_dir()
+    click.echo(f"Configured local model: {name}")
+    click.echo(f"Models directory: {md}")
+    if not md.exists():
+        click.echo("  (directory does not exist yet)")
+        return
+    for f in sorted(md.glob("*.gguf")):
+        size_mb = round(f.stat().st_size / (1024 * 1024), 1)
+        click.echo(f"  {f.name}  ({size_mb} MB)")
+
+
 # ─── `openbro config …` subcommands ───────────────────────────────────
 
 
