@@ -294,6 +294,26 @@ def config_set(key_path: str, value: str):
     click.echo(f"Set {key_path} = {coerced}")
 
 
+# ─── `openbro train` — custom-model training pipeline ────────────────
+
+
+def _register_train_command():
+    """Register the train command lazily so the heavy ML imports in
+    openbro.training don't slow down `openbro` startup for users who
+    aren't training."""
+    try:
+        from openbro.training.cli import train as train_cmd
+
+        main.add_command(train_cmd)
+    except Exception:
+        # Training extras (torch, peft, etc.) optional — if missing,
+        # the command simply isn't available.
+        pass
+
+
+_register_train_command()
+
+
 # ─── `openbro mcp …` subcommands ──────────────────────────────────────
 
 
