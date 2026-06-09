@@ -282,6 +282,143 @@ def fetch_arxiv(queries: list[str], per_query: int = 20) -> list[RawDoc]:
     return out
 
 
+# ─── HuggingFace curated datasets ────────────────────────────────────
+
+
+_HF_DATASET_RECIPES: dict[str, dict[str, str]] = {
+    # name → {dataset_id, split, prompt_field, response_field}
+    "openassistant": {
+        "id": "OpenAssistant/oasst1",
+        "split": "train",
+        "prompt_field": "text",
+        "response_field": "text",  # tree-shaped, handled below
+    },
+    "slim_orca": {
+        "id": "Open-Orca/SlimOrca",
+        "split": "train",
+        "prompt_field": "conversations",
+        "response_field": "conversations",
+    },
+    "hermes": {
+        "id": "teknium/OpenHermes-2.5",
+        "split": "train",
+        "prompt_field": "conversations",
+        "response_field": "conversations",
+    },
+    "dolly_15k": {
+        "id": "databricks/databricks-dolly-15k",
+        "split": "train",
+        "prompt_field": "instruction",
+        "response_field": "response",
+    },
+    "alpaca": {
+        "id": "tatsu-lab/alpaca",
+        "split": "train",
+        "prompt_field": "instruction",
+        "response_field": "output",
+    },
+    "wildchat": {
+        "id": "allenai/WildChat-1M",
+        "split": "train",
+        "prompt_field": "conversation",
+        "response_field": "conversation",
+    },
+}
+
+
+def fetch_huggingface_datasets(
+    recipes: list[str],
+    max_per_dataset: int = 50000,
+) -> list[RawDoc]:
+    """Pull curated instruction-tuning datasets from the HuggingFace
+    Hub. Far higher quality than scraping public APIs — these are
+    already deduped, filtered, and (mostly) human-vetted.
+
+    `recipes` is a list of keys into `_HF_DATASET_RECIPES`. Pass
+    `max_per_dataset` to cap the take from each (useful when one
+    dataset is much larger than the others).
+    """
+    try:
+        from datasets import load_dataset
+    except ImportError:
+        return []
+
+    out: list[RawDoc] = []
+    for name in recipes:
+        recipe = _HF_DATASET_RECIPES.get(name)
+        if not recipe:
+            continue
+        # Non-streaming with slice cap — streaming hits intermittent
+        # connection-reset errors on Windows + some networks.
+        split_spec = f"{recipe['split']}[:{max_per_dataset}]"
+        try:
+            ds = load_dataset(recipe["id"], split=split_spec)
+        except Exception:
+            continue
+
+        for count, row in enumerate(ds):
+            prompt, response = _extract_pair(row, recipe)
+            if not prompt or not response:
+                continue
+            out.append(
+                RawDoc(
+                    source=f"hf:{name}",
+                    id=str(row.get("id", count)),
+                    title=prompt[:300],
+                    body=response,
+                    url=f"https://huggingface.co/datasets/{recipe['id']}",
+                    tags=[name],
+                    score=0,
+                    fetched_at=time.time(),
+                )
+            )
+    return out
+
+
+def _extract_pair(row: dict, recipe: dict) -> tuple[str, str]:
+    """Convert a dataset row into (prompt, response) using the
+    recipe-specified fields. Handles the common shapes:
+      • flat instruction/response (Dolly, Alpaca)
+      • conversations list-of-dicts (Orca, Hermes, WildChat)
+      • OpenAssistant tree messages (role + text)
+    """
+    pf = recipe["prompt_field"]
+    rf = recipe["response_field"]
+    # Conversations: list of {role/from, content/value} dicts
+    if pf == "conversations" or pf == "conversation":
+        conv = row.get(pf, [])
+        if not isinstance(conv, list) or len(conv) < 2:
+            return "", ""
+        user_msg = next(
+            (
+                m.get("content", m.get("value", ""))
+                for m in conv
+                if (m.get("role") or m.get("from", "")).lower() in ("user", "human")
+            ),
+            "",
+        )
+        asst_msg = next(
+            (
+                m.get("content", m.get("value", ""))
+                for m in conv
+                if (m.get("role") or m.get("from", "")).lower() in ("assistant", "gpt", "ai")
+            ),
+            "",
+        )
+        return user_msg, asst_msg
+    # OpenAssistant tree: each row is one message, prompt rows have role=prompter
+    if recipe["id"].startswith("OpenAssistant/"):
+        if row.get("role") == "prompter":
+            return row.get("text", ""), ""  # paired downstream; skip for now
+        return "", ""
+    # Flat: instruction + response
+    prompt = row.get(pf, "")
+    response = row.get(rf, "")
+    if isinstance(prompt, str) and isinstance(response, str):
+        return prompt, response
+    return "", ""
+
+
 # ─── Orchestrator ────────────────────────────────────────────────────
 
 
@@ -322,4 +459,10 @@ def fetch_all(config: dict[str, Any]) -> list[RawDoc]:
     if "arxiv" in config:
         c = config["arxiv"]
         docs += fetch_arxiv(c.get("queries", []), c.get("per_query", 20))
+    if "huggingface" in config:
+        c = config["huggingface"]
+        docs += fetch_huggingface_datasets(
+            c.get("recipes", []),
+            c.get("max_per_dataset", 50000),
+        )
     return docs

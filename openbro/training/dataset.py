@@ -101,6 +101,10 @@ def to_examples(doc: RawDoc) -> list[TrainingExample]:
         return [_reddit_to_example(doc)]
     if doc.source == "arxiv":
         return [_arxiv_to_example(doc)]
+    # HuggingFace datasets arrive with source="hf:<recipe>" and the
+    # (prompt, response) pair already separated in title/body.
+    if doc.source.startswith("hf:"):
+        return [_hf_to_example(doc)]
     return []
 
 
@@ -150,6 +154,18 @@ def _reddit_to_example(doc: RawDoc) -> TrainingExample:
 def _arxiv_to_example(doc: RawDoc) -> TrainingExample:
     return TrainingExample(
         prompt=f"Summarise: {doc.title}",
+        response=doc.body[:2000],
+        source=doc.source,
+        source_id=doc.id,
+        source_url=doc.url,
+    )
+
+
+def _hf_to_example(doc: RawDoc) -> TrainingExample:
+    """HuggingFace recipes already split prompt+response in the
+    fetcher (title=prompt, body=response). Pass through directly."""
+    return TrainingExample(
+        prompt=doc.title,
         response=doc.body[:2000],
         source=doc.source,
         source_id=doc.id,
