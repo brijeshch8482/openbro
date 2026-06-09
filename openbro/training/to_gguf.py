@@ -86,13 +86,26 @@ def convert_to_gguf(config: ConvertConfig) -> None:
         convert_py = llama_dir_p / "convert_hf_to_gguf.py"
 
     fp16_path = Path(config.gguf_output).with_suffix(".fp16.gguf")
-    quant_bin = llama_dir_p / (
-        "llama-quantize" if (llama_dir_p / "llama-quantize").exists() else "llama-quantize.exe"
-    )
-    if not quant_bin.exists():
-        # Fall back to the legacy `quantize` name.
-        quant_bin = llama_dir_p / (
-            "quantize" if (llama_dir_p / "quantize").exists() else "quantize.exe"
+    # Search the standard locations for the quantize binary across
+    # platforms + build configs. The Linux/Mac Makefile build leaves
+    # it at the repo root; the Windows CMake build hides it under
+    # build/bin/Release/.
+    quant_candidates = [
+        llama_dir_p / "llama-quantize",
+        llama_dir_p / "llama-quantize.exe",
+        llama_dir_p / "build" / "bin" / "Release" / "llama-quantize.exe",
+        llama_dir_p / "build" / "bin" / "llama-quantize",
+        llama_dir_p / "build" / "llama-quantize",
+        llama_dir_p / "quantize",
+        llama_dir_p / "quantize.exe",
+    ]
+    quant_bin = next((c for c in quant_candidates if c.exists()), None)
+    if quant_bin is None:
+        raise FileNotFoundError(
+            f"llama-quantize binary not found under {llama_dir_p}. "
+            "Build it first:\n"
+            f"  cd {llama_dir_p}\n"
+            "  cmake -B build && cmake --build build --config Release --target llama-quantize"
         )
 
     # Step 1 — fp16 GGUF

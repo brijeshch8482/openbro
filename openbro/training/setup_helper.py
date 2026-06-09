@@ -55,8 +55,28 @@ def check_python_packages() -> CheckResult:
     )
 
 
+def _nvidia_driver_version() -> str | None:
+    """Return the human-readable driver version from `nvidia-smi`,
+    or None if the binary isn't on PATH (no NVIDIA hardware or
+    driver not installed)."""
+    if _which("nvidia-smi") is None:
+        return None
+    try:
+        p = subprocess.run(
+            ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except Exception:
+        return None
+    return p.stdout.strip().splitlines()[0] if p.stdout.strip() else None
+
+
 def check_cuda() -> CheckResult:
-    """CUDA visible to PyTorch."""
+    """CUDA visible to PyTorch. Detects the common 'driver too old'
+    case explicitly so the fix hint points at the driver update
+    rather than re-installing torch (which won't help)."""
     try:
         import torch
     except ImportError:
@@ -67,15 +87,30 @@ def check_cuda() -> CheckResult:
             "Install training extras first (see above).",
         )
     if not torch.cuda.is_available():
-        return CheckResult(
-            "CUDA",
-            False,
-            "torch.cuda.is_available() is False",
-            "Install a CUDA-enabled torch wheel:\n"
-            "  pip install torch --index-url "
-            "https://download.pytorch.org/whl/cu121\n"
-            "Then verify NVIDIA driver: `nvidia-smi`.",
-        )
+        driver = _nvidia_driver_version()
+        torch_cuda = getattr(torch.version, "cuda", "?")
+        # PyTorch 2.x wheels for cu121 need NVIDIA driver >= 525 (Linux)
+        # or >= 528 (Windows). cu118 wheels need >= 450/452.
+        msg = f"torch.cuda.is_available() is False (torch built for CUDA {torch_cuda}"
+        if driver:
+            msg += f", driver {driver}"
+        msg += ")"
+        if driver and torch_cuda == "12.1":
+            hint = (
+                f"Your NVIDIA driver ({driver}) is too old for torch+cu121.\n"
+                f"Update the driver to >= 528 (Windows) or >= 525 (Linux):\n"
+                f"  https://www.nvidia.com/Download/index.aspx\n"
+                f"OR install a torch wheel that matches your existing driver:\n"
+                f"  pip install --upgrade --force-reinstall torch \\\n"
+                f"    --index-url https://download.pytorch.org/whl/cu118"
+            )
+        else:
+            hint = (
+                "Verify driver with `nvidia-smi`. If old, update at "
+                "https://www.nvidia.com/Download/index.aspx — otherwise "
+                "match the torch wheel to your driver's CUDA version."
+            )
+        return CheckResult("CUDA", False, msg, hint)
     name = torch.cuda.get_device_name(0)
     vram_gb = round(torch.cuda.get_device_properties(0).total_memory / (1024**3), 1)
     return CheckResult("CUDA", True, f"{name} ({vram_gb} GB VRAM)")
@@ -125,8 +160,32 @@ def check_gh_cli() -> CheckResult:
     return CheckResult("gh CLI", True, "authenticated")
 
 
+def _find_quantize_binary(llama_dir: Path) -> Path | None:
+    """Locate the llama-quantize binary inside a llama.cpp checkout.
+
+    The binary moves around between platforms and build configs:
+      • Linux/Mac Makefile:  <root>/llama-quantize
+      • Windows CMake:       <root>/build/bin/Release/llama-quantize.exe
+      • Legacy:              <root>/quantize(.exe)
+    Returns the first one that exists or None.
+    """
+    candidates = [
+        llama_dir / "llama-quantize",
+        llama_dir / "llama-quantize.exe",
+        llama_dir / "build" / "bin" / "Release" / "llama-quantize.exe",
+        llama_dir / "build" / "bin" / "llama-quantize",
+        llama_dir / "build" / "llama-quantize",
+        llama_dir / "quantize",
+        llama_dir / "quantize.exe",
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    return None
+
+
 def check_llama_cpp() -> CheckResult:
-    """llama.cpp checkout + quantize binary available."""
+    """llama.cpp checkout + convert script + built quantize binary."""
     llama_dir = os.environ.get("OPENBRO_LLAMA_CPP_DIR", "./llama.cpp")
     p = Path(llama_dir)
     if not p.exists():
@@ -138,17 +197,26 @@ def check_llama_cpp() -> CheckResult:
             "  git clone https://github.com/ggerganov/llama.cpp\n"
             "  cd llama.cpp && cmake -B build && cmake --build build --config Release\n"
             "Then set:\n"
-            '  setx OPENBRO_LLAMA_CPP_DIR "D:\\\\llama.cpp\\\\build\\\\bin"',
+            '  setx OPENBRO_LLAMA_CPP_DIR "D:\\\\llama.cpp"',
         )
     has_convert = (p / "convert_hf_to_gguf.py").exists() or (p / "convert-hf-to-gguf.py").exists()
     if not has_convert:
         return CheckResult(
             "llama.cpp",
             False,
-            f"convert script not found in {p}",
+            f"convert_hf_to_gguf.py not found in {p}",
             "Reclone or update your llama.cpp checkout.",
         )
-    return CheckResult("llama.cpp", True, f"found at {p}")
+    quant_bin = _find_quantize_binary(p)
+    if quant_bin is None:
+        return CheckResult(
+            "llama.cpp",
+            False,
+            f"llama-quantize binary not built under {p}",
+            f"Build it:\n  cd {p}\n  cmake -B build\n"
+            f"  cmake --build build --config Release --target llama-quantize",
+        )
+    return CheckResult("llama.cpp", True, f"convert + quantize ready ({quant_bin.name})")
 
 
 def check_model_repo_clone(root: Path) -> CheckResult:
