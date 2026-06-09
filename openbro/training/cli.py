@@ -60,7 +60,86 @@ _DEFAULT_SOURCES = {
 }
 
 
-@click.command("train")
+_DEFAULT_ROOT = "D:/OpenBro-teting"
+
+
+@click.group("train", invoke_without_command=True)
+@click.pass_context
+def train(ctx: click.Context) -> None:
+    """Train and publish openbro.gguf.
+
+    With no subcommand, runs the full pipeline (equivalent to
+    `openbro train run`). Subcommands: `setup` for pre-flight checks
+    and `status` for past-run history.
+    """
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(run_pipeline)
+
+
+@train.command("setup")
+@click.option(
+    "--root",
+    type=click.Path(file_okay=False),
+    default=_DEFAULT_ROOT,
+    help="Root dir holding models/, training_queue/, openbro-model/.",
+)
+def setup_cmd(root: str) -> None:
+    """Pre-flight checks: ML deps, CUDA, HF login, gh CLI, llama.cpp,
+    model repo clone, base-model access."""
+    from openbro.training.setup_helper import run_all_checks
+
+    results = run_all_checks(Path(root))
+    ok_count = sum(1 for r in results if r.ok)
+    click.echo(f"\nPre-flight checks ({ok_count}/{len(results)} passing):\n")
+    for r in results:
+        glyph = "✓" if r.ok else "✗"
+        color = "green" if r.ok else "red"
+        click.secho(f"  {glyph} {r.name:<25} {r.detail}", fg=color)
+        if not r.ok and r.fix_hint:
+            for line in r.fix_hint.splitlines():
+                click.echo(f"        {line}")
+    if ok_count == len(results):
+        click.echo("\nAll checks passed. Ready to run: openbro train")
+    else:
+        click.echo(
+            f"\n{len(results) - ok_count} blocker(s). Fix the marked items, then re-run setup."
+        )
+
+
+@train.command("status")
+@click.option(
+    "--root",
+    type=click.Path(file_okay=False),
+    default=_DEFAULT_ROOT,
+    help="Root dir holding training_runs/.",
+)
+def status_cmd(root: str) -> None:
+    """Show past training-run summaries."""
+    from openbro.training.status import days_since_last, load_runs
+
+    runs = load_runs(Path(root))
+    if not runs:
+        click.echo("No training runs yet. Trigger one with `openbro train`.")
+        return
+    click.echo(f"Past runs ({len(runs)} total, oldest-first):\n")
+    for r in runs:
+        click.echo(f"  {r.run_id}")
+        click.echo(f"    dataset:  {r.dataset_count} examples")
+        if r.train_loss is not None:
+            click.echo(f"    loss:     {r.train_loss:.3f}")
+        if r.gguf_size_mb is not None:
+            click.echo(f"    gguf:     {r.gguf_size_mb} MB")
+        if r.pr_url:
+            click.echo(f"    PR:       {r.pr_url}")
+        if r.hf_uploaded:
+            click.echo("    HF:       uploaded")
+        click.echo()
+    last = runs[-1]
+    days = days_since_last(last)
+    click.echo(f"Last run: {last.run_id} — {days:.1f} day(s) ago")
+
+
+@train.command("run")
 @click.option("--no-publish", is_flag=True, help="Skip Stage 6 (no PR, no HF push).")
 @click.option(
     "--skip-fetch",
@@ -76,10 +155,12 @@ _DEFAULT_SOURCES = {
 @click.option(
     "--root",
     type=click.Path(file_okay=False),
-    default="D:/OpenBro-teting",
+    default=_DEFAULT_ROOT,
     help="Root dir holding models/, training_queue/, training_runs/.",
 )
-def train(no_publish: bool, skip_fetch: bool, quick: bool, base_model: str, root: str) -> None:
+def run_pipeline(
+    no_publish: bool, skip_fetch: bool, quick: bool, base_model: str, root: str
+) -> None:
     """Run the full openbro.gguf training pipeline end-to-end."""
     root_p = Path(root)
     run_id = time.strftime("%Y%m%d-%H%M%S")

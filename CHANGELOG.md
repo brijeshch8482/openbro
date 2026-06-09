@@ -2,6 +2,25 @@
 
 All notable changes to OpenBro are tracked here.
 
+## [Unreleased] — Custom model training pipeline
+
+**Headline: `openbro train` builds your own `openbro.gguf` from public web data.**
+
+A complete maintainer pipeline + end-user distribution layer for shipping a custom-fine-tuned LLM with OpenBro:
+
+- **`openbro train`** (maintainer) — full automated pipeline: fetches public training data (Stack Overflow / GitHub Issues / Wikipedia / Reddit / ArXiv), LoRA-fine-tunes `Llama-3.2-1B-Instruct` on local GPU (~4–6 hours on RTX 3050 4 GB VRAM), merges + quantizes to a 700 MB Q4_K_M GGUF, runs smoke tests, replaces the live model, auto-creates a GitHub PR, and uploads to HuggingFace Hub.
+- **`openbro train setup`** — pre-flight checks: ML libraries, CUDA, HuggingFace login, gh CLI, llama.cpp checkout, model-repo clone, base-model license access. Prints a green/red checklist with fix hints for each failure.
+- **`openbro train status`** — past training-run history with dataset size, loss, GGUF size, PR URL, HuggingFace upload status, and days-since-last-run.
+- **`openbro train run`** — explicit form of the bare `openbro train`; supports `--no-publish`, `--skip-fetch`, `--quick` (1 epoch debug), `--base-model`, `--root`.
+- **`openbro model update`** (end user) — pulls the latest `openbro.gguf` from `brijeshch8482/openbro-1b-instruct` on HuggingFace via the free CDN, sha-checks against the local copy, backs up + replaces if newer.
+- **`openbro model info`** — shows the configured local model + every GGUF on disk with sizes.
+- **`openbro:1b`** registered in the model catalogue alongside the existing Llama / Mistral entries. `openbro model download openbro:1b` works the same as any other model.
+- **Auto-prefer**: when `openbro.gguf` is on disk, the local provider uses it automatically without requiring a config change.
+- **New module**: `openbro/training/` with `data_sources.py`, `dataset.py`, `finetune.py`, `to_gguf.py`, `validate.py`, `publish.py`, `setup_helper.py`, `status.py`, `cli.py`.
+- **New optional extras**: `pip install 'openbro[training]'` pulls torch / transformers / peft / bitsandbytes / datasets / accelerate / huggingface_hub / llama-cpp-python. Core deps stay light.
+- **Privacy by design**: training uses public APIs only — no end-user data collection. Architecture details in [docs/TRAINING.md](docs/TRAINING.md).
+- **22 new unit tests** in `tests/test_training_pipeline.py` covering text cleaning, JSONL building, dedup, length filtering, status loading, and CLI command registration.
+
 ## [1.0.0-beta] - Stable beta
 
 **Headline: CLI agent orchestration — OpenBro can drive other AI CLIs.**
