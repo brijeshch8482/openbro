@@ -109,16 +109,29 @@ def run(config: FinetuneConfig) -> dict[str, object]:
     # ─── 2. Dataset ──────────────────────────────────────────────
     ds = load_dataset("json", data_files=config.dataset_path, split="train")
 
+    # Use the tokenizer's own chat_template — each base model ships
+    # the right template (Llama-3 ones use <|start_header_id|>...,
+    # SmolLM2 uses ChatML <|im_start|>..., Qwen and Mistral have
+    # their own). The previous hardcoded Llama-3 format silently
+    # corrupted training on SmolLM2 (captured 2026-06-10: model
+    # degenerated to repeating the user's cwd name).
+    if tokenizer.chat_template is None:
+        raise RuntimeError(
+            f"Base model {config.base_model} has no chat_template — "
+            "set tokenizer.chat_template explicitly or pick a base "
+            "model whose tokenizer ships one."
+        )
+
     def _format(example):
-        # Llama-3 style instruct format. The tokeniser appends the
-        # EOS so the model learns to stop.
         prompt = example["input"]
         response = example["output"]
-        text = (
-            "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
-            f"{prompt}<|eot_id|>"
-            "<|start_header_id|>assistant<|end_header_id|>\n\n"
-            f"{response}<|eot_id|>"
+        text = tokenizer.apply_chat_template(
+            [
+                {"role": "user", "content": prompt},
+                {"role": "assistant", "content": response},
+            ],
+            tokenize=False,
+            add_generation_prompt=False,
         )
         return {"text": text}
 

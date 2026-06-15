@@ -117,6 +117,24 @@ def _build_one(provider_name: str, config: dict, providers_config: dict) -> LLMP
             n_gpu_layers=local_cfg.get("n_gpu_layers", -1),
         )
 
+    elif provider_name == "specialist":
+        # Tree-of-specialists: tiny router maps the prompt to a
+        # category, the adapter engine attaches the matching LoRA on
+        # top of one shared base model. Configure via:
+        #   providers.specialist.base_model   (HF id; default SmolLM2)
+        #   providers.specialist.adapters_dir
+        from openbro.llm.specialist_provider import SpecialistProvider
+
+        spec_cfg = providers_config.get("specialist", {})
+        return SpecialistProvider(
+            base_model=spec_cfg.get(
+                "base_model", "HuggingFaceTB/SmolLM2-360M-Instruct"
+            ),
+            adapters_dir=spec_cfg.get(
+                "adapters_dir", "D:/OpenBro-teting/specialists/adapters"
+            ),
+        )
+
     elif provider_name == "anthropic":
         from openbro.llm.anthropic_provider import AnthropicProvider
 
