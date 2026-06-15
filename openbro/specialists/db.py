@@ -497,7 +497,11 @@ _SEED: list[tuple[str, str | None, str, str, str]] = [
         None,
         "OpenBro Tool Use",
         "Identity + tool calls for this agent.",
-        "openbro|who are you|kon ho|kya kar sakte|battery|screenshot|file_search|process_check|system_health|disk space|drive space|disk usage|c drive|d drive|free space",
+        (
+            "openbro|who are you|kon ho|kya kar sakte|battery|screenshot|"
+            "file_search|process_check|system_health|disk space|drive space|"
+            "disk usage|c drive|d drive|free space"
+        ),
     ),
     # ─── GENERAL CATCH-ALL ────────────────────────────────────────
     ("general", None, "General / Chitchat", "Default if nothing else fits.", ""),

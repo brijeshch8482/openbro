@@ -17,16 +17,15 @@ overnight_report.json so the morning user can inspect what happened.
 
 from __future__ import annotations
 
-# CRITICAL: datasets BEFORE transformers (silent segfault otherwise).
-from datasets import load_dataset  # noqa: I001
-
 import json
 import os
 import shutil
-import subprocess
 import sys
 import time
 from pathlib import Path
+
+# CRITICAL: datasets BEFORE transformers (silent segfault otherwise).
+from datasets import load_dataset  # noqa: I001
 
 ROOT = Path("D:/OpenBro-teting")
 RUN_ID_V2 = "20260609-141643"  # the in-flight run
@@ -156,15 +155,11 @@ _OPENBRO_TOOL_EXAMPLES = [
     },
     {
         "input": "spotify kholo",
-        "output": (
-            '<tool_call name="open_app">{"name": "spotify"}</tool_call>'
-        ),
+        "output": ('<tool_call name="open_app">{"name": "spotify"}</tool_call>'),
     },
     {
         "input": "browser band kar do",
-        "output": (
-            '<tool_call name="close_app">{"name": "chrome"}</tool_call>'
-        ),
+        "output": ('<tool_call name="close_app">{"name": "chrome"}</tool_call>'),
     },
     {
         "input": "openbro kya hai?",
@@ -189,34 +184,26 @@ _OPENBRO_TOOL_EXAMPLES = [
     },
     {
         "input": "battery kitni hai?",
-        "output": (
-            '<tool_call name="battery_status">{}</tool_call>'
-        ),
+        "output": ('<tool_call name="battery_status">{}</tool_call>'),
     },
     {
         "input": "screenshot lo",
-        "output": (
-            '<tool_call name="screenshot">{"path": "~/Desktop/screenshot.png"}</tool_call>'
-        ),
+        "output": ('<tool_call name="screenshot">{"path": "~/Desktop/screenshot.png"}</tool_call>'),
     },
     {
         "input": "Excel file kholo",
         "output": (
-            'Kaunsi file? Path bata, mai open_app se launch kar dunga.\n'
+            "Kaunsi file? Path bata, mai open_app se launch kar dunga.\n"
             '<tool_call name="open_app">{"name": "excel"}</tool_call>'
         ),
     },
     {
         "input": "kal ka meeting schedule check karo",
-        "output": (
-            '<tool_call name="calendar_check">{"date": "tomorrow"}</tool_call>'
-        ),
+        "output": ('<tool_call name="calendar_check">{"date": "tomorrow"}</tool_call>'),
     },
     {
         "input": "email check karo",
-        "output": (
-            '<tool_call name="email_check">{"unread_only": true}</tool_call>'
-        ),
+        "output": ('<tool_call name="email_check">{"unread_only": true}</tool_call>'),
     },
     {
         "input": "Word me ek letter likho",
@@ -228,9 +215,7 @@ _OPENBRO_TOOL_EXAMPLES = [
     },
     {
         "input": "system me kya issues hain?",
-        "output": (
-            '<tool_call name="system_health">{}</tool_call>'
-        ),
+        "output": ('<tool_call name="system_health">{}</tool_call>'),
     },
 ]
 
@@ -297,7 +282,6 @@ def train_tools(starting_adapters_dir: Path, dataset_path: Path) -> Path:
     log("Stage 6: training on tools dataset")
     import torch  # noqa: PLC0415
     from peft import (  # noqa: PLC0415
-        LoraConfig,
         PeftModel,
         prepare_model_for_kbit_training,
     )
@@ -333,9 +317,7 @@ def train_tools(starting_adapters_dir: Path, dataset_path: Path) -> Path:
 
     ds = ds.map(_format, remove_columns=ds.column_names)
     ds = ds.map(
-        lambda b: tokenizer(
-            b["text"], truncation=True, max_length=512, padding=False
-        ),
+        lambda b: tokenizer(b["text"], truncation=True, max_length=512, padding=False),
         batched=True,
         remove_columns=["text"],
     )
@@ -346,13 +328,9 @@ def train_tools(starting_adapters_dir: Path, dataset_path: Path) -> Path:
         bnb_4bit_compute_dtype=torch.bfloat16,
         bnb_4bit_use_double_quant=True,
     )
-    base_m = AutoModelForCausalLM.from_pretrained(
-        base, quantization_config=bnb, device_map="auto"
-    )
+    base_m = AutoModelForCausalLM.from_pretrained(base, quantization_config=bnb, device_map="auto")
     base_m = prepare_model_for_kbit_training(base_m)
-    model = PeftModel.from_pretrained(
-        base_m, str(starting_adapters_dir), is_trainable=True
-    )
+    model = PeftModel.from_pretrained(base_m, str(starting_adapters_dir), is_trainable=True)
     model.print_trainable_parameters()
 
     args = TrainingArguments(
@@ -371,9 +349,7 @@ def train_tools(starting_adapters_dir: Path, dataset_path: Path) -> Path:
         report_to="none",
     )
     collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
-    trainer = Trainer(
-        model=model, args=args, train_dataset=ds, data_collator=collator
-    )
+    trainer = Trainer(model=model, args=args, train_dataset=ds, data_collator=collator)
     started = time.time()
     result = trainer.train()
     elapsed = time.time() - started
@@ -391,7 +367,10 @@ def train_tools(starting_adapters_dir: Path, dataset_path: Path) -> Path:
         "dataset_path": str(dataset_path),
     }
     (run_dir / "summary.json").write_text(json.dumps(summary, indent=2))
-    log(f"  tools training complete in {summary['elapsed_hours']} hr — loss={summary['train_loss']:.3f}")
+    log(
+        f"  tools training complete in {summary['elapsed_hours']} hr "
+        f"— loss={summary['train_loss']:.3f}"
+    )
     update_report("tools_train", summary)
     return run_dir
 
@@ -406,9 +385,7 @@ def write_final_report() -> None:
     final["models_on_disk"] = sorted(p.name for p in MODELS_DIR.glob("*.gguf"))
     final["backups"] = sorted(p.name for p in BACKUPS_DIR.glob("*"))
     final["live_size_mb"] = (
-        round(LIVE_PATH.stat().st_size / (1024 * 1024), 1)
-        if LIVE_PATH.exists()
-        else None
+        round(LIVE_PATH.stat().st_size / (1024 * 1024), 1) if LIVE_PATH.exists() else None
     )
     final["finished_at"] = time.time()
     update_report("final", final)

@@ -6,8 +6,6 @@ live HF caches and are exercised by the runtime, not CI.
 from __future__ import annotations
 
 import sqlite3
-import tempfile
-from pathlib import Path
 
 import pytest
 
@@ -137,9 +135,7 @@ def test_router_adapter_path_walks_to_parent_when_leaf_untrained(temp_db):
     import sqlite3 as _sql
 
     conn = _sql.connect(temp_db)
-    conn.execute(
-        "UPDATE categories SET adapter_path='/fake/parent' WHERE slug='coding'"
-    )
+    conn.execute("UPDATE categories SET adapter_path='/fake/parent' WHERE slug='coding'")
     conn.commit()
     from openbro.specialists.router import Router
 

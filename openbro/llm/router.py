@@ -134,12 +134,8 @@ def _build_one(provider_name: str, config: dict, providers_config: dict) -> LLMP
 
         spec_cfg = providers_config.get("specialist", {})
         return SpecialistProvider(
-            base_model=spec_cfg.get(
-                "base_model", "HuggingFaceTB/SmolLM2-360M-Instruct"
-            ),
-            adapters_dir=spec_cfg.get(
-                "adapters_dir", "D:/OpenBro-teting/specialists/adapters"
-            ),
+            base_model=spec_cfg.get("base_model", "HuggingFaceTB/SmolLM2-360M-Instruct"),
+            adapters_dir=spec_cfg.get("adapters_dir", "D:/OpenBro-teting/specialists/adapters"),
         )
 
     elif provider_name == "anthropic":

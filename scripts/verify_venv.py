@@ -62,9 +62,7 @@ def main() -> int:
 
         if torch.cuda.is_available():
             name = torch.cuda.get_device_name(0)
-            vram = round(
-                torch.cuda.get_device_properties(0).total_memory / (1024**3), 1
-            )
+            vram = round(torch.cuda.get_device_properties(0).total_memory / (1024**3), 1)
             print(f"\nCUDA: OK — {name} ({vram} GB VRAM)")
         else:
             print("\nCUDA: NOT available (torch sees CPU only)")

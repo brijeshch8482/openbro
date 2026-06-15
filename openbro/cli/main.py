@@ -14,9 +14,7 @@ from openbro import __version__
 @click.option(
     "--provider",
     "-p",
-    type=click.Choice(
-        ["local", "specialist", "anthropic", "openai", "groq", "google", "deepseek"]
-    ),
+    type=click.Choice(["local", "specialist", "anthropic", "openai", "groq", "google", "deepseek"]),
     help="LLM provider to use",
 )
 @click.option("--model", "-m", help="Model name to use")

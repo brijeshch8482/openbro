@@ -384,13 +384,19 @@ def test_router_local_fallback_falls_back_to_default_when_unset(monkeypatch):
             "local": {},  # no model set
         },
     }
+
     # Make sure the live openbro.gguf isn't on disk for this test run
     # — otherwise the auto-prefer branch added in commit dfa5a58 picks
     # it up first and the assertion below changes meaning.
-    monkeypatch.setattr(
-        "openbro.utils.local_llm_setup.models_dir",
-        lambda: type("_P", (), {"__truediv__": lambda self, x: type("_Q", (), {"exists": lambda self: False})()})(),
-    )
+    class _NoGGUF:
+        def __truediv__(self, _name):
+            class _Q:
+                def exists(self):
+                    return False
+
+            return _Q()
+
+    monkeypatch.setattr("openbro.utils.local_llm_setup.models_dir", lambda: _NoGGUF())
     router._build_one("local", config, config["providers"])
     # Must fall back to DEFAULT_MODEL (llama3.2:3b), not the cloud name.
     assert captured == ["llama3.2:3b"]

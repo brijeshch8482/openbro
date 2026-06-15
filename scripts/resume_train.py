@@ -12,14 +12,13 @@ import json
 import time
 from pathlib import Path
 
+import torch  # noqa: E402
+
 # IMPORTANT: import datasets BEFORE transformers — there's a C-extension
 # DLL conflict on Windows with torch 2.6+cu124 if the order is reversed,
 # causing a silent segfault during import.
 from datasets import load_dataset  # noqa: I001
-
-import torch  # noqa: E402
 from peft import (  # noqa: E402
-    LoraConfig,
     PeftModel,
     prepare_model_for_kbit_training,
 )
@@ -106,9 +105,7 @@ def main() -> None:
         report_to="none",
     )
     collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
-    trainer = Trainer(
-        model=model, args=args, train_dataset=ds, data_collator=collator
-    )
+    trainer = Trainer(model=model, args=args, train_dataset=ds, data_collator=collator)
     result = trainer.train()
 
     print("[5/5] Saving adapters…", flush=True)
