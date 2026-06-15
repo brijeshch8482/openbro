@@ -87,13 +87,20 @@ def _build_one(provider_name: str, config: dict, providers_config: dict) -> LLMP
         )
         model_path = local_cfg.get("model_path")
         if not model_path:
-            # Auto-prefer openbro.gguf when present — it's the
-            # maintainer-fine-tuned model. Falls through to whatever
-            # `model_name` resolves to if openbro.gguf isn't there.
+            # Auto-prefer openbro.gguf when on disk AND the user hasn't
+            # explicitly pinned a different local model. The pinned
+            # case can come from EITHER providers.local.model OR (when
+            # local is primary) llm.model — both must be empty for
+            # auto-prefer to kick in.
             from openbro.utils.local_llm_setup import models_dir
 
             openbro_gguf = models_dir() / "openbro.gguf"
-            if openbro_gguf.exists() and local_cfg.get("model") in (None, "", "openbro:1b"):
+            explicit_model = local_cfg.get("model") or (
+                config["llm"].get("model")
+                if config.get("llm", {}).get("provider") == "local"
+                else None
+            )
+            if openbro_gguf.exists() and explicit_model in (None, "", "openbro:1b"):
                 model_path = str(openbro_gguf)
                 model_name = "openbro:1b"
             else:

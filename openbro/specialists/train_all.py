@@ -93,7 +93,7 @@ def train_one(
     base_model,
     tokenizer,
     epochs: int = 1,
-    max_steps_cap: int = 400,
+    max_steps_cap: int = 150,
 ) -> dict:
     """Train one LoRA adapter for the given slug. Returns a summary
     dict that gets written to train_log.json + categories.db."""
