@@ -10,22 +10,27 @@ Resumable: rerunning skips slugs that are already 'trained' on disk.
 
 from __future__ import annotations
 
-import json
-import sqlite3
-import time
-from pathlib import Path
-
-import torch
-
-# Same Windows-segfault dance: datasets first.
+# CRITICAL: datasets must be imported BEFORE torch/transformers/peft
+# on Windows or a C-extension DLL conflict silently segfaults the
+# whole process at import time. Captured 2026-06-10 with the D-drive
+# venv. Keep this import block above every other ML import and DO
+# NOT let ruff reorganise it (the isort:skip_file directive locks it).
+# isort:skip_file
 from datasets import load_dataset  # noqa: I001
-from peft import (
+
+import json  # noqa: E402
+import sqlite3  # noqa: E402
+import time  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+import torch  # noqa: E402
+from peft import (  # noqa: E402
     LoraConfig,
     PeftModel,
     get_peft_model,
     prepare_model_for_kbit_training,
 )
-from transformers import (
+from transformers import (  # noqa: E402
     AutoModelForCausalLM,
     AutoTokenizer,
     BitsAndBytesConfig,
@@ -34,7 +39,7 @@ from transformers import (
     TrainingArguments,
 )
 
-from openbro.specialists.db import init_db
+from openbro.specialists.db import init_db  # noqa: E402
 
 BASE_MODEL = "HuggingFaceTB/SmolLM2-360M-Instruct"
 DATASETS_DIR = Path("D:/OpenBro-teting/specialists/datasets")
