@@ -20,6 +20,13 @@ from dataclasses import dataclass
 
 from openbro.core.activity import get_bus
 
+
+def _pt_escape(text: str) -> str:
+    """Minimal HTML-style escape for prompt_toolkit's HTML formatter so
+    args containing < > & don't break the markup."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 YES_PATTERNS = re.compile(
     r"\b(yes|yeah|yep|yup|sure|ok|okay|haan|han|ha|de|do|kar|kro|allow|approve|theek|sahi|chal)\b",
     re.IGNORECASE,
@@ -127,13 +134,82 @@ class PermissionGate:
         return decision
 
     def _ask_cli(self, req: PermissionRequest) -> bool:
-        # Claude-Code-style single bordered modal: tool details + the
-        # four action choices live INSIDE the same panel, with a clear
-        # "Allow?" headline. The prompt then renders as one bold line
-        # right under the modal. Captured 2026-06-20: user said
-        # "yes no ke liye chat box ke uper claude jasie professional
-        # prompt aaye" — pre-fix the panel was the only thing visible
-        # and the dim "[y]es / [n]o …" row underneath got lost.
+        # Captured 2026-06-20 (TWO failures from the same user):
+        #   1. "isme yes no poocha hi nhi???" — text prompt missed.
+        #   2. "kai baar yes press kiya but nhi hua aur enter press
+        #       krte hi deny ho gya" + "dialog jaisa chat box ke uper
+        #       aaye yrr..arrow se select ho jaye?? up dn se".
+        # Root cause for #2: Rich's Live spinner that drives the
+        # `running elevate · 18.5s` status was sharing the terminal
+        # with our blocking console.input — keystrokes got eaten by
+        # the redraw loop, and the eventual Enter landed before our
+        # input prompt even gained focus, defaulting to NO.
+        # Real fix: prompt_toolkit's button_dialog. It takes a hard
+        # lock on the terminal, draws a centred modal, and reads the
+        # left/right arrow keys + Enter properly. Falls back to the
+        # text prompt only when prompt_toolkit isn't installed (CI,
+        # minimal envs) or when stdin isn't a TTY (`openbro ask` in
+        # scripts, Telegram bot).
+        import sys
+
+        prompted = self._try_button_dialog(req) if sys.stdin.isatty() else None
+        if prompted is not None:
+            return self._record_choice(req, prompted)
+        return self._ask_cli_text_fallback(req)
+
+    def _try_button_dialog(self, req: PermissionRequest) -> str | None:
+        """Show a real arrow-key modal via prompt_toolkit. Returns the
+        chosen action ("yes"/"no"/"always"/"never") or None if the
+        widget isn't usable in this environment."""
+        try:
+            from prompt_toolkit.formatted_text import HTML
+            from prompt_toolkit.shortcuts import button_dialog
+        except Exception:
+            return None
+
+        risk_color = {"safe": "ansigreen", "moderate": "ansiyellow", "dangerous": "ansired"}[
+            req.risk
+        ]
+        args_repr = str(req.args)
+        if len(args_repr) > 300:
+            args_repr = args_repr[:297] + "…"
+        # HTML(...) keeps the modal lightweight + colour-coded without
+        # dragging in Rich rendering inside prompt_toolkit's display.
+        body_html = (
+            f"<b>Tool</b>   {req.tool}\n"
+            f"<b>Risk</b>   <{risk_color}>{req.risk}</{risk_color}>\n"
+            f"<b>Args</b>   <ansigray>{_pt_escape(args_repr)}</ansigray>"
+        )
+        if req.reason:
+            body_html += f"\n<b>Why</b>    {_pt_escape(req.reason)}"
+        try:
+            result = button_dialog(
+                title=f" Permission required  [{req.risk}] ",
+                text=HTML(body_html),
+                buttons=[
+                    ("Yes", "yes"),
+                    ("No", "no"),
+                    ("Always allow", "always"),
+                    ("Deny always", "never"),
+                ],
+            ).run()
+        except Exception:
+            return None
+        return result  # None if user pressed Esc
+
+    def _record_choice(self, req: PermissionRequest, choice: str | None) -> bool:
+        """Apply the user's selection (incl. session memos)."""
+        if choice == "always":
+            self._always_allow.add(req.tool)
+            return True
+        if choice == "never":
+            self._always_deny.add(req.tool)
+            return False
+        return choice == "yes"  # None (Esc) → False, "no" → False
+
+    def _ask_cli_text_fallback(self, req: PermissionRequest) -> bool:
+        """Plain-text prompt used in non-TTY environments. Same shape as
+        before the prompt_toolkit modal landed."""
         from rich.console import Console
         from rich.panel import Panel
         from rich.text import Text
@@ -143,7 +219,6 @@ class PermissionGate:
         args_repr = str(req.args)
         if len(args_repr) > 220:
             args_repr = args_repr[:217] + "…"
-
         body = Text()
         body.append("Tool   ", style="bold")
         body.append(f"{req.tool}\n")
@@ -157,16 +232,7 @@ class PermissionGate:
             body.append(f"{req.reason}\n")
         body.append("\n")
         body.append("Allow?", style=f"bold {risk_color}")
-        body.append("  ")
-        body.append("(y)", style="bold green")
-        body.append("es  ")
-        body.append("(n)", style="bold red")
-        body.append("o  ")
-        body.append("(a)", style="bold green")
-        body.append("lways allow  ")
-        body.append("(d)", style="bold red")
-        body.append("eny always")
-
+        body.append("  (y)es  (n)o  (a)lways allow  (d)eny always")
         console.print(
             Panel(
                 body,
@@ -176,8 +242,6 @@ class PermissionGate:
                 padding=(1, 2),
             )
         )
-        # Default NO on dangerous tools — Enter must not silently approve
-        # a Recycle-Bin wipe or a registry change.
         choice = console.input("[bold]› [/bold]").strip().lower()
         if choice in ("a", "always"):
             self._always_allow.add(req.tool)
