@@ -89,8 +89,14 @@ class CodexProvider(LLMProvider):
         # 30+ tool system prompt. `codex exec -` (or piped stdin with
         # no prompt arg) reads instructions from stdin.
         try:
+            # --skip-git-repo-check lets Codex run from any cwd; without
+            # it the CLI refuses with "Not inside a trusted directory"
+            # whenever OpenBro is invoked from a non-git folder (e.g.
+            # D:/OpenBro-teting/). The user already signed in, so the
+            # safety gate is unnecessary at this layer — OpenBro's own
+            # permission system gates write actions anyway.
             proc = subprocess.run(
-                [resolved, "exec", "-"],
+                [resolved, "exec", "--skip-git-repo-check", "-"],
                 input=prompt,
                 capture_output=True,
                 text=True,
