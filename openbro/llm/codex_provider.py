@@ -67,9 +67,7 @@ class CodexProvider(LLMProvider):
         # the chat path simple.
         return False
 
-    def chat(
-        self, messages: list[Message], tools: list[dict] | None = None
-    ) -> LLMResponse:
+    def chat(self, messages: list[Message], tools: list[dict] | None = None) -> LLMResponse:
         # Resolve to the full path. On Windows the npm-installed
         # `codex` is a .cmd shim that subprocess can't locate from a
         # bare name (CreateProcess returns WinError 2). which() finds
@@ -105,13 +103,9 @@ class CodexProvider(LLMProvider):
                 errors="replace",
             )
         except subprocess.TimeoutExpired as e:
-            raise RuntimeError(
-                f"Codex CLI timed out after {self._timeout}s"
-            ) from e
+            raise RuntimeError(f"Codex CLI timed out after {self._timeout}s") from e
         if proc.returncode != 0:
-            raise RuntimeError(
-                f"Codex exited {proc.returncode}: {proc.stderr.strip()[:500]}"
-            )
+            raise RuntimeError(f"Codex exited {proc.returncode}: {proc.stderr.strip()[:500]}")
         answer = self._extract_answer(proc.stdout)
         # Codex prints "tokens used\n<n>" at the end; pull the count out
         # so the REPL status line keeps working even without an API
