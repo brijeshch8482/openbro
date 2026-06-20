@@ -19,8 +19,21 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import threading
+import time
 
 from openbro.llm.base import LLMProvider, LLMResponse, Message
+
+
+def _get_activity_bus():
+    """Lazy import the activity bus so this provider stays importable
+    from minimal scripts that don't pull the agent loop."""
+    try:
+        from openbro.core.activity import get_bus
+
+        return get_bus()
+    except Exception:
+        return None
 
 
 class CodexProvider(LLMProvider):
@@ -86,6 +99,10 @@ class CodexProvider(LLMProvider):
         # line is too long." Captured 2026-06-16 in REPL with a
         # 30+ tool system prompt. `codex exec -` (or piped stdin with
         # no prompt arg) reads instructions from stdin.
+        # Heartbeat thread keeps the REPL spinner alive while codex
+        # works — long turns can easily hit 30 s. Same fix as
+        # ClaudeProvider; captured 2026-06-20 user complaint about
+        # the agent appearing stuck.
         try:
             # --skip-git-repo-check lets Codex run from any cwd; without
             # it the CLI refuses with "Not inside a trusted directory"
@@ -93,24 +110,65 @@ class CodexProvider(LLMProvider):
             # D:/OpenBro-teting/). The user already signed in, so the
             # safety gate is unnecessary at this layer — OpenBro's own
             # permission system gates write actions anyway.
-            proc = subprocess.run(
+            proc = subprocess.Popen(
                 [resolved, "exec", "--skip-git-repo-check", "-"],
-                input=prompt,
-                capture_output=True,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=self._timeout,
                 encoding="utf-8",
                 errors="replace",
             )
-        except subprocess.TimeoutExpired as e:
-            raise RuntimeError(f"Codex CLI timed out after {self._timeout}s") from e
-        if proc.returncode != 0:
-            raise RuntimeError(f"Codex exited {proc.returncode}: {proc.stderr.strip()[:500]}")
-        answer = self._extract_answer(proc.stdout)
+        except FileNotFoundError as e:
+            raise RuntimeError(f"Could not spawn {resolved}: {e}") from e
+
+        try:
+            proc.stdin.write(prompt)
+        finally:
+            try:
+                proc.stdin.close()
+            except Exception:
+                pass
+
+        bus = _get_activity_bus()
+        started = time.time()
+        stop_flag = threading.Event()
+
+        def _heartbeat() -> None:
+            time.sleep(1.0)
+            while not stop_flag.is_set():
+                if bus is not None:
+                    elapsed = time.time() - started
+                    bus.emit(
+                        "thinking",
+                        f"codex · {elapsed:.0f}s",
+                        source="codex",
+                        elapsed=elapsed,
+                    )
+                stop_flag.wait(2.0)
+
+        beater = threading.Thread(target=_heartbeat, daemon=True)
+        beater.start()
+
+        try:
+            try:
+                stdout_text, stderr_text = proc.communicate(timeout=self._timeout)
+            except subprocess.TimeoutExpired as e:
+                proc.kill()
+                raise RuntimeError(f"Codex CLI timed out after {self._timeout}s") from e
+        finally:
+            stop_flag.set()
+            beater.join(timeout=0.5)
+
+        if proc.returncode not in (0, None):
+            raise RuntimeError(
+                f"Codex exited {proc.returncode}: {(stderr_text or '').strip()[:500]}"
+            )
+        answer = self._extract_answer(stdout_text or "")
         # Codex prints "tokens used\n<n>" at the end; pull the count out
         # so the REPL status line keeps working even without an API
         # usage object.
-        usage = self._extract_usage(proc.stdout)
+        usage = self._extract_usage(stdout_text or "")
         return LLMResponse(
             content=answer,
             tool_calls=[],

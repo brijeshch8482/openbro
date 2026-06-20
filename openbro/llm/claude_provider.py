@@ -25,8 +25,21 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import threading
+import time
 
 from openbro.llm.base import LLMProvider, LLMResponse, Message
+
+
+def _get_activity_bus():
+    """Lazy import of the activity bus so this module stays usable
+    even from short scripts that don't pull in the agent loop."""
+    try:
+        from openbro.core.activity import get_bus
+
+        return get_bus()
+    except Exception:
+        return None
 
 
 class ClaudeProvider(LLMProvider):
@@ -72,24 +85,77 @@ class ClaudeProvider(LLMProvider):
                 "Then sign in once: claude login"
             )
         prompt = self._flatten(messages)
-        # Pipe via stdin — OpenBro's flattened prompt (system + tools +
-        # history) routinely exceeds Windows' 8 KB command-line cap.
-        # `claude -p` reads from stdin when no prompt arg is given.
+        # Captured 2026-06-20: claude --print with OpenBro's big
+        # system prompt (~30 KB) takes ~20 s end-to-end on the
+        # subscription tier. subprocess.run() blocked the main
+        # thread and the spinner froze; the user thought OpenBro
+        # was stuck and said so twice ("ye stuck ho jata hai…",
+        # "jabaab hi nhi de rha"). Real fix: keep the call but
+        # spawn a heartbeat thread that emits a "thinking" event
+        # every couple of seconds with elapsed time. The activity
+        # bus drives the REPL spinner, so as long as it sees
+        # events it keeps rendering "20s elapsed, still working".
         try:
-            proc = subprocess.run(
+            proc = subprocess.Popen(
                 [resolved, "-p", "--output-format", "text"],
-                input=prompt,
-                capture_output=True,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=self._timeout,
                 encoding="utf-8",
                 errors="replace",
             )
-        except subprocess.TimeoutExpired as e:
-            raise RuntimeError(f"Claude CLI timed out after {self._timeout}s") from e
-        if proc.returncode != 0:
-            raise RuntimeError(f"Claude exited {proc.returncode}: {proc.stderr.strip()[:500]}")
-        answer = self._extract_answer(proc.stdout)
+        except FileNotFoundError as e:
+            raise RuntimeError(f"Could not spawn {resolved}: {e}") from e
+
+        try:
+            proc.stdin.write(prompt)
+        finally:
+            try:
+                proc.stdin.close()
+            except Exception:
+                pass
+
+        bus = _get_activity_bus()
+        started = time.time()
+        stop_flag = threading.Event()
+
+        def _heartbeat() -> None:
+            # 2-second cadence balances "spinner is alive" against
+            # event-bus noise. The first beat goes out after 1 s so
+            # the user sees activity almost immediately even on
+            # fast turns.
+            time.sleep(1.0)
+            while not stop_flag.is_set():
+                if bus is not None:
+                    elapsed = time.time() - started
+                    bus.emit(
+                        "thinking",
+                        f"claude · {elapsed:.0f}s",
+                        source="claude",
+                        elapsed=elapsed,
+                    )
+                stop_flag.wait(2.0)
+
+        beater = threading.Thread(target=_heartbeat, daemon=True)
+        beater.start()
+
+        try:
+            try:
+                stdout_text, stderr_text = proc.communicate(timeout=self._timeout)
+            except subprocess.TimeoutExpired as e:
+                proc.kill()
+                raise RuntimeError(f"Claude CLI timed out after {self._timeout}s") from e
+        finally:
+            stop_flag.set()
+            beater.join(timeout=0.5)
+
+        if proc.returncode not in (0, None):
+            raise RuntimeError(
+                f"Claude exited {proc.returncode}: {(stderr_text or '').strip()[:500]}"
+            )
+
+        answer = self._extract_answer(stdout_text or "")
         return LLMResponse(
             content=answer,
             tool_calls=[],
