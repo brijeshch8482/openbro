@@ -127,32 +127,58 @@ class PermissionGate:
         return decision
 
     def _ask_cli(self, req: PermissionRequest) -> bool:
+        # Claude-Code-style single bordered modal: tool details + the
+        # four action choices live INSIDE the same panel, with a clear
+        # "Allow?" headline. The prompt then renders as one bold line
+        # right under the modal. Captured 2026-06-20: user said
+        # "yes no ke liye chat box ke uper claude jasie professional
+        # prompt aaye" — pre-fix the panel was the only thing visible
+        # and the dim "[y]es / [n]o …" row underneath got lost.
         from rich.console import Console
         from rich.panel import Panel
+        from rich.text import Text
 
         console = Console()
         risk_color = {"safe": "green", "moderate": "yellow", "dangerous": "red"}[req.risk]
-        body = (
-            f"[bold]Tool:[/bold] {req.tool}\n"
-            f"[bold]Risk:[/bold] [{risk_color}]{req.risk}[/{risk_color}]\n"
-            f"[bold]Args:[/bold] {req.args}"
-        )
+        args_repr = str(req.args)
+        if len(args_repr) > 220:
+            args_repr = args_repr[:217] + "…"
+
+        body = Text()
+        body.append("Tool   ", style="bold")
+        body.append(f"{req.tool}\n")
+        body.append("Risk   ", style="bold")
+        body.append(req.risk, style=f"bold {risk_color}")
+        body.append("\n")
+        body.append("Args   ", style="bold")
+        body.append(args_repr + "\n")
         if req.reason:
-            body += f"\n[bold]Why:[/bold] {req.reason}"
-        console.print(Panel(body, title="Permission required", border_style=risk_color))
-        # Captured 2026-06-20: the previous "[y]es / [n]o / [a]lways
-        # allow / [d]eny always >" prompt rendered as a dim text line
-        # right under the bordered panel and a real user missed it
-        # entirely, then asked "isme yes no poocha hi nhi?" Boost the
-        # prompt: bold + colored, on its own line, with a "y/N" hint
-        # so the default is unambiguous. Default stays NO on dangerous
-        # ops — bare Enter must never silently approve a Recycle-Bin
-        # wipe or a registry change.
+            body.append("Why    ", style="bold")
+            body.append(f"{req.reason}\n")
+        body.append("\n")
+        body.append("Allow?", style=f"bold {risk_color}")
+        body.append("  ")
+        body.append("(y)", style="bold green")
+        body.append("es  ")
+        body.append("(n)", style="bold red")
+        body.append("o  ")
+        body.append("(a)", style="bold green")
+        body.append("lways allow  ")
+        body.append("(d)", style="bold red")
+        body.append("eny always")
+
         console.print(
-            f"[bold {risk_color}]→ Allow this {req.risk} action?[/bold {risk_color}]"
-            "  [dim](y = yes, n = no, a = always allow, d = deny always)[/dim]"
+            Panel(
+                body,
+                title=f"  Permission required  [{req.risk}]",
+                title_align="left",
+                border_style=risk_color,
+                padding=(1, 2),
+            )
         )
-        choice = console.input(f"[bold]{req.tool} [y/N] >[/bold] ").strip().lower()
+        # Default NO on dangerous tools — Enter must not silently approve
+        # a Recycle-Bin wipe or a registry change.
+        choice = console.input("[bold]› [/bold]").strip().lower()
         if choice in ("a", "always"):
             self._always_allow.add(req.tool)
             return True

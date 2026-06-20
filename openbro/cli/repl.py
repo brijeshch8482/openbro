@@ -268,9 +268,24 @@ class _ToolCallRenderer:
                 )
                 # Args: dim, indented; syntax-highlight code, plain
                 # the rest. Long args get truncated for display only —
-                # the LLM still sent the full args.
+                # the LLM still sent the full args. Captured 2026-06-20
+                # user ask: "code (bash) likhe max 3-4 line hi show ho
+                # aur hide rhe". For multi-line code args (python,
+                # powershell, shell scripts) we now cap at the same
+                # 4-line preview the assistant-response folder uses and
+                # spill the full body to a sidecar file so the user can
+                # open it for review.
                 body_show = body
-                if len(body_show) > 800:
+                body_lines = body_show.splitlines()
+                if len(body_lines) > _CODE_PREVIEW_LINES + 1:
+                    sidecar = _save_code_sidecar(lexer or "txt", body_show)
+                    preview = "\n".join(body_lines[:_CODE_PREVIEW_LINES])
+                    body_show = (
+                        f"{preview}\n"
+                        f"… (+{len(body_lines) - _CODE_PREVIEW_LINES} more lines · "
+                        f"full code: {sidecar})"
+                    )
+                elif len(body_show) > 800:
                     body_show = body_show[:800] + f"\n… (+{len(body) - 800} chars)"
                 if lexer in ("python", "powershell", "json"):
                     self.con.print(
@@ -379,18 +394,77 @@ COMMANDS = [
 completer = WordCompleter(COMMANDS, ignore_case=True)
 
 
+_CODE_FENCE_RE = __import__("re").compile(
+    r"```([a-zA-Z0-9_+\-]*)\n(.*?)```", __import__("re").DOTALL
+)
+# Captured 2026-06-20 user ask: "ye jo code (bash) likhe max 3-4 line
+# hi show ho aur hide rhe...shortcut de full view ke liye". Long code
+# fences in assistant replies overwhelm the chat; the renderer now
+# truncates anything over this threshold and spills the full body to
+# a sidecar file so the user can `code <path>` to see it.
+_CODE_PREVIEW_LINES = 4
+
+
+def _save_code_sidecar(lang: str, body: str) -> str:
+    """Write `body` to a temp file and return the path so we can show
+    the user a "open this for the full code" shortcut."""
+    import os as _os
+    import tempfile as _tmp
+
+    suffix_for = {
+        "python": ".py",
+        "py": ".py",
+        "bash": ".sh",
+        "sh": ".sh",
+        "powershell": ".ps1",
+        "ps1": ".ps1",
+        "javascript": ".js",
+        "js": ".js",
+        "ts": ".ts",
+        "json": ".json",
+        "yaml": ".yaml",
+        "sql": ".sql",
+    }
+    suffix = suffix_for.get((lang or "").lower(), ".txt")
+    fd, path = _tmp.mkstemp(prefix="openbro_code_", suffix=suffix)
+    with _os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(body)
+    return path
+
+
+def _fold_code_fences(text: str) -> str:
+    """Replace long fenced code blocks with a 4-line preview plus a
+    sidecar-file hint. Short blocks pass through unchanged."""
+
+    def _replace(match):
+        lang = match.group(1)
+        body = match.group(2)
+        lines = body.splitlines()
+        if len(lines) <= _CODE_PREVIEW_LINES + 1:
+            return match.group(0)
+        path = _save_code_sidecar(lang, body)
+        preview = "\n".join(lines[:_CODE_PREVIEW_LINES])
+        more = len(lines) - _CODE_PREVIEW_LINES
+        return f"```{lang}\n{preview}\n… (+{more} more lines · full code: {path})\n```"
+
+    return _CODE_FENCE_RE.sub(_replace, text)
+
+
 def _render_response(con: Console, text: str) -> None:
     """Render an assistant response with Markdown formatting.
 
     Falls back to plain print if Markdown rendering fails (e.g. very
     long output that the parser chokes on). Claude Code parity:
     code fences become syntax-highlighted blocks, lists / tables /
-    headings render properly instead of as raw backticks.
+    headings render properly instead of as raw backticks. Long code
+    fences are folded to a 4-line preview with a file path the user
+    can open for the full body.
     """
     from rich.markdown import Markdown
 
     if not text:
         return
+    text = _fold_code_fences(text)
     try:
         # Markdown() takes care of code blocks, lists, headings.
         con.print(Markdown(text, code_theme="monokai"))
