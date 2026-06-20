@@ -29,8 +29,11 @@ class CodexAgent(CliAgent):
     )
 
     def build_command(self, task, cwd, max_cost_usd):
-        # codex exec runs non-interactively; --quiet to keep output clean
-        return [self.binary, "exec", "--quiet", task]
+        # codex exec runs non-interactively. The pre-v0.130 `--quiet`
+        # flag was removed by OpenAI — current builds just stream
+        # clean output to stdout. Captured 2026-06-16 on codex 0.130.0:
+        # "error: unexpected argument '--quiet' found".
+        return [self.binary, "exec", task]
 
     def parse_stream(self, stdout_lines: Iterable[str], on_event) -> CliAgentResult:
         text_parts: list[str] = []
