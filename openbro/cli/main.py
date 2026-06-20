@@ -19,6 +19,7 @@ from openbro import __version__
             "local",
             "specialist",
             "codex",
+            "claude",
             "anthropic",
             "openai",
             "groq",

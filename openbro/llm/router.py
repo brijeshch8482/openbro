@@ -124,6 +124,23 @@ def _build_one(provider_name: str, config: dict, providers_config: dict) -> LLMP
             n_gpu_layers=local_cfg.get("n_gpu_layers", -1),
         )
 
+    elif provider_name == "claude":
+        # Uses the locally-installed `claude` CLI (Claude Code) as the
+        # chat backend. OAuth is handled by claude itself (one-time
+        # `claude login`), billing rides on the user's Claude
+        # subscription, so we don't need an ANTHROPIC_API_KEY.
+        # Configure via:
+        #   providers.claude.binary   (default 'claude')
+        #   providers.claude.timeout  (default 300 s — code tasks take
+        #                              longer than chat completions)
+        from openbro.llm.claude_provider import ClaudeProvider
+
+        cl_cfg = providers_config.get("claude", {})
+        return ClaudeProvider(
+            binary=cl_cfg.get("binary", "claude"),
+            timeout=cl_cfg.get("timeout", 300),
+        )
+
     elif provider_name == "codex":
         # Uses the locally-installed `codex` CLI as the chat backend.
         # OAuth is handled by codex itself (one-time `codex login`),
