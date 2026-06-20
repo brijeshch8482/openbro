@@ -82,9 +82,16 @@ class CodexProvider(LLMProvider):
                 "Then sign in once: codex login"
             )
         prompt = self._flatten(messages)
+        # Pipe via stdin instead of arg — OpenBro's flattened prompt
+        # (system + tools + history) routinely exceeds Windows' 8 KB
+        # command-line cap and the CLI rejects it with "The command
+        # line is too long." Captured 2026-06-16 in REPL with a
+        # 30+ tool system prompt. `codex exec -` (or piped stdin with
+        # no prompt arg) reads instructions from stdin.
         try:
             proc = subprocess.run(
-                [resolved, "exec", prompt],
+                [resolved, "exec", "-"],
+                input=prompt,
                 capture_output=True,
                 text=True,
                 timeout=self._timeout,
