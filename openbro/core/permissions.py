@@ -140,7 +140,19 @@ class PermissionGate:
         if req.reason:
             body += f"\n[bold]Why:[/bold] {req.reason}"
         console.print(Panel(body, title="Permission required", border_style=risk_color))
-        choice = console.input("[y]es / [n]o / [a]lways allow / [d]eny always > ").strip().lower()
+        # Captured 2026-06-20: the previous "[y]es / [n]o / [a]lways
+        # allow / [d]eny always >" prompt rendered as a dim text line
+        # right under the bordered panel and a real user missed it
+        # entirely, then asked "isme yes no poocha hi nhi?" Boost the
+        # prompt: bold + colored, on its own line, with a "y/N" hint
+        # so the default is unambiguous. Default stays NO on dangerous
+        # ops — bare Enter must never silently approve a Recycle-Bin
+        # wipe or a registry change.
+        console.print(
+            f"[bold {risk_color}]→ Allow this {req.risk} action?[/bold {risk_color}]"
+            "  [dim](y = yes, n = no, a = always allow, d = deny always)[/dim]"
+        )
+        choice = console.input(f"[bold]{req.tool} [y/N] >[/bold] ").strip().lower()
         if choice in ("a", "always"):
             self._always_allow.add(req.tool)
             return True
