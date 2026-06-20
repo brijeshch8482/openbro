@@ -553,17 +553,18 @@ def test_tool_registry():
 
 
 def test_tool_registry_count():
-    # 21 tools: + document for the universal file reader (PDF/image OCR/
-    # audio transcript/HTML/CSV/zip — replaces the old "main sirf .docx
-    # padh sakta" failure mode). sticky_notes is still the carve-out for
-    # Windows Sticky Notes app integration.
-    assert len(BUILTIN_TOOLS) == 21
+    # 22 tools: + elevate (UAC-prompt admin shell — captured 2026-06-20
+    # when the user noticed OpenBro silently swallowed "Access denied"
+    # on C:/Windows/Temp instead of asking for elevation). document
+    # was the previous addition for the universal file reader. sticky_notes
+    # is still the carve-out for Windows Sticky Notes app integration.
+    assert len(BUILTIN_TOOLS) == 22
 
 
 def test_tool_registry_schema():
     registry = ToolRegistry()
     schemas = registry.get_tools_schema()
-    assert len(schemas) == 21
+    assert len(schemas) == 22
     for s in schemas:
         assert "name" in s
         assert "parameters" in s

@@ -8,6 +8,7 @@ from openbro.tools.clipboard_tool import ClipboardTool
 from openbro.tools.datetime_tool import DateTimeTool
 from openbro.tools.document_tool import DocumentTool
 from openbro.tools.download_tool import DownloadTool
+from openbro.tools.elevate_tool import ElevateTool
 from openbro.tools.excel_tool import ExcelTool
 from openbro.tools.file_tool import FileTool
 from openbro.tools.memory_tool import MemoryTool
@@ -32,6 +33,7 @@ BUILTIN_TOOLS = [
     DateTimeTool,
     DocumentTool,
     DownloadTool,
+    ElevateTool,
     ExcelTool,
     FileTool,
     MemoryTool,
