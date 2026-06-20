@@ -124,6 +124,21 @@ def _build_one(provider_name: str, config: dict, providers_config: dict) -> LLMP
             n_gpu_layers=local_cfg.get("n_gpu_layers", -1),
         )
 
+    elif provider_name == "codex":
+        # Uses the locally-installed `codex` CLI as the chat backend.
+        # OAuth is handled by codex itself (one-time `codex login`),
+        # billing rides on the user's ChatGPT subscription, so we don't
+        # need an OPENAI_API_KEY. Configure via:
+        #   providers.codex.binary   (default 'codex')
+        #   providers.codex.timeout  (default 180 s)
+        from openbro.llm.codex_provider import CodexProvider
+
+        cdx_cfg = providers_config.get("codex", {})
+        return CodexProvider(
+            binary=cdx_cfg.get("binary", "codex"),
+            timeout=cdx_cfg.get("timeout", 180),
+        )
+
     elif provider_name == "specialist":
         # Tree-of-specialists: tiny router maps the prompt to a
         # category, the adapter engine attaches the matching LoRA on
