@@ -113,11 +113,22 @@ class ToolRegistry:
     def get_tool(self, name: str) -> BaseTool | None:
         return self._tools.get(name)
 
-    def get_risk(self, name: str) -> str:
+    def get_risk(self, name: str, args: dict | None = None) -> str:
+        """Return the risk tier for `name`, optionally adjusted by the
+        actual args. `BaseTool.compute_risk(args)` is what catches a
+        destructive `shell` invocation that the class-level tier would
+        otherwise label as merely MODERATE."""
         tool = self._tools.get(name)
         if not tool:
             return RiskLevel.SAFE.value
-        return tool.risk.value if isinstance(tool.risk, RiskLevel) else str(tool.risk)
+        if args is not None and hasattr(tool, "compute_risk"):
+            try:
+                risk = tool.compute_risk(args)
+            except Exception:
+                risk = tool.risk
+        else:
+            risk = tool.risk
+        return risk.value if isinstance(risk, RiskLevel) else str(risk)
 
     def execute(self, name: str, args: dict, confirmed: bool = False) -> str:
         tool = self._tools.get(name)

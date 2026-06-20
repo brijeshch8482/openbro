@@ -27,3 +27,14 @@ class BaseTool(ABC):
 
     @abstractmethod
     def schema(self) -> dict: ...
+
+    def compute_risk(self, args: dict) -> RiskLevel:
+        """Per-call risk classification.
+
+        Default: return the class-level `risk`. Tools that can run
+        either trivially or destructively (the prime case is `shell`:
+        `Get-Process` vs `Remove-Item -Recurse -Force C:\\Windows\\Temp`)
+        override this so the permission gate sees the right tier and
+        prompts the user when the actual command is dangerous.
+        """
+        return self.risk

@@ -382,7 +382,31 @@ class Agent:
             "Never silently swallow permission errors and report"
             " partial success — the user expects you to ask for"
             " elevation, not give up. Captured 2026-06-20: user said"
-            " 'agar permission ki jaroorat hai to maangta kyo nhi'."
+            " 'agar permission ki jaroorat hai to maangta kyo nhi'.\n"
+            "\n"
+            "### 8. Reply tone — Claude / Codex style, not a tutorial\n"
+            "After the tools have done the work, the final assistant"
+            " message goes to a human reading a chat. Keep it short"
+            " and professional:\n"
+            "  • 1-3 lines for most outcomes. Long bullet lists only"
+            " when the user explicitly asked for steps.\n"
+            "  • Lead with the result, not the journey. 'Temp cleared"
+            " (1.2 GB freed). Recycle Bin still locked — chrome.exe"
+            " is holding 200 MB.' Not 'It looks like the previous"
+            " commands failed because…'\n"
+            "  • No meta-narration: skip 'I am switching to native"
+            " PowerShell', 'Let me try a different approach',"
+            " 'attempting cleanup now'. Just dispatch the next tool."
+            " Captured 2026-06-20: user said 'isko thoda professional"
+            " reply krne bolo...jaise claude aur codex krta hai'.\n"
+            "  • Never paste the tool's raw command line back at the"
+            ' user (`shell.command(command="powershell -Command …")`)'
+            " — that's debug output, not a conversation. Tools run;"
+            " you summarise the outcome.\n"
+            "  • Failure stays honest: 'Recycle Bin clean nahi hua,"
+            " UAC se permission nahi mili.' One line, no apology"
+            " loop, no 'Would you like me to try again?' unless the"
+            " next attempt is materially different."
         )
 
     def _world_facts_block(self) -> str:
@@ -816,7 +840,12 @@ class Agent:
             name = func.get("name", "")
             args = func.get("arguments", {})
 
-            risk = self.tool_registry.get_risk(name)
+            # Pass args through compute_risk so a destructive `shell`
+            # invocation (Remove-Item, rm -rf, Clear-RecycleBin, …)
+            # gets upgraded from MODERATE to DANGEROUS and actually
+            # triggers the permission modal. Read-only Get-* / dir /
+            # ps stay MODERATE and run silently in normal mode.
+            risk = self.tool_registry.get_risk(name, args=args)
             self.bus.emit(
                 "tool_start",
                 f"{name} ({risk})",

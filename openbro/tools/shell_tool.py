@@ -24,12 +24,48 @@ class ShellTool(BaseTool):
         "the `python` tool for compute/parsing — `shell` is for native "
         "OS commands."
     )
-    # Was DANGEROUS, which made the LLM refuse to reach for it in
-    # normal queries. Most shell commands a chat agent runs (Get-PSDrive,
-    # dir, df, ps, ipconfig) are read-only — the real teeth are the
-    # BLOCKED_PATTERNS list above, not the risk tier. Boss mode still
-    # gates every moderate tool if the user wants stricter policy.
+    # Class-level default is MODERATE so read-only Get-* / dir / ps
+    # don't drown the user in prompts. `compute_risk` below bumps
+    # destructive commands (Remove-Item, rm -rf, Clear-RecycleBin,
+    # registry edits, service stops, …) to DANGEROUS so the
+    # permission modal fires before they execute. Captured 2026-06-20
+    # user complaint: "poocha hi nhi permission??" while the agent ran
+    # ten Remove-Item attempts in a row against Temp + Recycle Bin.
     risk = RiskLevel.MODERATE
+
+    # Substring patterns that should ALWAYS prompt the user. Casing
+    # doesn't matter — we lowercase the command before checking.
+    _DESTRUCTIVE_PATTERNS = (
+        "remove-item",
+        "rmdir",
+        "rd /s",
+        "del /q",
+        "del /s",
+        "rm -r",
+        "rm -f",
+        "rm /",
+        "clear-recyclebin",
+        "stop-service",
+        "set-service",
+        "stop-process -force",
+        "taskkill /f",
+        "reg delete",
+        "reg add hklm",
+        "reg add 'hklm",
+        "shutdown ",
+        "restart-computer",
+        "format ",
+        "diskpart",
+        "cipher /w",
+        "icacls ",
+        "takeown ",
+    )
+
+    def compute_risk(self, args: dict) -> RiskLevel:
+        cmd = str(args.get("command", "")).lower()
+        if any(p in cmd for p in self._DESTRUCTIVE_PATTERNS):
+            return RiskLevel.DANGEROUS
+        return self.risk
 
     def run(self, command: str, background: bool = False, timeout: int = 30) -> str:
         # Safety check
