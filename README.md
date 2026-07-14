@@ -1,3 +1,4 @@
+<img width="1280" height="640" alt="openbro_social_preview" src="https://github.com/user-attachments/assets/021580e8-dd3e-4016-80ae-a3a6cf3c7f1e" />
 <div align="center">
 
 # OpenBro
