@@ -3,7 +3,9 @@
 import uuid
 from collections import deque
 
+from openbro.llm.base import Message
 from openbro.memory import store
+from openbro.memory.transcript import Transcript, TranscriptStore, build_transcript_store
 
 
 class MemoryManager:
@@ -20,6 +22,7 @@ class MemoryManager:
         channel: str = "cli",
         session_id: str | None = None,
         working_size: int = 30,
+        transcripts: TranscriptStore | None = None,
     ):
         self.user_id = user_id
         self.channel = channel
@@ -29,6 +32,16 @@ class MemoryManager:
 
         # Initialize DB
         store.init_db()
+        if transcripts is None:
+            try:
+                from openbro.utils.config import load_config
+
+                transcripts = build_transcript_store(load_config())
+            except NotImplementedError:
+                raise
+            except Exception:
+                transcripts = build_transcript_store(None)
+        self.transcripts = transcripts
 
     def _new_session_id(self) -> str:
         return str(uuid.uuid4())[:12]
@@ -36,16 +49,28 @@ class MemoryManager:
     # === Tier 1: Working memory ===
 
     def add(self, role: str, content: str, persist: bool = True):
-        """Add a message to working memory and optionally persist to session store."""
-        self._working.append({"role": role, "content": content})
+        """Add a plain text message to working memory and optionally persist it."""
         if persist:
-            store.save_message(
-                role=role,
-                content=content,
-                session_id=self.session_id,
-                user_id=self.user_id,
-                channel=self.channel,
-            )
+            self.record(Message(role=role, content=content))
+        else:
+            self._working.append({"role": role, "content": content})
+
+    def record(self, msg: Message) -> str:
+        """Persist one full message (tool calls and tool results included)
+        to the session transcript. Sets and returns `msg.id`."""
+        self._working.append({"role": msg.role, "content": msg.content})
+        uid = self.transcripts.append(self.session_id, self.user_id, self.channel, msg)
+        msg.id = uid
+        return uid
+
+    def save_summary(self, summary: str, upto_uid: str | None) -> None:
+        """Store the rolling conversation summary written by compaction."""
+        self.transcripts.set_summary(self.session_id, self.user_id, summary, upto_uid)
+
+    def load_transcript(self, session_id: str) -> Transcript:
+        """Switch to `session_id` and return its summary + messages after it."""
+        self.load_session(session_id)
+        return self.transcripts.load(session_id, self.user_id)
 
     def working(self) -> list[dict]:
         return list(self._working)

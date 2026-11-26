@@ -11,6 +11,9 @@ class Message:
     content: str
     tool_calls: list = field(default_factory=list)
     tool_call_id: str | None = None
+    # Transcript uid, set when the message is recorded. Never sent to a
+    # provider (they build their payloads field by field).
+    id: str | None = None
 
 
 @dataclass

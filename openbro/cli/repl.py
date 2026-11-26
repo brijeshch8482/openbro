@@ -390,6 +390,8 @@ COMMANDS = [
     "brain",
     "clear",
     "reset",
+    "compact",
+    "context",
 ]
 completer = WordCompleter(COMMANDS, ignore_case=True)
 
@@ -1005,12 +1007,44 @@ def _handle_command(cmd: str, agent: Agent) -> bool:
         print_banner()
         return True
 
+    if cmd_lower == "compact" or cmd_lower.startswith("compact "):
+        _compact(agent, cmd[len("compact") :].strip() or None)
+        return True
+
+    if cmd_lower == "context":
+        _show_context(agent)
+        return True
+
     if cmd_lower == "reset":
         agent.history = [agent.history[0]]  # Keep system prompt only
         console.print("[yellow]Chat history cleared.[/yellow]\n")
         return True
 
     return False
+
+
+def _compact(agent: Agent, focus: str | None) -> None:
+    with console.status("[dim]compacting context…[/dim]"):
+        result = agent.compact(focus)
+    if result is None:
+        console.print("[dim]Nothing to compact yet.[/dim]\n")
+        return
+    console.print(f"[green]✓[/green] {result.describe()}\n")
+
+
+def _show_context(agent: Agent) -> None:
+    r = agent.context_report()
+    pct = (r["total"] / r["budget"] * 100) if r["budget"] else 0
+    table = Table(show_header=False, box=None, padding=(0, 2))
+    table.add_row("used", f"{r['total']:,} / {r['budget']:,} tokens ({pct:.0f}%)")
+    table.add_row("compacts at", f"{r['trigger']:,} tokens")
+    table.add_row("system prompt", f"{r['system']:,}")
+    table.add_row("summary", f"{r['summary']:,}" if r["summary"] else "none")
+    table.add_row(
+        "conversation", f"{r['conversation']:,} ({r['turns']} turns, {r['messages']} msgs)"
+    )
+    console.print(table)
+    console.print()
 
 
 def _show_help():
@@ -1066,6 +1100,8 @@ def _show_help():
     table.add_row("model remove <name>", "Uninstall offline model OR clear cloud key")
     table.add_row("clear", "Clear screen")
     table.add_row("reset", "Clear chat history")
+    table.add_row("compact [focus]", "Summarise older turns now to free context")
+    table.add_row("context", "Show context usage vs budget")
     table.add_row("exit / quit", "Exit OpenBro")
 
     console.print(table)
@@ -1200,27 +1236,19 @@ def _resume_previous_session(agent: Agent, session_hint: str) -> None:
         label = target_id
 
     try:
-        agent.memory.load_session(target_id)
+        transcript = agent.memory.load_transcript(target_id)
     except Exception as e:
         console.print(f"[red]Failed to load session {target_id}: {e}[/red]\n")
         return
 
-    # Replay the past turns into agent.history. The system prompt at
-    # history[0] stays — we only append from the resumed conversation.
-    from openbro.llm.base import Message as _Message
-
-    resumed = agent.memory.working()
-    replayed = 0
-    for msg in resumed:
-        role = msg.get("role")
-        if role not in ("user", "assistant"):
-            continue
-        agent.history.append(_Message(role=role, content=msg.get("content", "")))
-        replayed += 1
-
+    # Lossless restore: saved summary + every message after it, tool
+    # calls and tool results included. The agent repairs broken tool
+    # pairs (e.g. a crash mid-turn) and compacts to fit the budget.
+    replayed = agent.resume(transcript.summary, transcript.messages)
+    extra = ", with summary of earlier turns" if transcript.summary else ""
     console.print(
         f"[green]Resumed session[/green] [bold]{target_id}[/bold] "
-        f"[dim]({label}, {replayed} messages loaded)[/dim]\n"
+        f"[dim]({label}, {replayed} messages loaded{extra})[/dim]\n"
     )
 
 

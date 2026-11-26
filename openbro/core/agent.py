@@ -1,5 +1,6 @@
 """Core Agent - the brain of OpenBro."""
 
+import json
 import re
 import threading
 from collections.abc import Iterator
@@ -14,6 +15,18 @@ from openbro.core.workspace import detect_cached as detect_workspace
 from openbro.llm.base import LLMResponse, Message
 from openbro.llm.router import create_provider
 from openbro.memory import MemoryManager
+from openbro.memory.compaction import (
+    SUMMARY_SYSTEM_PROMPT,
+    CompactionConfig,
+    CompactionResult,
+    Compactor,
+    estimate_tokens,
+    make_summary_message,
+    render_for_summary,
+    repair_tool_pairs,
+    split_head,
+    split_turns,
+)
 from openbro.playbooks import PlaybookContext, PlaybookRegistry
 from openbro.tools.memory_tool import MemoryTool
 from openbro.tools.registry import ToolRegistry
@@ -200,6 +213,13 @@ class Agent:
         self._prompt_text_tools = self._text_tool_mode()
         self.history.append(Message(role="system", content=self._build_system_prompt()))
         self.max_history = config.get("agent", {}).get("max_history", 50)
+        # Compaction keeps history under a token budget by clearing old
+        # tool output and summarising older turns — never a blind cut.
+        compaction_cfg = CompactionConfig.from_config(config)
+        n_ctx = self._local_context_window()
+        if n_ctx:
+            compaction_cfg.max_context_tokens = min(compaction_cfg.max_context_tokens, n_ctx)
+        self.compactor = Compactor(compaction_cfg, summarize=self._summarize)
 
         self.last_language = "hinglish"
         self._lock = threading.RLock()  # serialize chat() across threads (REPL + voice)
@@ -628,14 +648,12 @@ class Agent:
         self._ensure_prompt_mode()
 
         self.bus.emit("user", user_input, lang=self.last_language)
-        self.history.append(Message(role="user", content=user_input))
-        self.memory.add("user", user_input)
+        self._append(Message(role="user", content=user_input))
         # Auto-record goals from goal-setting user turns. Persists to
         # SQLite so `openbro --resume` next session can pick up the
         # same goal. De-duplicates by text — same goal repeated isn't
         # re-recorded.
         self._maybe_record_goal(user_input)
-        self._trim_history()
 
         # Native function calling → send schemas. Text-only providers get
         # the tool protocol in the system prompt instead (tools=None) and
@@ -643,6 +661,12 @@ class Agent:
         text_tools = self._prompt_text_tools
         tools = None if text_tools else self.tool_registry.get_tools_schema()
         known_tools = self.tool_registry.list_tools()
+        # Schemas go out with every call but aren't in the history —
+        # reserve their size out of the compaction budget.
+        self.compactor.reserved_tokens = (
+            len(json.dumps(tools, ensure_ascii=False)) // 4 if tools else 0
+        )
+        self._fit_context()
         turn_started = _time.monotonic()
         # Per-turn counters so the UI can render "step N, X tokens, Ys"
         # without the agent having to thread them through every emit.
@@ -677,6 +701,10 @@ class Agent:
                 step=iteration + 1,
                 max_steps=max_iterations,
             )
+            if iteration:
+                # Tool results from the last round may have pushed the
+                # history over budget.
+                self._fit_context()
             llm_t0 = _time.monotonic()
             try:
                 response = self.provider.chat(self._messages_for_call(), tools=tools)
@@ -720,8 +748,7 @@ class Agent:
                 # detection regex, no escalation strategies; the user
                 # explicitly asked to drop the patch layer
                 # (2026-05-31).
-                self.history.append(Message(role="assistant", content=response.content))
-                self.memory.add("assistant", response.content)
+                self._append(Message(role="assistant", content=response.content))
                 self.bus.emit(
                     "assistant",
                     response.content,
@@ -747,8 +774,7 @@ class Agent:
         if text_tools:
             # No more tool rounds — drop any stray tags from the answer.
             response.content, _ = parse_tool_calls(response.content or "", known_tools)
-        self.history.append(Message(role="assistant", content=response.content))
-        self.memory.add("assistant", response.content)
+        self._append(Message(role="assistant", content=response.content))
         self.bus.emit("assistant", response.content)
         return response.content
 
@@ -766,9 +792,8 @@ class Agent:
         self._ensure_prompt_mode()
         self.bus.emit("user", user_input, lang=self.last_language)
 
-        self.history.append(Message(role="user", content=user_input))
-        self.memory.add("user", user_input)
-        self._trim_history()
+        self._append(Message(role="user", content=user_input))
+        self._fit_context()
 
         full_response = ""
         try:
@@ -779,8 +804,7 @@ class Agent:
             yield f"\nError: {e}"
             return
 
-        self.history.append(Message(role="assistant", content=full_response))
-        self.memory.add("assistant", full_response)
+        self._append(Message(role="assistant", content=full_response))
         self.bus.emit("assistant", full_response)
 
     def _try_playbook(self, user_input: str, turn_started: float) -> str | None:
@@ -870,8 +894,7 @@ class Agent:
 
         # Persist as a normal assistant turn so chat history stays consistent
         # — the LLM will see this on its next turn and won't be surprised.
-        self.history.append(Message(role="assistant", content=response))
-        self.memory.add("assistant", response)
+        self._append(Message(role="assistant", content=response))
         self.bus.emit(
             "assistant",
             response,
@@ -897,7 +920,7 @@ class Agent:
         """
         # Assistant turn that called tools — keep the original tool_calls
         # structure; provider serializes it back into the wire format.
-        self.history.append(
+        self._append(
             Message(
                 role="assistant",
                 content=response.content or "",
@@ -964,7 +987,7 @@ class Agent:
 
             # One role='tool' message per call, linked by tool_call_id.
             # This is the OpenAI/Groq Assistants spec.
-            self.history.append(
+            self._append(
                 Message(
                     role="tool",
                     content=result,
@@ -972,35 +995,106 @@ class Agent:
                 )
             )
 
-    def _trim_history(self):
-        """Drop the oldest WHOLE turns until history fits `max_history`.
+    # ─── history + context management (harness piece 2) ──────────────
 
-        A turn starts at a `user` message and runs until the next one,
-        so an assistant `tool_calls` message is never separated from its
-        `tool` results (an orphan `tool` message is a 400 on strict
-        APIs). The latest turn is always kept, even if it alone is over
-        the limit.
+    def _append(self, msg: Message) -> None:
+        """Append to the live history and record it in the transcript.
+
+        Every message is recorded — tool calls and tool results included —
+        so a resumed session sees exactly what the model saw.
         """
-        if not self.history:
-            return
-        has_system = self.history[0].role == "system"
-        head = self.history[:1] if has_system else []
-        body = self.history[1:] if has_system else list(self.history)
-        if len(body) <= self.max_history:
-            return
+        self.history.append(msg)
+        try:
+            self.memory.record(msg)
+        except Exception as e:  # never lose a turn over a storage hiccup
+            self.bus.emit("system", f"transcript write failed: {e}")
 
-        turns: list[list[Message]] = []
-        for msg in body:
-            if msg.role == "user" or not turns:
-                turns.append([msg])
-            else:
-                turns[-1].append(msg)
-        # A leading group that doesn't start with a user message is the
-        # leftover of an earlier cut — it can't stand alone, drop it first.
-        if turns and turns[0][0].role != "user" and len(turns) > 1:
-            turns.pop(0)
+    def _local_context_window(self) -> int | None:
+        """n_ctx of a local model (directly or as the active primary)."""
+        provider = getattr(self.provider, "primary", self.provider)
+        engine = getattr(provider, "engine", None)
+        for n_ctx in (getattr(engine, "n_ctx", None), getattr(provider, "n_ctx", None)):
+            # Only a real positive int counts (mocks and odd configs don't).
+            if isinstance(n_ctx, int) and not isinstance(n_ctx, bool) and n_ctx > 0:
+                return n_ctx
+        return None
 
-        total = sum(len(t) for t in turns)
-        while len(turns) > 1 and total > self.max_history:
-            total -= len(turns.pop(0))
-        self.history = head + [m for t in turns for m in t]
+    def _fit_context(
+        self, force: bool = False, focus: str | None = None
+    ) -> CompactionResult | None:
+        """Compact the history if it is over budget (or when forced)."""
+        result = self.compactor.fit(self.history, force=force, focus=focus)
+        if result is None:
+            return None
+        self.history = result.history
+        if result.summary:
+            try:
+                self.memory.save_summary(result.summary, result.summary_upto)
+            except Exception as e:
+                self.bus.emit("system", f"summary save failed: {e}")
+        self.bus.emit(
+            "system",
+            result.describe(),
+            compaction=True,
+            tokens_before=result.tokens_before,
+            tokens_after=result.tokens_after,
+            summarised_turns=result.summarised_turns,
+        )
+        return result
+
+    def _summarize(self, prior: str | None, messages: list[Message], focus: str | None) -> str:
+        """One no-tools model call that folds older turns into the summary."""
+        budget_chars = int(self.compactor.budget * 0.5) * 4
+        transcript = render_for_summary(messages)
+        if len(transcript) > budget_chars:
+            transcript = "…[earlier part truncated]\n" + transcript[-budget_chars:]
+        parts = []
+        if prior:
+            parts.append(f"Existing summary (merge it in, keep what still matters):\n{prior}")
+        parts.append(f"Conversation to summarise:\n{transcript}")
+        if focus:
+            parts.append(f"The user asked to keep this in focus: {focus}")
+        response = self.provider.chat(
+            [
+                Message(role="system", content=SUMMARY_SYSTEM_PROMPT),
+                Message(role="user", content="\n\n".join(parts)),
+            ],
+            tools=None,
+        )
+        self.session_tokens_in += int(response.usage.get("input", 0) or 0)
+        self.session_tokens_out += int(response.usage.get("output", 0) or 0)
+        text, _ = parse_tool_calls(response.content or "", self.tool_registry.list_tools())
+        limit = self.compactor.config.summary_max_tokens * 4 * 2
+        return text.strip()[:limit]
+
+    def compact(self, focus: str | None = None) -> CompactionResult | None:
+        """`compact` command: summarise every complete turn now."""
+        with self._lock:
+            return self._fit_context(force=True, focus=focus)
+
+    def context_report(self) -> dict:
+        """Numbers for the `context` command."""
+        head, summary, body = split_head(self.history)
+        return {
+            "budget": self.compactor.budget,
+            "trigger": int(self.compactor.budget * self.compactor.config.trigger_ratio),
+            "total": estimate_tokens(self.history),
+            "system": estimate_tokens(head),
+            "summary": estimate_tokens([summary]) if summary else 0,
+            "conversation": estimate_tokens(body),
+            "turns": sum(1 for t in split_turns(body) if t and t[0].role == "user"),
+            "messages": len(body),
+        }
+
+    def resume(self, summary: str | None, messages: list[Message]) -> int:
+        """Load a past session: system prompt + saved summary + messages
+        after it (tool calls included), repaired and compacted to fit.
+        Returns the number of messages restored."""
+        with self._lock:
+            restored = repair_tool_pairs(messages)
+            self.history = [self.history[0]]
+            if summary:
+                self.history.append(make_summary_message(summary))
+            self.history.extend(restored)
+            self._fit_context()
+            return len(restored)

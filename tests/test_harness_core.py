@@ -1,4 +1,4 @@
-"""Harness piece 1 — text tool protocol, turn-safe trimming, stable
+"""Harness piece 1 — text tool protocol, stable
 system prompt + per-call reminder, per-call audit risk."""
 
 from unittest.mock import MagicMock, patch
@@ -237,85 +237,6 @@ def test_system_prompt_stable_across_turns_and_reminder_not_stored():
     earlier_user = [m for m in sent if m.role == "user"][0]
     assert "<system-reminder>" not in earlier_user.content
     assert all("<system-reminder>" not in m.content for m in agent.history)
-
-
-# ─── Turn-safe trimming ───────────────────────────────────────────────
-
-
-def _turn(i: int, with_tools: bool) -> list[Message]:
-    msgs = [Message(role="user", content=f"q{i}")]
-    if with_tools:
-        msgs.append(
-            Message(
-                role="assistant",
-                content="",
-                tool_calls=[{"id": f"c{i}", "function": {"name": "echo", "arguments": {}}}],
-            )
-        )
-        msgs.append(Message(role="tool", content="r", tool_call_id=f"c{i}"))
-    msgs.append(Message(role="assistant", content=f"a{i}"))
-    return msgs
-
-
-def _trim(history: list[Message], max_history: int) -> list[Message]:
-    from openbro.core.agent import Agent
-
-    agent = Agent.__new__(Agent)
-    agent.history = history
-    agent.max_history = max_history
-    agent._trim_history()
-    return agent.history
-
-
-def test_trim_never_orphans_tool_results():
-    history = [Message(role="system", content="sys")]
-    for i in range(10):
-        history += _turn(i, with_tools=True)  # 4 messages per turn
-    out = _trim(history, max_history=10)
-
-    assert out[0].role == "system"
-    assert out[1].role == "user"
-    assert len(out) - 1 <= 10
-    ids_called = {c["id"] for m in out if m.tool_calls for c in m.tool_calls}
-    ids_answered = {m.tool_call_id for m in out if m.role == "tool"}
-    assert ids_called == ids_answered
-    assert out[-1].content == "a9"
-
-
-def test_trim_keeps_oversized_current_turn():
-    history = [Message(role="system", content="sys")] + _turn(0, False)
-    big = [Message(role="user", content="big")]
-    for i in range(20):
-        big.append(
-            Message(
-                role="assistant",
-                content="",
-                tool_calls=[{"id": f"b{i}", "function": {"name": "echo", "arguments": {}}}],
-            )
-        )
-        big.append(Message(role="tool", content="r", tool_call_id=f"b{i}"))
-    out = _trim(history + big, max_history=5)
-    assert out[0].role == "system"
-    assert out[1].content == "big"
-    assert len(out) == 1 + len(big)
-
-
-def test_trim_drops_leading_orphan_group():
-    history = [
-        Message(role="system", content="sys"),
-        Message(role="tool", content="orphan", tool_call_id="x"),
-        Message(role="assistant", content="old"),
-    ]
-    for i in range(3):
-        history += _turn(i, False)
-    out = _trim(history, max_history=4)
-    assert out[1].role == "user"
-    assert all(m.content != "orphan" for m in out)
-
-
-def test_trim_noop_under_limit():
-    history = [Message(role="system", content="sys")] + _turn(0, True)
-    assert _trim(list(history), max_history=50) == history
 
 
 # ─── Audit risk uses the call's args ──────────────────────────────────
