@@ -391,6 +391,7 @@ COMMANDS = [
     "clear",
     "reset",
     "compact",
+    "docs",
     "context",
 ]
 completer = WordCompleter(COMMANDS, ignore_case=True)
@@ -617,6 +618,10 @@ def start_repl(resume_session: str | None = None):
     # count from the start.
     if resume_session is not None:
         _resume_previous_session(agent, resume_session)
+
+    # Re-scan indexed document folders in the background so edits made
+    # while OpenBro was closed are picked up without blocking the prompt.
+    _start_docs_rescan()
 
     # Auto-start voice listener if configured (before the session is built
     # so the status bar can already reflect 'voice on').
@@ -1030,6 +1035,10 @@ def _handle_command(cmd: str, agent: Agent) -> bool:
         print_banner()
         return True
 
+    if cmd_lower == "docs" or cmd_lower.startswith("docs "):
+        _docs_command(cmd[4:].strip())
+        return True
+
     if cmd_lower == "compact" or cmd_lower.startswith("compact "):
         _compact(agent, cmd[len("compact") :].strip() or None)
         return True
@@ -1062,6 +1071,113 @@ def _open_path(path) -> None:
         console.print(f"[dim]Opened {path}[/dim]\n")
     except Exception as e:
         console.print(f"[yellow]Couldn't open it ({e}). Path: {path}[/yellow]\n")
+
+
+def _start_docs_rescan() -> None:
+    import threading
+
+    def _run():
+        try:
+            from openbro.rag import get_docs_service
+
+            svc = get_docs_service()
+            if len(svc.sources()) <= 1 and not svc.status()["documents"]:
+                return  # nothing indexed yet
+            from openbro.core.activity import get_bus
+
+            for report in svc.scan_all():
+                if report.added or report.updated or report.removed:
+                    get_bus().emit("system", f"docs: {report.summary()}")
+        except Exception:
+            pass
+
+    threading.Thread(target=_run, daemon=True, name="docs-rescan").start()
+
+
+def _docs_command(args: str) -> None:
+    from openbro.rag import get_docs_service
+
+    sub, _, rest = args.partition(" ")
+    sub, rest = sub.lower(), rest.strip().strip('"').strip("'")
+    try:
+        svc = get_docs_service()
+    except Exception as e:
+        console.print(f"[red]Document index unavailable: {e}[/red]\n")
+        return
+
+    def progress(msg: str) -> None:
+        console.print(f"[dim]  {msg}[/dim]")
+
+    try:
+        if sub in ("", "status"):
+            st = svc.status()
+            table = Table(show_header=False, box=None, padding=(0, 2))
+            for key in (
+                "mode",
+                "sources",
+                "documents",
+                "chunks",
+                "vectors",
+                "index_path",
+                "library",
+            ):
+                table.add_row(key, str(st[key]))
+            table.add_row("index size", f"{st['index_mb']} MB")
+            console.print(table)
+            console.print()
+        elif sub == "add" and rest:
+            report = svc.add(rest, progress)
+            console.print(f"[green]✓[/green] {report.summary()}")
+            for line in (report.skipped + report.errors)[:10]:
+                console.print(f"[dim]  · {line}[/dim]")
+            console.print()
+        elif sub == "upload" and rest:
+            report = svc.upload(rest, progress)
+            console.print(f"[green]✓[/green] uploaded — {report.summary()}\n")
+        elif sub == "list":
+            table = Table(title="Indexed sources", border_style="cyan")
+            table.add_column("Path", overflow="fold")
+            table.add_column("Kind")
+            table.add_column("Docs", justify="right")
+            table.add_column("Last scan", style="dim")
+            for s in svc.sources():
+                n = len(svc.store.list_documents(s.id))
+                table.add_row(s.path, s.kind, str(n), s.last_scan or "never")
+            console.print(table)
+            console.print(f"[dim]{svc.mode()}[/dim]\n")
+        elif sub == "search" and rest:
+            hits = svc.search(rest)
+            if not hits:
+                console.print("[dim]No matches.[/dim]\n")
+            for i, h in enumerate(hits, start=1):
+                where = h.path + (f" p.{h.page}" if h.page else "")
+                console.print(f"[bold cyan][{i}][/bold cyan] {where} [dim](score {h.score})[/dim]")
+                console.print(f"    {' '.join(h.text.split())[:300]}")
+            console.print()
+        elif sub == "remove" and rest:
+            console.print(svc.remove(rest) + "\n")
+        elif sub == "reindex":
+            for report in svc.scan_all(progress):
+                console.print(f"[green]✓[/green] {report.summary()}")
+            if svc.embedder is not None and not svc._embed_model_matches():
+                n = svc.reembed(progress)
+                console.print(f"[green]✓[/green] re-embedded {n} passages")
+            console.print()
+        elif sub == "open":
+            _open_path(svc.blobs.root)
+        elif sub == "export" and rest:
+            n = svc.export(rest)
+            console.print(f"[green]✓[/green] exported {n} rows to {rest}\n")
+        elif sub == "import" and rest:
+            n = svc.import_bundle(rest)
+            console.print(f"[green]✓[/green] imported {n} rows from {rest}\n")
+        else:
+            console.print(
+                "[yellow]Usage: docs [status|add <path>|upload <file>|list|search <q>|"
+                "remove <path>|reindex|open|export <file>|import <file>][/yellow]\n"
+            )
+    except FileNotFoundError as e:
+        console.print(f"[red]{e}[/red]\n")
 
 
 def _compact(agent: Agent, focus: str | None) -> None:
@@ -1143,6 +1259,14 @@ def _show_help():
     table.add_row("reset", "Clear chat history")
     table.add_row("memory open", "Open the memory notes folder")
     table.add_row("memory edit", "Edit your global OPENBRO.md instructions")
+    table.add_row("docs add <path>", "Index a file or folder for document search")
+    table.add_row("docs upload <file>", "Copy a file into the OpenBro library and index it")
+    table.add_row("docs list / status", "What is indexed / index details")
+    table.add_row("docs search <query>", "Search your indexed documents")
+    table.add_row("docs remove <path>", "Stop using a folder (files untouched)")
+    table.add_row("docs reindex", "Re-scan every source (and re-embed if the model changed)")
+    table.add_row("docs open", "Open the library folder")
+    table.add_row("docs export|import <file>", "Move the index to / from another machine")
     table.add_row("compact [focus]", "Summarise older turns now to free context")
     table.add_row("context", "Show context usage vs budget")
     table.add_row("exit / quit", "Exit OpenBro")

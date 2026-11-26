@@ -102,6 +102,13 @@ docs = [
     "lxml>=5.0",
     "pdf2image>=1.17",
 ]
+rag = [
+    # Document search: local embedding model (ONNX, no torch) + PDF text.
+    # Without it, `docs` search still works on keywords (SQLite FTS5).
+    "fastembed>=0.3",
+    "pypdf>=4.0",
+    "python-docx>=1.1",
+]
 brain = [
     # Semantic memory backend. Pulls torch (~2.5 GB on Windows). Optional —
     # without it, OpenBro falls back to keyword-based memory search which
