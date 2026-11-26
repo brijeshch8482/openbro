@@ -43,7 +43,7 @@ testing happens once all pieces are in.
 | 1 | Core loop fixes — text tool protocol, turn-safe trimming, stable prompt + reminders, audit risk | **built** |
 | 2 | Lossless transcripts + compaction (summarise, don't drop) | **built** |
 | 3 | Memory v2 — notes, ranked memory block, OPENBRO.md, memory tool — see [MEMORY.md](MEMORY.md) | **built** |
-| 4 | Search tools — `grep`, `glob`, `read` (offset/limit), `edit` (exact replace, read-first) | planned |
+| 4 | Search tools — `grep`, `glob`, `read` (offset/limit), `edit` (exact replace, read-first) | **built** |
 | 5 | Document RAG — local index, hybrid search, `docs` tool, server-ready backend — see [RAG.md](RAG.md) | designed |
 | 6 | Progressive disclosure — tool/skill names in prompt, schemas on demand | planned |
 | 7 | Subagents — `task` tool runs a child agent, returns a summary | planned |
@@ -281,3 +281,21 @@ Differences from the MEMORY.md proposal: ranking is in-process BM25
 instead of an FTS5 table (no sync needed at this size); auto-extract
 defaults to off so `exit` never waits on a model call unless the user
 opts in.
+
+---
+
+## Piece 4 — Search tools
+
+`openbro/tools/search_tools.py`. Retrieval over files is done by the model
+calling these tools in a loop (grep → read the hits → edit), not by an
+index. Each returns raw data.
+
+| Tool | Risk | Does |
+|---|---|---|
+| `grep` | safe | Regex over file contents. `output_mode` content (`file:line:text`, optional context lines) · files · count; `glob` filter; case-insensitive flag. Uses ripgrep when installed, else a Python walk. Skips `.git`, `node_modules`, build/cache folders, binary files and files over 5 MB. |
+| `glob` | safe | Files by name pattern (`**/*.py`), newest first, same skip list. |
+| `read` | safe | Numbered lines with `offset` / `limit`; tells the model the offset to continue from. Text files only (PDF/Office → `document`). Records the file's mtime. |
+| `edit` | moderate | Exact string replacement. Refused unless the file was `read` in this session and is unchanged since; `old_string` must be unique unless `replace_all`. Keeps CRLF line endings. New files → `file_ops` write. |
+
+Output is capped at 30,000 characters with a note saying what was cut.
+The four names were added to the Groq inline tool-call rescue list.
