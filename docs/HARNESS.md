@@ -44,7 +44,7 @@ testing happens once all pieces are in.
 | 2 | Lossless transcripts + compaction (summarise, don't drop) | **built** |
 | 3 | Memory v2 — notes, ranked memory block, OPENBRO.md, memory tool — see [MEMORY.md](MEMORY.md) | **built** |
 | 4 | Search tools — `grep`, `glob`, `read` (offset/limit), `edit` (exact replace, read-first) | **built** |
-| 5 | Document RAG — local index, hybrid search, `docs` tool, server-ready backend — see [RAG.md](RAG.md) | designed |
+| 5 | Document RAG — local index, hybrid search, `docs` tool, server-ready backend — see [RAG.md](RAG.md) | **built** (v1) |
 | 6 | Progressive disclosure — tool/skill names in prompt, schemas on demand | planned |
 | 7 | Subagents — `task` tool runs a child agent, returns a summary | planned |
 | 8 | Hooks + permission rules in `config.yaml` | planned |
@@ -299,3 +299,27 @@ index. Each returns raw data.
 
 Output is capped at 30,000 characters with a note saying what was cut.
 The four names were added to the Groq inline tool-call rescue list.
+
+---
+
+## Piece 5 — Document RAG (v1)
+
+Full design in [RAG.md](RAG.md). Built: the local backend, terminal-first.
+
+- `openbro/rag/`: `DocsService` (ingest + hybrid search + RRF, above the
+  storage boundary), `SQLiteDocStore` (FTS5 + float32 vectors in
+  `<base_dir>/docs/index.db`), `LibraryBlobStore` (`docs/library/`),
+  `LocalEmbedder` (lazy; fastembed or sentence-transformers; none →
+  keyword-only), `extract.py`, `chunker.py`.
+- Incremental scans: size + mtime, then sha256; changed files re-indexed,
+  deleted files dropped. Indexed sources are re-scanned in the background
+  when the REPL starts.
+- Embedding model recorded in the index; a different model switches
+  search to keyword-only until `docs reindex` re-embeds.
+- `docs` tool: search / read / add / list / remove (add and remove are
+  moderate risk).
+- REPL: `docs status | add | upload | list | search | remove | reindex |
+  open | export | import`.
+- Portable: `docs export` writes a JSONL bundle (+ the library folder);
+  `docs import` merges it, re-embedding when the model differs.
+- Not yet: the remote backend and Telegram uploads (server, v2).

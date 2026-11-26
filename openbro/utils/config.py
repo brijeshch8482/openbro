@@ -316,6 +316,17 @@ def default_config() -> dict:
             # 'remote' = an OpenBro server (planned for v2).
             "backend": "local",
         },
+        # Document RAG (docs tool / `docs` commands). embedder: auto uses a
+        # local embedding model when openbro[rag] is installed, else
+        # keyword-only search.
+        "rag": {
+            "embedder": "auto",
+            "embed_model": "intfloat/multilingual-e5-small",
+            "chunk_tokens": 500,
+            "chunk_overlap": 50,
+            "top_k": 5,
+            "max_file_mb": 200,
+        },
         # Context compaction: keep history under a token budget by
         # clearing old tool output and summarising older turns.
         "memory": {

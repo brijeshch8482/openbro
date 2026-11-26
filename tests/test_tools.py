@@ -553,19 +553,19 @@ def test_tool_registry():
 
 
 def test_tool_registry_count():
-    # 26 tools: + grep / glob / read / edit (harness piece 4 search tools).
+    # 27 tools: + docs (piece 5 document search), grep / glob / read / edit (piece 4).
     # Before that: + elevate (UAC-prompt admin shell — captured 2026-06-20
     # when the user noticed OpenBro silently swallowed "Access denied"
     # on C:/Windows/Temp instead of asking for elevation). document
     # was the previous addition for the universal file reader. sticky_notes
     # is still the carve-out for Windows Sticky Notes app integration.
-    assert len(BUILTIN_TOOLS) == 26
+    assert len(BUILTIN_TOOLS) == 27
 
 
 def test_tool_registry_schema():
     registry = ToolRegistry()
     schemas = registry.get_tools_schema()
-    assert len(schemas) == 26
+    assert len(schemas) == 27
     for s in schemas:
         assert "name" in s
         assert "parameters" in s

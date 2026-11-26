@@ -1,6 +1,7 @@
 # OpenBro Document RAG — Design
 
-Status: **designed** (2026-11-26). Harness piece 5 — see [HARNESS.md](HARNESS.md).
+Status: **v1 built** (2026-11-26). Harness piece 5 — see [HARNESS.md](HARNESS.md).
+Server mode (v2) is designed below but not built yet.
 
 OpenBro answers questions over the user's own documents (PDFs, Word,
 Excel, scans, notes) without sending the whole library to a model. It
@@ -44,7 +45,7 @@ run against an OpenBro server by changing config, not code.
                              │              │              │
              ┌───────────────┴───┐   ┌──────┴──────┐   ┌───┴──────────────┐
   backend:   │ local: SQLite     │   │ local: dir  │   │ local: e5 model  │
-  local      │  FTS5 + sqlite-vec│   │ docs/library│   │  on CPU          │
+  local      │  FTS5 + vectors   │   │ docs/library│   │  on CPU          │
              └───────────────────┘   └─────────────┘   └──────────────────┘
              ┌───────────────────┐   ┌─────────────┐   ┌──────────────────┐
   backend:   │ remote: HTTP      │   │ remote: HTTP│   │ server-side      │
@@ -159,7 +160,7 @@ chunks(id TEXT PRIMARY KEY,       -- '<doc_id>:<ord>'
        text TEXT NOT NULL, tokens INTEGER)
 
 chunks_fts USING fts5(text, heading, content='chunks')     -- keyword index
-chunks_vec USING vec0(chunk_id TEXT PRIMARY KEY, embedding float[384])  -- sqlite-vec
+chunk_vectors(chunk_id TEXT PRIMARY KEY, doc_id TEXT, vec BLOB)   -- float32 vectors
 ```
 
 Original in-place files are never copied or modified.
@@ -214,8 +215,8 @@ k1 = 1.2 (repeat saturation); b = 0.75 (length normalisation)
 Catches exact tokens embeddings miss: invoice numbers, names, romanised
 Hinglish ("fee", "INV-2041").
 
-**Vector search** (sqlite-vec, exact scan): the query embedding against
-every chunk vector, nearest by cosine. 10,000 chunks × 384 floats ≈ 15 MB —
+**Vector search** (exact scan with numpy over float32 BLOBs, cached in
+memory): the query embedding against every chunk vector, nearest by cosine. 10,000 chunks × 384 floats ≈ 15 MB —
 milliseconds, no approximate index needed at personal scale.
 
 **Reciprocal Rank Fusion:**
@@ -332,19 +333,22 @@ openbro/rag/
   models.py        Source, Document, Chunk, Hit, Filters, StoreInfo (dataclasses)
   protocols.py     DocStore, BlobStore, Embedder
   service.py       DocsService: ingestion pipeline + hybrid search + RRF
+  extract.py       page-aware text extraction (PDF pages, Word headings)
   chunker.py       recursive splitter
   embedder.py      LocalEmbedder (lazy load), factory by config
-  local_store.py   SQLite + FTS5 + sqlite-vec DocStore
+  local_store.py   SQLite + FTS5 + float32 vector DocStore
   local_blobs.py   library-folder BlobStore
   remote.py        HTTP DocStore / BlobStore (v2)
-  backend.py       build_docs_service(config) → picks local | remote
+  __init__.py      build_docs_service(config) → picks local | remote
 openbro/tools/docs_tool.py
 openbro/server/    `openbro serve` (v2)
 ```
 
-New optional extra: `pip install 'openbro[rag]'` → `sqlite-vec`,
-`fastembed` (ONNX, no torch). Without it, `docs` falls back to keyword-only
-search (FTS5 is built into SQLite) and says so.
+New optional extra: `pip install 'openbro[rag]'` → `fastembed` (ONNX, no
+torch), `pypdf`, `python-docx`. `sentence-transformers` is used instead when
+that is what is installed. Without either, `docs` runs keyword-only search
+(FTS5 is built into SQLite) and says so. numpy (a core dependency) does
+the vector scan, so no SQLite extension is needed.
 
 ---
 

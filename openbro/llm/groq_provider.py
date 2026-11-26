@@ -242,6 +242,7 @@ _KNOWN_TOOL_NAMES = frozenset(
         "cli_agent",
         "clipboard",
         "datetime",
+        "docs",
         "document",
         "download",
         "edit",
