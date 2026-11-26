@@ -1,6 +1,6 @@
 # OpenBro Harness v2 — Design
 
-Status: **in progress** (started 2026-11-26).
+Status: **v2 complete** (2026-11-26) — all 8 pieces built. Server mode (v2 backend) still to come.
 
 The harness is everything around the LLM: the tool loop, what goes into
 the context, what gets dropped, permissions, memory and retrieval. It must
@@ -21,6 +21,40 @@ Rules:
   HTTP against an OpenBro server (`openbro serve`), which itself uses the
   local implementation. Switching is config, not code. See the backend
   section in [RAG.md](RAG.md).
+
+## How one turn flows (all pieces together)
+
+```
+user message
+ │
+ ├─ hooks: user_prompt_submit ── exit 2 → turn refused · stdout → reminder      (8)
+ ├─ system prompt (stable, cached): base · principles · OPENBRO.md ·
+ │     tool list · MORE TOOLS (deferred) · text tool protocol if needed       (1,3,6)
+ ├─ record user message → transcript                                          (2)
+ ├─ compaction if over budget: clear old tool output → summarise → shrink     (2)
+ │
+ └─ loop (25 steps cloud / 80 local / 15 sub-agent)
+      ├─ send: history + <system-reminder> on the latest user message
+      │        (workspace · relevant memories · language · hook context)      (1,3)
+      │        + schemas of ACTIVE tools only                                  (6)
+      ├─ reply has tool calls (native, or <tool_call> tags parsed)            (1)
+      │    for each call:
+      │      hooks: pre_tool_use ── exit 2 → blocked, reason to the model     (8)
+      │      rules: deny → no · allow → yes · ask → always prompt             (8)
+      │      mode:  normal / boss / auto, prompt on cli / voice / silent
+      │      run tool → audit log (per-call risk) → hooks: post_tool_use      (1,8)
+      │      record tool call + result → transcript                           (2)
+      │    tools a model can use: grep / glob / read / edit (4), docs (5),
+      │    memory (3), tool_search (6), task → sub-agent with fresh context (7)
+      │    re-check budget, refresh active tool list, next step
+      └─ reply without tool calls → final answer
+           hooks: stop ── exit 2 → feedback to the model, keep working        (8)
+           record → transcript, return to the user
+```
+
+Everything that stores data (transcripts, memories, document index) sits
+behind an interface with a local backend; `storage.backend: remote`
+switches to an OpenBro server once it exists.
 
 ## Data rules for every stored record
 
@@ -47,7 +81,7 @@ testing happens once all pieces are in.
 | 5 | Document RAG — local index, hybrid search, `docs` tool, server-ready backend — see [RAG.md](RAG.md) | **built** (v1) |
 | 6 | Progressive disclosure — tool/skill names in prompt, schemas on demand | **built** |
 | 7 | Subagents — `task` tool runs a child agent, returns a summary | **built** |
-| 8 | Hooks + permission rules in `config.yaml` | planned |
+| 8 | Hooks + permission rules in `config.yaml` | **built** |
 
 ---
 
@@ -374,3 +408,53 @@ history; the parent sees one compact tool result.
 - Step cap: `agent.subagent_max_steps` (15); at the cap the usual forced
   no-tools final call produces the report.
 - REPL shows `▸ sub-agent (explore) started: …` / `◂ … done: N tool calls`.
+
+---
+
+## Piece 8 — Hooks + permission rules
+
+### Permission rules (`core/permission_rules.py`)
+
+```yaml
+safety:
+  rules:
+    allow: ["shell(git status*)", "grep", "mcp_*"]
+    ask:   ["shell(*pip install*)"]
+    deny:  ["shell(*Remove-Item*C:/Windows*)", "elevate"]
+```
+
+- A rule is `tool` or `tool(pattern)`; both parts are case-insensitive
+  globs. The pattern matches the call's subject: the first of `command`,
+  `code`, `path`, `file`, `url`, `app_name`, `query`, `action` (else the
+  args as JSON). Back- and forward slashes are treated the same.
+- Checked in `PermissionGate.request` before anything else:
+  **deny** → refused without asking · **ask** → always prompts, even in
+  auto mode or after "always allow" · **allow** → runs without a prompt.
+  No match → the permission mode decides, as before.
+
+### Hooks (`core/hooks.py`)
+
+```yaml
+hooks:
+  pre_tool_use:
+    - matcher: "shell"
+      command: "python D:/hooks/check_shell.py"
+      timeout: 30
+  post_tool_use: []
+  user_prompt_submit: []
+  stop: []
+```
+
+The hook gets JSON on stdin (`event`, `cwd`, `session_id`, and `tool` /
+`args` / `result` / `prompt` / `response` as relevant).
+
+| Event | exit 0 + stdout | exit 2 |
+|---|---|---|
+| `user_prompt_submit` | text added to this turn's reminder | turn refused, stderr shown |
+| `pre_tool_use` | — | tool not run; stderr returned to the model |
+| `post_tool_use` | appended to the tool result as `[hook] …` | — |
+| `stop` | — | agent keeps working; stderr fed back (max `max_stop_continues`, 3) |
+
+Any other exit code or a timeout is reported as a failed hook and
+ignored. Sub-agents run tool hooks but not prompt/stop hooks. Hooks are
+commands from the user's own config and run with the user's rights.

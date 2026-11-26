@@ -9,6 +9,8 @@ from rich.console import Console
 
 from openbro.core import session_memory
 from openbro.core.activity import get_bus
+from openbro.core.hooks import HookRunner
+from openbro.core.permission_rules import PermissionRules
 from openbro.core.permissions import PermissionGate, PermissionRequest
 from openbro.core.tool_protocol import parse_tool_calls, render_tool_instructions
 from openbro.core.workspace import detect_cached as detect_workspace
@@ -216,7 +218,12 @@ class Agent:
         else:
             mode = config.get("safety", {}).get("permission_mode", "normal")
             channel = "cli" if interactive else "silent"
-            self.permissions = PermissionGate(mode=mode, channel=channel)
+            self.permissions = PermissionGate(
+                mode=mode, channel=channel, rules=PermissionRules.from_config(config)
+            )
+        # User hooks at fixed points of a turn (piece 8).
+        self.hooks = HookRunner.from_config(config)
+        self._hook_context = ""
 
         self.history: list[Message] = []
 
@@ -312,6 +319,8 @@ class Agent:
             pass
         if lang:
             parts.append(language_instruction(lang).strip())
+        if self._hook_context:
+            parts.append("## FROM THE USER'S HOOKS\n" + self._hook_context)
         return "\n\n".join(p for p in parts if p)
 
     def _messages_for_call(self) -> list[Message]:
@@ -717,6 +726,19 @@ class Agent:
         self.last_language = detect_language(user_input)
         self._ensure_prompt_mode()
 
+        self._hook_context = ""
+        if self.role_prompt is None and self.hooks.has("user_prompt_submit"):
+            outcome = self.hooks.run(
+                "user_prompt_submit",
+                {"session_id": self.memory.session_id, "prompt": user_input},
+            )
+            self._report_hook_errors(outcome)
+            if outcome.blocked:
+                self.bus.emit("system", f"prompt blocked by hook: {outcome.message}")
+                return f"⛔ Blocked by your hook: {outcome.message}"
+            self._hook_context = outcome.context
+        stop_continues = 0
+
         self.bus.emit("user", user_input, lang=self.last_language)
         self._append(Message(role="user", content=user_input))
         # Auto-record goals from goal-setting user turns. Persists to
@@ -825,6 +847,25 @@ class Agent:
                 # explicitly asked to drop the patch layer
                 # (2026-05-31).
                 self._append(Message(role="assistant", content=response.content))
+                if (
+                    self.role_prompt is None
+                    and self.hooks.has("stop")
+                    and stop_continues < self.hooks.max_stop_continues
+                ):
+                    outcome = self.hooks.run(
+                        "stop",
+                        {"session_id": self.memory.session_id, "response": response.content},
+                    )
+                    self._report_hook_errors(outcome)
+                    if outcome.blocked:
+                        # The hook says the work isn't done — feed its
+                        # message back and keep going.
+                        stop_continues += 1
+                        self.bus.emit("system", f"stop hook: {outcome.message}")
+                        self._append(
+                            Message(role="user", content=f"[hook feedback] {outcome.message}")
+                        )
+                        continue
                 self.bus.emit(
                     "assistant",
                     response.content,
@@ -1025,12 +1066,37 @@ class Agent:
                 risk=risk,
             )
 
-            req = PermissionRequest(tool=name, args=args, risk=risk)
-            allowed = self.permissions.request(req)
+            blocked_by_hook = None
+            if self.hooks.has("pre_tool_use"):
+                outcome = self.hooks.run(
+                    "pre_tool_use",
+                    {"session_id": self.memory.session_id, "tool": name, "args": args},
+                    tool=name,
+                )
+                self._report_hook_errors(outcome)
+                if outcome.blocked:
+                    blocked_by_hook = outcome.message
+
+            if blocked_by_hook is not None:
+                allowed = False
+            else:
+                req = PermissionRequest(tool=name, args=args, risk=risk)
+                allowed = self.permissions.request(req)
             confirmed = allowed
 
             tool_t0 = _time.monotonic()
-            if not allowed:
+            if blocked_by_hook is not None:
+                result = f"[{name}]: blocked by the user's hook — {blocked_by_hook}"
+                self.bus.emit(
+                    "tool_end",
+                    result,
+                    tool=name,
+                    args=args,
+                    ok=False,
+                    elapsed=_time.monotonic() - tool_t0,
+                    preview=result,
+                )
+            elif not allowed:
                 result = f"[{name}]: DENIED by user"
                 self.bus.emit(
                     "tool_end",
@@ -1047,6 +1113,20 @@ class Agent:
                 # syntax-highlighted args. Removing the print stops the
                 # double-render (one line + one panel for every call).
                 result = self.tool_registry.execute(name, args, confirmed=confirmed)
+                if self.hooks.has("post_tool_use"):
+                    outcome = self.hooks.run(
+                        "post_tool_use",
+                        {
+                            "session_id": self.memory.session_id,
+                            "tool": name,
+                            "args": args,
+                            "result": result[:20000],
+                        },
+                        tool=name,
+                    )
+                    self._report_hook_errors(outcome)
+                    if outcome.context:
+                        result = f"{result}\n\n[hook] {outcome.context}"
                 # Bigger preview (4000 chars) so the live panel can show
                 # meaningful output, not just 200 chars. The history msg
                 # stores the full result regardless.
@@ -1072,6 +1152,10 @@ class Agent:
             )
 
     # ─── history + context management (harness piece 2) ──────────────
+
+    def _report_hook_errors(self, outcome) -> None:
+        for err in outcome.errors:
+            self.bus.emit("system", f"hook failed: {err}")
 
     def _append(self, msg: Message) -> None:
         """Append to the live history and record it in the transcript.

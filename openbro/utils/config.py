@@ -357,11 +357,25 @@ def default_config() -> dict:
             "confirm_dangerous": True,
             "blocked_commands": ["rm -rf /", "format", "del /s /q"],
             "permission_mode": "normal",  # normal | boss | auto
+            # Per-call rules, checked before the mode: deny > ask > allow.
+            # Rule = "tool" or "tool(glob on the command/path/url…)",
+            # e.g. "shell(git status*)", "elevate", "mcp_*".
+            "rules": {"allow": [], "ask": [], "deny": []},
             "cli_agent": {
                 "max_cost_per_call_usd": 1.00,
                 "daily_budget_usd": 10.00,
                 "timeout_seconds": 600,
             },
+        },
+        # Your own commands at fixed points of a turn. Each event takes a
+        # list of {matcher: "<tool glob>", command: "...", timeout: 30}.
+        # Exit 2 blocks (pre_tool_use / user_prompt_submit) or makes the
+        # agent keep working (stop). See docs/HARNESS.md, piece 8.
+        "hooks": {
+            "user_prompt_submit": [],
+            "pre_tool_use": [],
+            "post_tool_use": [],
+            "stop": [],
         },
         "language": {
             "auto_detect": True,

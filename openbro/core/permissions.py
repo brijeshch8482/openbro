@@ -70,7 +70,9 @@ class PermissionGate:
         channel: str = "cli",
         voice_listener=None,  # VoiceListener instance for voice mode
         tts=None,  # TextToSpeech instance for voice prompts
+        rules=None,  # PermissionRules from safety.rules (allow / ask / deny)
     ):
+        self.rules = rules
         self.mode = mode
         self.channel = channel
         self.voice_listener = voice_listener
@@ -87,6 +89,21 @@ class PermissionGate:
         return req.risk == "dangerous"
 
     def request(self, req: PermissionRequest) -> bool:
+        # Config rules first: deny never reaches the user, allow skips the
+        # prompt, ask always prompts (even in auto mode / after "always").
+        decision, rule = self.rules.decide(req.tool, req.args) if self.rules else (None, None)
+        if decision in ("deny", "allow"):
+            get_bus().emit(
+                "permission",
+                f"{req.tool}: {decision} by rule {rule.raw}",
+                tool=req.tool,
+                decision=decision,
+                rule=rule.raw,
+            )
+            return decision == "allow"
+        if decision == "ask":
+            return self._prompt(req)
+
         # Session-level memo
         if req.tool in self._always_allow:
             get_bus().emit(
@@ -109,7 +126,10 @@ class PermissionGate:
 
         if not self.needs_approval(req):
             return True
+        return self._prompt(req)
 
+    def _prompt(self, req: PermissionRequest) -> bool:
+        """Ask the user on the current channel (silent = deny)."""
         get_bus().emit(
             "permission",
             f"asking for {req.tool} ({req.risk})",
