@@ -1,6 +1,6 @@
 # OpenBro Memory v2 — Design
 
-Status: **proposed** (2026-10-07). Designed for OpenBro's reality: weak/free models (Groq 8B/70B,
+Status: **built** (proposed 2026-10-07; built 2026-11-26 as harness pieces 2–3 — see HARNESS.md for the differences). Designed for OpenBro's reality: weak/free models (Groq 8B/70B,
 local GGUF), tight token budgets (Groq free-tier TPM), multiple channels
 (CLI, Telegram, voice).
 

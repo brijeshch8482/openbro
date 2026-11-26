@@ -320,6 +320,13 @@ def default_config() -> dict:
         # clearing old tool output and summarising older turns.
         "memory": {
             "max_context_tokens": 24000,
+            # Memories shown per turn (index lines / small bodies).
+            "index_budget_tokens": 1500,
+            # OPENBRO.md instruction files (global + project).
+            "instructions_budget_tokens": 4000,
+            # One model call at `exit` proposes memory updates: off | on | auto
+            # (auto = on for cloud / CLI providers, off for local models).
+            "auto_extract": "off",
             "compaction": {
                 "trigger_ratio": 0.75,
                 "keep_recent_turns": 6,

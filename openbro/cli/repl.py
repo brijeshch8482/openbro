@@ -710,6 +710,11 @@ def start_repl(resume_session: str | None = None):
                     continue
 
                 if user_input.lower() in ("exit", "quit", "bye"):
+                    try:
+                        for line in agent.end_session():
+                            console.print(f"[dim magenta]※ memory: {line}[/dim magenta]")
+                    except Exception:
+                        pass
                     console.print("[dim cyan]◆ session ended.[/dim cyan]")
                     break
 
@@ -879,6 +884,24 @@ def _handle_command(cmd: str, agent: Agent) -> bool:
         _forget(cmd[7:].strip(), agent)
         return True
 
+    if cmd_lower == "memory open":
+        _open_path(agent.memory.notes.location())
+        return True
+
+    if cmd_lower == "memory edit":
+        from openbro.memory.instructions import FILE_NAME
+        from openbro.utils.config import get_config_dir
+
+        target = get_config_dir() / FILE_NAME
+        if not target.exists():
+            target.write_text(
+                "# OpenBro instructions\n\nWrite standing instructions here — OpenBro "
+                "follows them in every session.\n",
+                encoding="utf-8",
+            )
+        _open_path(target)
+        return True
+
     if cmd_lower == "sessions":
         _show_sessions(agent)
         return True
@@ -1023,6 +1046,24 @@ def _handle_command(cmd: str, agent: Agent) -> bool:
     return False
 
 
+def _open_path(path) -> None:
+    """Open a file or folder with the OS default app."""
+    import os
+    import platform
+    import subprocess
+
+    try:
+        if platform.system() == "Windows":
+            os.startfile(str(path))  # type: ignore[attr-defined]
+        elif platform.system() == "Darwin":
+            subprocess.Popen(["open", str(path)])
+        else:
+            subprocess.Popen(["xdg-open", str(path)])
+        console.print(f"[dim]Opened {path}[/dim]\n")
+    except Exception as e:
+        console.print(f"[yellow]Couldn't open it ({e}). Path: {path}[/yellow]\n")
+
+
 def _compact(agent: Agent, focus: str | None) -> None:
     with console.status("[dim]compacting context…[/dim]"):
         result = agent.compact(focus)
@@ -1100,6 +1141,8 @@ def _show_help():
     table.add_row("model remove <name>", "Uninstall offline model OR clear cloud key")
     table.add_row("clear", "Clear screen")
     table.add_row("reset", "Clear chat history")
+    table.add_row("memory open", "Open the memory notes folder")
+    table.add_row("memory edit", "Edit your global OPENBRO.md instructions")
     table.add_row("compact [focus]", "Summarise older turns now to free context")
     table.add_row("context", "Show context usage vs budget")
     table.add_row("exit / quit", "Exit OpenBro")

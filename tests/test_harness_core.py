@@ -222,7 +222,7 @@ def test_system_prompt_stable_across_turns_and_reminder_not_stored():
         supports_tools=True,
         replies=[LLMResponse(content="one"), LLMResponse(content="two")],
     )
-    agent.memory.context_prompt = lambda: "Things you know about this user:\n- city: Delhi"
+    agent.memory.memory_block = lambda query="": "## MEMORY\n- city: Delhi"
     system_before = agent.history[0].content
 
     agent.chat("pehla sawaal kya hai bhai")

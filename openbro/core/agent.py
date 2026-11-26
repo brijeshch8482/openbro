@@ -27,6 +27,8 @@ from openbro.memory.compaction import (
     split_head,
     split_turns,
 )
+from openbro.memory.instructions import instruction_files, load_instructions
+from openbro.memory.instructions import signature as instruction_signature
 from openbro.playbooks import PlaybookContext, PlaybookRegistry
 from openbro.tools.memory_tool import MemoryTool
 from openbro.tools.registry import ToolRegistry
@@ -258,6 +260,7 @@ class Agent:
             ),
             self._world_facts_block(),
             self._intent_check_block(),
+            self._instructions_block(),
         ]
         if self._prompt_text_tools:
             parts.append("\n" + render_tool_instructions(self.tool_registry.get_tools_schema()))
@@ -273,10 +276,11 @@ class Agent:
             self.history.insert(0, Message(role="system", content=content))
 
     def _reminder_block(self, lang: str | None) -> str:
-        """Per-turn context: workspace, remembered facts, reply language."""
+        """Per-turn context: workspace, relevant memories, reply language."""
         parts = [self._workspace_block().strip()]
+        query = next((m.content for m in reversed(self.history) if m.role == "user"), "")
         try:
-            parts.append(self.memory.context_prompt().strip())
+            parts.append(self.memory.memory_block(query).strip())
         except Exception:
             pass
         if lang:
@@ -484,7 +488,22 @@ class Agent:
             "  • Failure stays honest: 'Recycle Bin clean nahi hua,"
             " UAC se permission nahi mili.' One line, no apology"
             " loop, no 'Would you like me to try again?' unless the"
-            " next attempt is materially different."
+            " next attempt is materially different.\n"
+            "\n"
+            "### 9. Memory — keep what lasts, nothing else\n"
+            "Use the `memory` tool (action=save) when the user tells you"
+            " something lasting about themselves (name, city, how they"
+            " like replies), corrects how you work, or a durable"
+            " project decision / deadline / location appears. One note"
+            " per fact, short kebab-case name, one-line description."
+            " For feedback and project notes add 'Why:' and 'How to"
+            " apply:' lines. If a note on the topic exists, update it"
+            " (same name) instead of adding a duplicate; delete a note"
+            " that turned out wrong. Never save passwords, keys or"
+            " OTPs, and never save what you can re-read from files."
+            " The MEMORY block in the reminder shows what you already"
+            " know — read a full note with action=read when its line"
+            " looks relevant."
         )
 
     def _world_facts_block(self) -> str:
@@ -542,10 +561,32 @@ class Agent:
         )
         return "\n".join(lines)
 
+    def _instruction_files(self) -> list:
+        from pathlib import Path
+
+        from openbro.utils.config import get_config_dir
+
+        try:
+            return instruction_files(Path.cwd(), get_config_dir())
+        except Exception:
+            return []
+
+    def _instructions_block(self) -> str:
+        """User-written OPENBRO.md instructions (global + project)."""
+        files = self._instruction_files()
+        self._instructions_sig = instruction_signature(files)
+        budget = int(
+            (load_config().get("memory", {}) or {}).get("instructions_budget_tokens", 4000)
+        )
+        return "\n" + load_instructions(files, budget) if files else ""
+
     def _ensure_prompt_mode(self) -> None:
-        """Rebuild the system prompt only if the provider's tool mode
-        changed since it was built (e.g. `model switch` to Claude CLI)."""
-        if self._text_tool_mode() != self._prompt_text_tools:
+        """Rebuild the system prompt only when something it is built from
+        changed: the provider's tool mode (e.g. `model switch` to a CLI
+        provider) or an OPENBRO.md file (edited, or the cwd moved)."""
+        if self._text_tool_mode() != self._prompt_text_tools or instruction_signature(
+            self._instruction_files()
+        ) != getattr(self, "_instructions_sig", ()):
             self.refresh_system_prompt()
 
     def chat(self, user_input: str) -> str:
@@ -1066,6 +1107,88 @@ class Agent:
         text, _ = parse_tool_calls(response.content or "", self.tool_registry.list_tools())
         limit = self.compactor.config.summary_max_tokens * 4 * 2
         return text.strip()[:limit]
+
+    _EXTRACT_PROMPT = (
+        "You maintain OpenBro's long-term memory about this user. Read the "
+        "conversation and the existing memory index, then return ONLY a JSON "
+        "array of operations, [] if nothing lasting came up.\n"
+        'Save: {"op": "save", "name": "kebab-case", "description": "one line", '
+        '"type": "user|feedback|project|reference", "body": "the fact; for '
+        'feedback/project add Why: and How to apply: lines"}\n'
+        'Delete: {"op": "delete", "name": "existing-name"}\n'
+        "Save only lasting facts: who the user is, how they want you to work, "
+        "durable project decisions, where things live. Reuse an existing name "
+        "to update it. Never save secrets, passwords or one-off task details."
+    )
+
+    def _auto_extract_enabled(self) -> bool:
+        mode = str((load_config().get("memory", {}) or {}).get("auto_extract", "off")).lower()
+        if mode == "on":
+            return True
+        if mode == "auto":
+            return self._local_context_window() is None  # cloud / CLI providers only
+        return False
+
+    def end_session(self) -> list[str]:
+        """Optional: one model call at session end proposes memory updates.
+
+        Off by default (`memory.auto_extract: off | on | auto`). Returns
+        human-readable lines for what changed.
+        """
+        if not self._auto_extract_enabled():
+            return []
+        _, _, body = split_head(self.history)
+        if not any(m.role == "user" for m in body):
+            return []
+        transcript = render_for_summary(body)[-int(self.compactor.budget * 0.5) * 4 :]
+        index = "\n".join(n.index_line() for n in self.memory.notes.all()) or "(empty)"
+        try:
+            response = self.provider.chat(
+                [
+                    Message(role="system", content=self._EXTRACT_PROMPT),
+                    Message(
+                        role="user",
+                        content=f"Existing memory index:\n{index}\n\nConversation:\n{transcript}",
+                    ),
+                ],
+                tools=None,
+            )
+        except Exception as e:
+            self.bus.emit("system", f"memory extract failed: {e}")
+            return []
+        return self._apply_memory_ops(response.content or "")
+
+    def _apply_memory_ops(self, text: str) -> list[str]:
+        from openbro.memory.notes import NOTE_TYPES, Note
+
+        start, end = text.find("["), text.rfind("]")
+        if start < 0 or end <= start:
+            return []
+        try:
+            ops = json.loads(text[start : end + 1])
+        except (TypeError, ValueError):
+            return []
+        done = []
+        for op in ops if isinstance(ops, list) else []:
+            if not isinstance(op, dict) or not op.get("name"):
+                continue
+            try:
+                if op.get("op") == "save" and op.get("body"):
+                    note_type = op.get("type") if op.get("type") in NOTE_TYPES else "user"
+                    note = self.memory.save_note(
+                        Note(
+                            name=str(op["name"]),
+                            description=str(op.get("description") or op["body"])[:200],
+                            type=note_type,
+                            body=str(op["body"]),
+                        )
+                    )
+                    done.append(f"saved {note.name}")
+                elif op.get("op") == "delete" and self.memory.forget(str(op["name"])):
+                    done.append(f"deleted {op['name']}")
+            except Exception:
+                continue
+        return done
 
     def compact(self, focus: str | None = None) -> CompactionResult | None:
         """`compact` command: summarise every complete turn now."""
