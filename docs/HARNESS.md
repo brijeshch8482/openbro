@@ -45,7 +45,7 @@ testing happens once all pieces are in.
 | 3 | Memory v2 — notes, ranked memory block, OPENBRO.md, memory tool — see [MEMORY.md](MEMORY.md) | **built** |
 | 4 | Search tools — `grep`, `glob`, `read` (offset/limit), `edit` (exact replace, read-first) | **built** |
 | 5 | Document RAG — local index, hybrid search, `docs` tool, server-ready backend — see [RAG.md](RAG.md) | **built** (v1) |
-| 6 | Progressive disclosure — tool/skill names in prompt, schemas on demand | planned |
+| 6 | Progressive disclosure — tool/skill names in prompt, schemas on demand | **built** |
 | 7 | Subagents — `task` tool runs a child agent, returns a summary | planned |
 | 8 | Hooks + permission rules in `config.yaml` | planned |
 
@@ -323,3 +323,29 @@ Full design in [RAG.md](RAG.md). Built: the local backend, terminal-first.
 - Portable: `docs export` writes a JSONL bundle (+ the library folder);
   `docs import` merges it, re-embedding when the model differs.
 - Not yet: the remote backend and Telegram uploads (server, v2).
+
+---
+
+## Piece 6 — Progressive disclosure
+
+Every tool schema is sent with every call (~6K tokens for the built-ins,
+more with skills and MCP servers). Deferred tools are listed in the
+stable system prompt as one line each; their schemas are sent only after
+the model loads them.
+
+- `ToolRegistry.configure_loading(config)` — `agent.tool_loading`:
+  - `auto` (default): defers every extension tool (skills, MCP) plus
+    `agent.deferred_tools` (default `cli_agent`, `sticky_notes`,
+    `notification` — large and rarely needed).
+  - `all`: no deferral, as before.
+  Common built-ins stay loaded on purpose: some providers reject a call
+  to a tool that is not in the request, so a tool the user reaches for
+  every day must not sit behind a load step.
+- `tool_search` (`tools/tool_search.py`): `select='a,b'` loads by name,
+  `query='…'` ranks deferred tools with BM25. Returns the loaded tools'
+  parameters as text; from the next model call their schemas are in the
+  request (the agent refreshes the tool list on every loop step).
+- A deferred tool called directly (text-protocol providers) is loaded and
+  run.
+- The system prompt's `MORE TOOLS` block is built once, so the cached
+  prefix stays stable.
