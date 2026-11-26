@@ -191,6 +191,31 @@ class SQLiteTranscriptStore:
         )
 
 
+class InMemoryTranscriptStore:
+    """Throwaway transcript for sub-agents — nothing reaches the database."""
+
+    def __init__(self) -> None:
+        self._messages: dict[str, list[Message]] = {}
+        self._summaries: dict[str, tuple[str, str | None]] = {}
+
+    def append(self, session_id: str, owner: str, channel: str, msg: Message) -> str:
+        uid = msg.id or uuid.uuid4().hex
+        self._messages.setdefault(session_id, []).append(msg)
+        return uid
+
+    def load(self, session_id: str, owner: str) -> Transcript:
+        summary, upto = self._summaries.get(session_id, (None, None))
+        return Transcript(
+            session_id=session_id,
+            summary=summary,
+            summary_upto=upto,
+            messages=list(self._messages.get(session_id, [])),
+        )
+
+    def set_summary(self, session_id: str, owner: str, summary: str, upto_uid: str | None) -> None:
+        self._summaries[session_id] = (summary, upto_uid)
+
+
 def _load_meta(raw) -> dict:
     try:
         meta = json.loads(raw or "{}")

@@ -261,6 +261,7 @@ _KNOWN_TOOL_NAMES = frozenset(
         "sticky_notes",
         "system_control",
         "system_info",
+        "task",
         "tool_search",
         "web",
         "word",

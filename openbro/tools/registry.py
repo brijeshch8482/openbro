@@ -23,6 +23,7 @@ from openbro.tools.shell_tool import ShellTool
 from openbro.tools.sticky_notes_tool import StickyNotesTool
 from openbro.tools.system_control_tool import SystemControlTool
 from openbro.tools.system_tool import SystemTool
+from openbro.tools.task_tool import TaskTool
 from openbro.tools.web_tool import WebTool
 from openbro.tools.word_tool import WordTool
 from openbro.utils.audit import log_tool_execution
@@ -53,6 +54,7 @@ BUILTIN_TOOLS = [
     StickyNotesTool,
     SystemControlTool,
     SystemTool,
+    TaskTool,
     WebTool,
     WordTool,
 ]
@@ -103,6 +105,21 @@ class ToolRegistry:
             self._tools["tool_search"] = ToolSearchTool(self)
         else:
             self._tools.pop("tool_search", None)
+
+    def view(self, allowed: set[str]) -> "ToolRegistry":
+        """A registry holding only `allowed` tools (shared instances) —
+        what a sub-agent gets. Deferred/loaded state is copied."""
+        clone = ToolRegistry.__new__(ToolRegistry)
+        clone._tools = {n: t for n, t in self._tools.items() if n in allowed and n != "tool_search"}
+        clone._skill_registry = None
+        clone._builtin_names = self._builtin_names & set(clone._tools)
+        clone._deferred = self._deferred & set(clone._tools)
+        clone._loaded = self._loaded & clone._deferred
+        if clone._deferred - clone._loaded:
+            from openbro.tools.tool_search import ToolSearchTool
+
+            clone._tools["tool_search"] = ToolSearchTool(clone)
+        return clone
 
     def deferred_names(self) -> set[str]:
         """Deferred tools not loaded yet."""
