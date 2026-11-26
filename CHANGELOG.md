@@ -2,6 +2,22 @@
 
 All notable changes to OpenBro are tracked here.
 
+## [1.1.0] — Agent harness v2
+
+**Headline: the harness around the model is rebuilt — eight pieces, each shipped through its own pull request with the full CI matrix green.**
+
+- **Tool protocol** — text-only models (subscription CLIs, local specialists) can now use every OpenBro tool through `<tool_call>` tags; the permission gate and audit log apply to them too. Stable, cache-friendly system prompt with a per-turn reminder.
+- **Transcripts and compaction** — every message is saved, tool calls included, so `--resume` is lossless. Long sessions are summarised instead of truncated. New `context` and `compact` commands.
+- **Memory v2** — one Markdown note per memory, ranked per turn; `OPENBRO.md` instruction files (global and per project); memory tool with save/read/delete/list/search; `memory open` / `memory edit`.
+- **Search tools** — `grep`, `glob`, `read` (line ranges) and `edit` (exact replacement, read first).
+- **Document search** — index folders in place with `docs add`; keyword + meaning search merged into one ranked list, page citations, incremental re-indexing, export/import. New `docs` tool and commands; `openbro[rag]` extra.
+- **Lean requests** — plugin and rarely used tools are listed by name and loaded with `tool_search` when needed.
+- **Sub-agents** — the `task` tool runs a helper with a fresh context and returns only its report.
+- **Rules and hooks** — `safety.rules` allow/ask/deny and `hooks` scripts at prompt, tool and stop events.
+- **Maintenance** — `openbro doctor`, `openbro update`, `openbro uninstall`.
+- README rewritten; design docs in `docs/HARNESS.md`, `docs/RAG.md`, `docs/MEMORY.md`.
+- Server-ready storage: transcripts, memories and the document index sit behind a local backend; `storage.backend: remote` is reserved for the upcoming OpenBro server.
+
 ## [Unreleased] — Custom model training pipeline
 
 **Headline: `openbro train` builds your own `openbro.gguf` from public web data.**

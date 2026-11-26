@@ -49,9 +49,14 @@ class LocalEmbedder:
         for mod in ("fastembed", "sentence_transformers"):
             try:
                 __import__(mod)
-                return True
-            except ImportError:
+            except Exception:  # missing, or installed without its runtime (torch)
                 continue
+            if mod == "sentence_transformers":
+                try:
+                    __import__("torch")
+                except Exception:
+                    continue
+            return True
         return False
 
     def _load(self):

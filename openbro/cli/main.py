@@ -446,6 +446,65 @@ def _register_train_command():
 _register_train_command()
 
 
+# ─── `openbro doctor / update / uninstall` ───────────────────────────
+
+
+@main.command("doctor")
+def doctor():
+    """Check the install: Python, config, provider key, storage, optional features."""
+    from rich.console import Console
+    from rich.markup import escape
+    from rich.table import Table
+
+    from openbro.cli.maintenance import doctor_checks
+
+    marks = {"ok": "[green]✓[/green]", "warn": "[yellow]![/yellow]", "fail": "[red]✗[/red]"}
+    table = Table(title="OpenBro doctor", show_lines=False, border_style="cyan")
+    table.add_column("", width=2)
+    table.add_column("Check", style="bold")
+    table.add_column("Details", overflow="fold")
+    rows = doctor_checks()
+    for name, status, detail in rows:
+        table.add_row(marks.get(status, status), escape(name), escape(detail))
+    Console().print(table)
+    failed = [r for r in rows if r[1] == "fail"]
+    if failed:
+        raise SystemExit(1)
+
+
+@main.command("update")
+@click.option(
+    "--source",
+    type=click.Choice(["git", "pypi"]),
+    default="git",
+    show_default=True,
+    help="Install the latest main branch from GitHub, or the latest PyPI release.",
+)
+@click.option(
+    "--extras",
+    default=None,
+    help="Extras to install, e.g. 'all,voice,rag'. Default: keep what you have.",
+)
+@click.option("--dry-run", is_flag=True, help="Only print the commands.")
+def update(source: str, extras: str | None, dry_run: bool):
+    """Update OpenBro in place, keeping your config, memory and models."""
+    from openbro.cli.maintenance import run_update
+
+    chosen = [e.strip() for e in extras.split(",") if e.strip()] if extras is not None else None
+    raise SystemExit(run_update(source, chosen, dry_run, click.echo))
+
+
+@main.command("uninstall")
+@click.option("--yes", "-y", is_flag=True, help="Don't ask for confirmation.")
+@click.option("--keep-data", is_flag=True, help="Keep config, memory, document index and models.")
+@click.option("--keep-models", is_flag=True, help="Keep downloaded local models.")
+def uninstall(yes: bool, keep_data: bool, keep_models: bool):
+    """Remove OpenBro and (unless kept) its data folders."""
+    from openbro.cli.maintenance import run_uninstall
+
+    raise SystemExit(run_uninstall(yes, keep_data, keep_models, click.confirm, click.echo))
+
+
 # ─── `openbro mcp …` subcommands ──────────────────────────────────────
 
 

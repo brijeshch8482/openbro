@@ -1098,6 +1098,8 @@ def _start_docs_rescan() -> None:
 
 
 def _docs_command(args: str) -> None:
+    from rich.markup import escape
+
     from openbro.rag import get_docs_service
 
     sub, _, rest = args.partition(" ")
@@ -1124,7 +1126,7 @@ def _docs_command(args: str) -> None:
                 "index_path",
                 "library",
             ):
-                table.add_row(key, str(st[key]))
+                table.add_row(key, escape(str(st[key])))
             table.add_row("index size", f"{st['index_mb']} MB")
             console.print(table)
             console.print()
@@ -1145,9 +1147,9 @@ def _docs_command(args: str) -> None:
             table.add_column("Last scan", style="dim")
             for s in svc.sources():
                 n = len(svc.store.list_documents(s.id))
-                table.add_row(s.path, s.kind, str(n), s.last_scan or "never")
+                table.add_row(escape(s.path), s.kind, str(n), s.last_scan or "never")
             console.print(table)
-            console.print(f"[dim]{svc.mode()}[/dim]\n")
+            console.print(f"[dim]{escape(svc.mode())}[/dim]\n")
         elif sub == "search" and rest:
             hits = svc.search(rest)
             if not hits:
@@ -1155,7 +1157,7 @@ def _docs_command(args: str) -> None:
             for i, h in enumerate(hits, start=1):
                 where = h.path + (f" p.{h.page}" if h.page else "")
                 console.print(f"[bold cyan][{i}][/bold cyan] {where} [dim](score {h.score})[/dim]")
-                console.print(f"    {' '.join(h.text.split())[:300]}")
+                console.print(f"    {escape(' '.join(h.text.split())[:300])}")
             console.print()
         elif sub == "remove" and rest:
             console.print(svc.remove(rest) + "\n")
