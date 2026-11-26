@@ -300,6 +300,11 @@ def default_config() -> dict:
                 "- Single fact: one short sentence, no formatting"
             ),
             "max_history": 50,
+            # Progressive disclosure: 'auto' lists skill/MCP tools and the
+            # tools in deferred_tools by name only; the model loads their
+            # schemas with tool_search. 'all' sends every schema each call.
+            "tool_loading": "auto",
+            "deferred_tools": ["cli_agent", "sticky_notes", "notification"],
             # Playbooks = pre-built workflows that handle common intents
             # without an LLM call (close_app, geo_lookup, system_health,
             # file_search, etc.). Zero tokens, instant, deterministic. Set

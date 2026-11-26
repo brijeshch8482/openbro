@@ -208,7 +208,7 @@ class Agent:
             "system_prompt",
             "Tu OpenBro hai - ek helpful AI bro. Friendly reh, user ki help kar.",
         )
-        self.tool_names = ", ".join(self.tool_registry.list_tools())
+        self.tool_names = ", ".join(self.tool_registry.active_tools())
         # Whether the current system prompt carries the text tool-call
         # protocol. Tracked so a mid-session provider switch (native ⇄
         # text-only) rebuilds the prompt exactly once.
@@ -264,6 +264,14 @@ class Agent:
         ]
         if self._prompt_text_tools:
             parts.append("\n" + render_tool_instructions(self.tool_registry.get_tools_schema()))
+        deferred = self.tool_registry.deferred_index()
+        if deferred:
+            parts.append(
+                "\n## MORE TOOLS (load before use)\n"
+                "These exist but their parameters are not loaded yet. Call "
+                "`tool_search` with select='<name>' to load one, then call it.\n"
+                + "\n".join(deferred)
+            )
         return "\n".join(p for p in parts if p)
 
     def refresh_system_prompt(self) -> None:
@@ -743,6 +751,12 @@ class Agent:
                 max_steps=max_iterations,
             )
             if iteration:
+                # `tool_search` may have loaded more tools last round.
+                if not text_tools:
+                    tools = self.tool_registry.get_tools_schema()
+                    self.compactor.reserved_tokens = (
+                        len(json.dumps(tools, ensure_ascii=False)) // 4 if tools else 0
+                    )
                 # Tool results from the last round may have pushed the
                 # history over budget.
                 self._fit_context()

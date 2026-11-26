@@ -58,18 +58,76 @@ BUILTIN_TOOLS = [
 ]
 
 
+# Deferred by default in `auto` mode: big schemas, rarely needed.
+DEFAULT_DEFERRED = ("cli_agent", "sticky_notes", "notification")
+
+
 class ToolRegistry:
     def __init__(self, config: dict | None = None):
         self._tools: dict[str, BaseTool] = {}
         self._skill_registry = None
+        # Progressive disclosure (harness piece 6): deferred tools are
+        # listed by name in the prompt; their schemas are sent only after
+        # `tool_search` loads them.
+        self._deferred: set[str] = set()
+        self._loaded: set[str] = set()
         self._register_builtins()
+        self._builtin_names = set(self._tools)
         if config is not None:
             self._register_skills(config)
+            self.configure_loading(config)
 
     def _register_builtins(self):
         for tool_cls in BUILTIN_TOOLS:
             tool = tool_cls()
             self._tools[tool.name] = tool
+
+    # ─── progressive disclosure ─────────────────────────────────────
+
+    def configure_loading(self, config: dict) -> None:
+        """`agent.tool_loading`: auto (default) defers extension tools
+        (skills, MCP) plus `agent.deferred_tools`; all sends every schema."""
+        agent = (config or {}).get("agent", {}) or {}
+        mode = str(agent.get("tool_loading", "auto")).lower()
+        self._loaded.clear()
+        if mode == "all":
+            self._deferred = set()
+        else:
+            extra = agent.get("deferred_tools")
+            names = set(DEFAULT_DEFERRED if extra is None else extra)
+            extensions = set(self._tools) - self._builtin_names - {"tool_search"}
+            self._deferred = (names | extensions) & set(self._tools)
+        if self._deferred:
+            from openbro.tools.tool_search import ToolSearchTool
+
+            self._tools["tool_search"] = ToolSearchTool(self)
+        else:
+            self._tools.pop("tool_search", None)
+
+    def deferred_names(self) -> set[str]:
+        """Deferred tools not loaded yet."""
+        return self._deferred - self._loaded
+
+    def loaded_names(self) -> set[str]:
+        return set(self._loaded)
+
+    def load(self, names) -> None:
+        self._loaded |= set(names) & self._deferred
+
+    def is_active(self, name: str) -> bool:
+        return name in self._tools and (name not in self._deferred or name in self._loaded)
+
+    def active_tools(self) -> list[str]:
+        return [n for n in self._tools if self.is_active(n)]
+
+    def deferred_index(self) -> list[str]:
+        """One line per deferred tool for the system prompt."""
+        lines = []
+        for name in sorted(self._deferred):
+            desc = " ".join((self._tools[name].description or "").split())
+            first = desc.split(". ")[0][:140]
+            lines.append(f"- {name} — {first}")
+        return lines
 
     def _register_skills(self, config: dict):
         from openbro.skills.registry import SkillRegistry
@@ -115,6 +173,10 @@ class ToolRegistry:
         return self._skill_registry.info()
 
     def get_tools_schema(self) -> list[dict]:
+        """Schemas of the active tools (deferred ones only once loaded)."""
+        return [tool.schema() for name, tool in self._tools.items() if self.is_active(name)]
+
+    def get_all_tools_schema(self) -> list[dict]:
         return [tool.schema() for tool in self._tools.values()]
 
     def get_tool(self, name: str) -> BaseTool | None:
@@ -142,6 +204,8 @@ class ToolRegistry:
         if not tool:
             log_tool_execution(name, args, "Unknown tool", risk="unknown")
             return f"Unknown tool: {name}"
+        if name in self._deferred:
+            self._loaded.add(name)  # called directly (text mode) — treat as loaded
         try:
             result = tool.run(**args)
         except Exception as e:
