@@ -41,7 +41,7 @@ testing happens once all pieces are in.
 | # | Piece | Status |
 |---|---|---|
 | 1 | Core loop fixes — text tool protocol, turn-safe trimming, stable prompt + reminders, audit risk | **built** |
-| 2 | Transcripts (JSONL) + compaction | planned |
+| 2 | Lossless transcripts + compaction (summarise, don't drop) | **built** |
 | 3 | Memory v2 (notes + index) — see [MEMORY.md](MEMORY.md) | designed |
 | 4 | Search tools — `grep`, `glob`, `read` (offset/limit), `edit` (exact replace, read-first) | planned |
 | 5 | Document RAG — local index, hybrid search, `docs` tool, server-ready backend — see [RAG.md](RAG.md) | designed |
@@ -141,3 +141,119 @@ default `agent.playbooks_enabled` to `false`. Pending the owner's call.
 
 - `stream_chat` still has no tool loop (plain text stream).
 - Tool calls in one response still run one after another.
+
+---
+
+## Piece 2 — Lossless transcripts + compaction
+
+Implements L2 and L3 of [MEMORY.md](MEMORY.md).
+
+### Problems
+
+- The `conversations` table stored only user/assistant text. Tool calls
+  and tool results were lost, so `--resume` brought back a history where
+  the model could not see what it had done.
+- When history grew past `agent.max_history` messages, old turns were
+  **deleted** — the model forgot the start of a long task with no trace.
+- Size was counted in messages, not tokens. One `file_ops read` of a big
+  file could blow the context while the message count looked fine.
+
+### 2a. Transcript store (L3)
+
+`openbro/memory/transcript.py`
+
+```python
+class TranscriptStore(Protocol):
+    def append(self, session_id, owner, channel, msg: Message) -> str  # returns message uid
+    def load(self, session_id, owner) -> Transcript                   # summary + messages after it
+    def set_summary(self, session_id, owner, summary, upto_uid) -> None
+```
+
+- `SQLiteTranscriptStore` (local backend) uses the existing `memory.db`.
+  Migration adds `uid` (uuid), `tool_calls` (JSON) and `tool_call_id` to
+  `conversations`; old rows keep working. `user_id` is the `owner` column.
+  `schema_meta.transcript_schema = 2`.
+- Every message the agent appends is recorded: user, assistant (with its
+  tool calls), and `tool` results. The uid is set on `Message.id`.
+- The rolling summary lives on the session row
+  (`sessions.metadata = {"summary": …, "summary_upto": <uid>}`).
+- `build_transcript_store(config)` picks the backend from
+  `storage.backend`; `remote` arrives with the server (v2).
+
+### 2b. Compaction (L2)
+
+`openbro/memory/compaction.py` — replaces `Agent._trim_history`.
+
+History shape: `[system prompt] [summary (optional)] turn, turn, …`.
+A turn starts at a `user` message; cuts only ever happen between turns, so
+tool-call pairs stay intact by construction.
+
+Runs at the start of every turn and before every model call inside the
+tool loop. Triggers when **either**
+
+- estimated tokens > `trigger_ratio` (0.75) × budget, or
+- messages > `agent.max_history` (kept as a count trigger).
+
+Budget = `memory.max_context_tokens` (24K), lowered to the local model's
+`n_ctx` when that is smaller. Native tool schemas (~6K tokens) go out
+with every call but are not in the history, so their size is reserved out
+of the budget. Token estimate: characters / 4.
+
+Stages, each only if still over:
+
+1. **Clear old tool output** (no model call). In turns older than the last
+   3, tool results over 1,000 chars become
+   `[tool output cleared — 12,400 chars from file_ops]`. The transcript
+   keeps the full text.
+2. **Summarise** every turn except the most recent ones (up to 6, fewer
+   if those alone are over) with one model call, no tools, ≤ 800 tokens,
+   fixed sections: *Goal · Done · Decisions · Open items · Key facts &
+   paths*. A previous summary is merged in (rolling). Tool output is cut
+   to 1,500 chars per result in the summariser's input. If the call fails,
+   a deterministic summary (the user's requests, shortened) is used — the
+   turn never crashes.
+3. **Shrink the current turn** if it alone is over: keep its user message
+   and the newest complete tool-call groups; a note on the user message
+   says how many earlier steps were dropped.
+
+The summary is a `system` message right after the system prompt, marked
+`[CONVERSATION_SUMMARY]`. It changes only when compaction runs, so the
+cached prefix (piece 1) breaks at most once per compaction. It is also
+saved to the session row with the uid of the last message it covers.
+
+Event: `context compacted: 31,200 → 8,900 tokens (summarised 9 turns)`.
+
+### 2c. Resume
+
+`--resume` loads the saved summary plus every message after
+`summary_upto` — tool calls and results included — then runs
+`repair_tool_pairs` (drops a `tool_calls` message whose results are
+missing, e.g. after a crash mid-turn, and any orphan `tool` result) and
+compaction. Sessions saved before this change load as plain text, as
+before.
+
+### 2d. REPL
+
+- `compact [focus]` — compact now; the optional focus text tells the
+  summariser what to keep.
+- `context` — tokens used vs budget, summary size, turns and messages.
+
+### Config
+
+```yaml
+memory:
+  max_context_tokens: 24000
+  compaction:
+    trigger_ratio: 0.75
+    keep_recent_turns: 6
+    clear_tool_output_after_turns: 3
+    tool_output_keep_chars: 1000
+    summary_max_tokens: 800
+storage:
+  backend: local        # local | remote (v2)
+```
+
+### Not in piece 2
+
+- Full-text search over transcripts (`memory.search` over past chats) —
+  piece 3, with the memory tool.

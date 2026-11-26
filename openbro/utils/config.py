@@ -312,6 +312,21 @@ def default_config() -> dict:
             "models_dir": str(Path.home() / ".openbro" / "models"),
             "cloud_sync": False,
             "cloud_provider": None,
+            # Where stored data lives: 'local' = this laptop (in-process).
+            # 'remote' = an OpenBro server (planned for v2).
+            "backend": "local",
+        },
+        # Context compaction: keep history under a token budget by
+        # clearing old tool output and summarising older turns.
+        "memory": {
+            "max_context_tokens": 24000,
+            "compaction": {
+                "trigger_ratio": 0.75,
+                "keep_recent_turns": 6,
+                "clear_tool_output_after_turns": 3,
+                "tool_output_keep_chars": 1000,
+                "summary_max_tokens": 800,
+            },
         },
         "safety": {
             "confirm_dangerous": True,

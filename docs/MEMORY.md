@@ -34,8 +34,8 @@ one thing and return raw data (see the "no tool shortcuts" rule).
 ## 3. Architecture
 
 ```
-                 ┌──────────────────────── system prompt (rebuilt every turn) ─┐
-L0 Instructions  │ OPENBRO.md (global + project, also AGENTS.md / CLAUDE.md)   │
+                 ┌───────────────── system prompt (stable) + per-call reminder ─┐
+L0 Instructions  │ OPENBRO.md (global + project)                               │
 L1 Memories      │ ranked memory index (budgeted)                              │
                  │ [CONVERSATION_SUMMARY] (from L2, if compacted)              │
                  └─────────────────────────────────────────────────────────────┘
@@ -47,8 +47,7 @@ L3 Transcripts   SQLite: every message incl. tool calls + FTS5  ──→ resume
 
 - Files, loaded whole, in order:
   1. `<config_dir>/OPENBRO.md` (global, user-written)
-  2. From the git root (or cwd) down to cwd: `OPENBRO.md`, plus `AGENTS.md` /
-     `CLAUDE.md` if present (interop — config flag `memory.read_foreign_instructions`, default `true`).
+  2. From the git root (or cwd) down to cwd: `OPENBRO.md`.
 - Hard cap (default 4K tokens total); over-cap files are truncated with a note.
 - Cached by mtime; re-read when cwd changes.
 - `/memory edit` in the REPL opens the global file in `$EDITOR`/Notepad.
@@ -196,7 +195,6 @@ memory:
     summary_max_tokens: 800
   index_budget_tokens: 1500
   instructions_budget_tokens: 4000
-  read_foreign_instructions: true   # AGENTS.md / CLAUDE.md
   auto_extract: auto                # auto | on | off  (auto = off for local)
   embeddings: auto                  # use sentence-transformers if installed
   transcript_retention_days: 0
@@ -219,7 +217,7 @@ memory:
 |---|---|---|
 | **P1** | `compaction.py`: `split_turns`, tool-output clearing, LLM summary, `/compact`, `/context`; replace `_trim_history`; reuse in `FallbackProvider` | orphan-tool 400s, context loss |
 | **P2** | `notes.py` + FTS5, memory tool v2, ranked index injection, "when to save" principle, `facts` migration | 20-fact cap, flat facts |
-| **P3** | `instructions.py` (`OPENBRO.md`, `AGENTS.md`, `CLAUDE.md`), `/memory edit` | no human-written instructions |
+| **P3** | `instructions.py` (`OPENBRO.md`), `/memory edit` | no human-written instructions |
 | **P4** | Transcripts with tool calls, FTS over chats, summary-based resume, single connection | lossy resume, slow search |
 | **P5** | Auto-extract on session end, embeddings ranker, delete dead code | memory only on explicit "yaad rakh" |
 
