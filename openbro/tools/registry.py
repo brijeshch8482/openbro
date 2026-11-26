@@ -17,6 +17,7 @@ from openbro.tools.notification_tool import NotificationTool
 from openbro.tools.process_tool import ProcessTool
 from openbro.tools.python_tool import PythonTool
 from openbro.tools.screenshot_tool import ScreenshotTool
+from openbro.tools.search_tools import EditTool, GlobTool, GrepTool, ReadTool
 from openbro.tools.shell_tool import ShellTool
 from openbro.tools.sticky_notes_tool import StickyNotesTool
 from openbro.tools.system_control_tool import SystemControlTool
@@ -33,14 +34,18 @@ BUILTIN_TOOLS = [
     DateTimeTool,
     DocumentTool,
     DownloadTool,
+    EditTool,
     ElevateTool,
     ExcelTool,
     FileTool,
+    GlobTool,
+    GrepTool,
     MemoryTool,
     NetworkTool,
     NotificationTool,
     ProcessTool,
     PythonTool,
+    ReadTool,
     ScreenshotTool,
     ShellTool,
     StickyNotesTool,
