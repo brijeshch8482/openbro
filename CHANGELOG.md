@@ -2,6 +2,10 @@
 
 All notable changes to OpenBro are tracked here.
 
+## [Unreleased]
+
+- **`webpage` tool — operate web pages in a real browser.** Open, snapshot (numbered links / buttons / fields), click (by number or visible text), type, select, press, scroll, read, screenshot, tabs, wait. Drives the installed Chrome or Edge (Playwright's Chromium as a fallback) with a persistent OpenBro profile, from one worker thread. Buy / pay / send / delete clicks and password typing are dangerous-risk, so the user is asked first. New `browser` extra; `all` now also includes `playwright` and `fastembed`. `doctor` reports web page control.
+
 ## [1.1.0] — Agent harness v2
 
 **Headline: the harness around the model is rebuilt — eight pieces, each shipped through its own pull request with the full CI matrix green.**

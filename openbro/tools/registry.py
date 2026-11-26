@@ -25,6 +25,7 @@ from openbro.tools.system_control_tool import SystemControlTool
 from openbro.tools.system_tool import SystemTool
 from openbro.tools.task_tool import TaskTool
 from openbro.tools.web_tool import WebTool
+from openbro.tools.webpage_tool import WebpageTool
 from openbro.tools.word_tool import WordTool
 from openbro.utils.audit import log_tool_execution
 
@@ -56,6 +57,7 @@ BUILTIN_TOOLS = [
     SystemTool,
     TaskTool,
     WebTool,
+    WebpageTool,
     WordTool,
 ]
 

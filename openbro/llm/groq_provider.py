@@ -264,6 +264,7 @@ _KNOWN_TOOL_NAMES = frozenset(
         "task",
         "tool_search",
         "web",
+        "webpage",
         "word",
         "tech_research",
         "recap",

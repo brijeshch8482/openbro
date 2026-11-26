@@ -32,7 +32,8 @@ class BrowserTool(BaseTool):
         "tool (fetch/search returns text without disturbing the desktop) "
         "or `python` (httpx GET). Opening a browser window for every "
         "info query annoys the user — 'mere laptop par browser kyon khol "
-        "diya' was a real complaint."
+        "diya' was a real complaint. To OPERATE a page (click, type, "
+        "fill forms, read behind navigation) use `webpage` instead."
     )
     risk = RiskLevel.MODERATE
 

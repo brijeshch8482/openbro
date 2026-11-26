@@ -323,6 +323,14 @@ def default_config() -> dict:
             # 'remote' = an OpenBro server (planned for v2).
             "backend": "local",
         },
+        # webpage tool: real browser automation (openbro[browser]).
+        # channel auto = installed Chrome, then Edge, then Playwright's own.
+        "browser": {
+            "headless": False,
+            "channel": "auto",
+            "profile_dir": None,
+            "timeout_seconds": 30,
+        },
         # Document RAG (docs tool / `docs` commands). embedder: auto uses a
         # local embedding model when openbro[rag] is installed, else
         # keyword-only search.
