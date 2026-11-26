@@ -1,4 +1,4 @@
-# OpenBro Architecture — True JARVIS
+# OpenBro Architecture
 
 > **Mission**: A self-improving autonomous personal AI agent that thinks, plans, executes, learns, and gets smarter every day. Best-in-class at every layer.
 
@@ -95,7 +95,7 @@ When new models drop (e.g. `llama3.4:8b`), OpenBro notices on next `brain update
 
 ### 5. Terminal-First Interface
 
-OpenBro ships as a **terminal-first agent**, like Claude Code / Codex CLI, with
+OpenBro ships as a **terminal-first agent**, with
 voice support inside the terminal flow. There is no separate desktop/browser UI.
 
 **Default UI**: terminal REPL launched by `openbro`.

@@ -12,8 +12,8 @@ class ProcessTool(BaseTool):
     description = (
         "List, search, or kill processes by name OR command line. "
         "On Windows, 'find' matches BOTH the exe name AND the full command "
-        "line — so searching 'claude' finds Claude Code running inside "
-        "node.exe, 'openbro' finds it inside python.exe, etc. Don't tell the "
+        "line — so searching 'openbro' finds it inside python.exe, and a "
+        "Node-based CLI is found inside node.exe by its own name, etc. Don't tell the "
         "user 'process not found' until you've also tried adjacent names "
         "(claude -> node, code -> Code.exe / electron, jupyter -> python)."
     )
@@ -61,7 +61,7 @@ class ProcessTool(BaseTool):
             if system == "Windows":
                 return self._find_windows(query)
             # *nix: pgrep -f already matches against the full command line,
-            # so 'claude' finds Node-hosted Claude Code, etc.
+            # so a Node-hosted CLI is found by its own name.
             result = subprocess.run(
                 ["pgrep", "-laf", query],
                 capture_output=True,
@@ -79,9 +79,9 @@ class ProcessTool(BaseTool):
         """Search both Name AND CommandLine via Get-CimInstance.
 
         Previous version used `tasklist /FI "IMAGENAME eq <q>*"` which only
-        matches the exe filename. Captured failure: user asked 'is Claude
-        running' — Claude Code runs inside `node.exe` with 'claude' in the
-        command line, so the old find returned 'no processes matching'
+        matches the exe filename. Captured failure: user asked whether a
+        Node-based CLI was running — it runs inside `node.exe` with its name
+        only in the command line, so the old find returned 'no processes matching'
         even though it was right there. New impl uses WMI/CIM which exposes
         the full CommandLine, so substring matches against either.
         """

@@ -144,7 +144,7 @@ class ToolRegistry:
             name,
             args,
             result,
-            risk=self.get_risk(name),
+            risk=self.get_risk(name, args=args),
             confirmed=confirmed,
         )
         return result

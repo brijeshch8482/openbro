@@ -1,7 +1,7 @@
 """MCP Server — exposes OpenBro's tools to other MCP clients.
 
 Run with `openbro --mcp-server`. Connects on stdio (the standard MCP
-transport for desktop apps like Claude Desktop, Cursor, etc).
+transport for MCP-compatible desktop apps).
 
 Other AI clients can then invoke OpenBro's 18 built-in tools (file_ops,
 app, browser, word, excel, cli_agent, etc.) over MCP. Effectively this

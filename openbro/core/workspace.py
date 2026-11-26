@@ -1,6 +1,6 @@
 """Workspace context — auto-injected facts about the user's current dir.
 
-Claude Code routinely starts every conversation knowing the cwd, the
+The agent starts every conversation knowing the cwd, the
 current git branch, recently-modified files, and whether this is a git
 repo or a virtualenv. That context lets the model jump straight to
 'fix the bug in main.py' without the user spelling out the path.

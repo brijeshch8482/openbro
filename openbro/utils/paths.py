@@ -77,7 +77,7 @@ def resolve_user_path(raw: str | os.PathLike) -> Path:
 def resolve_with_candidates(raw: str | os.PathLike) -> Path:
     """Like resolve_user_path, but when the resolved path doesn't
     exist, try several common rewrites BEFORE returning. Maps to
-    Claude-style behaviour: 'if my first guess doesn't work, try
+    the behaviour: 'if my first guess doesn't work, try
     others before giving up'.
 
     Captured 2026-05-31: user said `C:\\OneDrive\\Desktop\\Testing

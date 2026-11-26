@@ -2,9 +2,8 @@
 
 When the user asks something that needs more than one step ("D drive me fee
 documents dhoondh aur sab open kar"), the agent breaks it into a TaskList,
-runs each step, and surfaces progress live. Same idea as Claude Code's
-TodoWrite — gives the user a visible roadmap and lets the agent self-check
-that every step actually happened.
+runs each step, and surfaces progress live. It gives the user a visible
+roadmap and lets the agent self-check that every step actually happened.
 """
 
 from __future__ import annotations

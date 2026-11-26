@@ -28,6 +28,7 @@ import subprocess
 import threading
 import time
 
+from openbro.core.tool_protocol import render_transcript
 from openbro.llm.base import LLMProvider, LLMResponse, Message
 
 
@@ -97,7 +98,11 @@ class ClaudeProvider(LLMProvider):
         # events it keeps rendering "20s elapsed, still working".
         try:
             proc = subprocess.Popen(
-                [resolved, "-p", "--output-format", "text"],
+                # --tools "" turns off the CLI's own built-in tools
+                # (shell, file edits, web fetch). The model then has to act
+                # through OpenBro's <tool_call> protocol, so every action
+                # goes through OpenBro's permission gate and audit log.
+                [resolved, "-p", "--output-format", "text", "--tools", ""],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -168,23 +173,10 @@ class ClaudeProvider(LLMProvider):
     @staticmethod
     def _flatten(messages: list[Message]) -> str:
         """Claude --print takes a single prompt string. Roll the
-        conversation into a Markdown-ish transcript so the model sees
-        the history (same shape as CodexProvider)."""
-        parts: list[str] = []
-        for m in messages:
-            role = (m.role or "user").lower()
-            content = m.content or ""
-            if not content:
-                continue
-            if role == "system":
-                parts.append(f"## System\n{content}")
-            elif role == "user":
-                parts.append(f"## User\n{content}")
-            elif role == "assistant":
-                parts.append(f"## Assistant\n{content}")
-            elif role == "tool":
-                parts.append(f"## Tool output\n{content}")
-        return "\n\n".join(parts).strip()
+        conversation into a transcript; earlier tool calls are written
+        back as <tool_call> tags and tool output as <tool_result> blocks
+        so the model sees the same text protocol it is asked to use."""
+        return render_transcript(messages)
 
     @classmethod
     def _extract_answer(cls, stdout: str) -> str:
