@@ -313,6 +313,9 @@ class _ToolCallRenderer:
                     f"{fallback} for this turn.[/yellow]",
                     highlight=False,
                 )
+            elif ev.kind == "subagent":
+                marker = "▸" if ev.meta.get("state") == "start" else "◂"
+                self.con.print(f"[magenta]  {marker} {ev.text}[/magenta]", highlight=False)
             elif ev.kind == "system":
                 # System notices — model loading progress, escalator
                 # state changes, internal swaps. Captured 2026-05-31:

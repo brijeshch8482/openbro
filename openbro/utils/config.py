@@ -304,6 +304,8 @@ def default_config() -> dict:
             # tools in deferred_tools by name only; the model loads their
             # schemas with tool_search. 'all' sends every schema each call.
             "tool_loading": "auto",
+            # Step cap for sub-agents started by the task tool.
+            "subagent_max_steps": 15,
             "deferred_tools": ["cli_agent", "sticky_notes", "notification"],
             # Playbooks = pre-built workflows that handle common intents
             # without an LLM call (close_app, geo_lookup, system_health,

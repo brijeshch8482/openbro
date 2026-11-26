@@ -46,7 +46,7 @@ testing happens once all pieces are in.
 | 4 | Search tools — `grep`, `glob`, `read` (offset/limit), `edit` (exact replace, read-first) | **built** |
 | 5 | Document RAG — local index, hybrid search, `docs` tool, server-ready backend — see [RAG.md](RAG.md) | **built** (v1) |
 | 6 | Progressive disclosure — tool/skill names in prompt, schemas on demand | **built** |
-| 7 | Subagents — `task` tool runs a child agent, returns a summary | planned |
+| 7 | Subagents — `task` tool runs a child agent, returns a summary | **built** |
 | 8 | Hooks + permission rules in `config.yaml` | planned |
 
 ---
@@ -349,3 +349,28 @@ the model loads them.
   run.
 - The system prompt's `MORE TOOLS` block is built once, so the cached
   prefix stays stable.
+
+---
+
+## Piece 7 — Sub-agents
+
+`tools/task_tool.py`. The `task` tool hands a self-contained job to a
+child `Agent` that starts with a fresh context and returns only its final
+report. Broad searches (dozens of grep/read results) stay out of the main
+history; the parent sees one compact tool result.
+
+- Types: `explore` (default) gets only safe-risk tools, minus `memory`
+  and `task`; `general` gets every tool except `task` (no recursion).
+- The child shares the parent's provider and **permission gate** — a
+  risky action inside a sub-agent asks the user exactly like one in the
+  main agent.
+- Tools come from `ToolRegistry.view(allowed)`: same tool instances,
+  filtered, with deferred/loaded state copied and `tool_search` bound to
+  the view (loading inside the child doesn't change the parent).
+- The child's messages go to an `InMemoryTranscriptStore` — never into the
+  session transcript. Its token use is added to the parent's counters.
+- Its system prompt adds a sub-agent role: work until done, report with
+  exact paths/numbers, no questions back.
+- Step cap: `agent.subagent_max_steps` (15); at the cap the usual forced
+  no-tools final call produces the report.
+- REPL shows `▸ sub-agent (explore) started: …` / `◂ … done: N tool calls`.

@@ -126,21 +126,33 @@ class Agent:
         memory: MemoryManager | None = None,
         interactive: bool = True,
         permission_gate: PermissionGate | None = None,
+        provider=None,
+        tool_registry: ToolRegistry | None = None,
+        role_prompt: str | None = None,
+        max_steps: int | None = None,
     ):
+        """`provider`, `tool_registry`, `role_prompt` and `max_steps` are
+        set when this agent runs as a sub-agent (the `task` tool): it then
+        shares the parent's provider and a filtered view of its tools."""
         config = load_config()
-        try:
-            self.provider = create_provider()
-        except Exception as e:
-            console.print(f"[red]LLM provider error: {e}[/red]")
-            console.print("[yellow]Run 'openbro --setup' to reconfigure.[/yellow]")
-            raise SystemExit(1)
+        self.role_prompt = role_prompt
+        self._max_steps = max_steps
+        if provider is not None:
+            self.provider = provider
+        else:
+            try:
+                self.provider = create_provider()
+            except Exception as e:
+                console.print(f"[red]LLM provider error: {e}[/red]")
+                console.print("[yellow]Run 'openbro --setup' to reconfigure.[/yellow]")
+                raise SystemExit(1)
 
         # Wire the fallback provider's notification callback to the
         # ActivityBus so the REPL renderer can show 'primary failed,
         # switched to local' inline.
         from openbro.llm.fallback_provider import FallbackProvider
 
-        if isinstance(self.provider, FallbackProvider):
+        if isinstance(self.provider, FallbackProvider) and provider is None:
 
             def _on_fallback(primary_name: str, fallback_name: str, error: str) -> None:
                 self.bus.emit(
@@ -179,11 +191,15 @@ class Agent:
         self.interactive = interactive
         self.bus = get_bus()
 
-        self.tool_registry = ToolRegistry(config=config)
+        self.tool_registry = tool_registry or ToolRegistry(config=config)
         # Inject memory into the memory tool so it uses this agent's user/session
         mem_tool = self.tool_registry.get_tool("memory")
-        if isinstance(mem_tool, MemoryTool):
+        if isinstance(mem_tool, MemoryTool) and tool_registry is None:
             mem_tool._manager = self.memory
+        # The task tool spawns sub-agents from this agent.
+        task_tool = self.tool_registry.get_tool("task")
+        if task_tool is not None and hasattr(task_tool, "_parent"):
+            task_tool._parent = self
 
         # Playbooks — pre-built workflows that bypass the LLM for common
         # intents (geo lookup, close app, file search, etc.). Match on
@@ -232,12 +248,13 @@ class Agent:
         self._turn_tokens_in = 0
         self._turn_tokens_out = 0
 
-        console.print(f"[dim]LLM: {self.provider.name()}[/dim]")
-        self.bus.emit("system", f"agent ready: {self.provider.name()}")
+        if role_prompt is None:
+            console.print(f"[dim]LLM: {self.provider.name()}[/dim]")
+            self.bus.emit("system", f"agent ready: {self.provider.name()}")
 
     def _text_tool_mode(self) -> bool:
-        """True when the provider has no native function calling (Claude
-        CLI, Codex CLI, local specialists). Tools are then described in
+        """True when the provider has no native function calling
+        (subscription CLI providers, local specialists). Tools are then described in
         the system prompt and parsed back out of the reply text."""
         try:
             return not self.provider.supports_tools()
@@ -262,6 +279,8 @@ class Agent:
             self._intent_check_block(),
             self._instructions_block(),
         ]
+        if self.role_prompt:
+            parts.append("\n" + self.role_prompt)
         if self._prompt_text_tools:
             parts.append("\n" + render_tool_instructions(self.tool_registry.get_tools_schema()))
         deferred = self.tool_registry.deferred_index()
@@ -655,6 +674,8 @@ class Agent:
         """
         from openbro.llm.fallback_provider import FallbackProvider
 
+        if self._max_steps:
+            return self._max_steps
         provider = self.provider
         if isinstance(provider, FallbackProvider):
             provider = getattr(provider, "primary", provider)
