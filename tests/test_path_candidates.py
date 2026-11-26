@@ -36,7 +36,7 @@ def test_nonexistent_path_returns_original_resolution(tmp_path):
 
 def test_case_insensitive_parent_walk(tmp_path):
     """`/Foo/Bar/file.txt` should still resolve when the actual
-    directory is `/foo/bar/file.txt` — Claude-style 'try a different
+    directory is `/foo/bar/file.txt` — 'try a different
     angle' before giving up."""
     real = tmp_path / "foo" / "bar"
     real.mkdir(parents=True)

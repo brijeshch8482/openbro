@@ -1,6 +1,6 @@
-"""Session recap — Claude Code-style 'where are we' summary.
+"""Session recap — a 'where are we' summary.
 
-The user pointed at Claude Code's recap line:
+Target shape of the recap line:
 
   ※ recap: Goal: improve FogPASS battery backup by making AudioBooster
     lazy and lowering LowVoltageGuard threshold to 3.2V (recovery

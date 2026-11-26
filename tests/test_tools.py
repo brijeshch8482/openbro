@@ -433,7 +433,7 @@ def test_process_find_requires_query():
 
 def test_process_find_windows_matches_command_line(monkeypatch):
     """Captured failure: 'find query=claude' returned 'no processes' even
-    though Claude Code was running as node.exe with 'claude' in the args.
+    though the CLI was running as node.exe with 'claude' in the args.
     The new Windows impl uses Get-CimInstance + JSON so command-line
     substrings match. Mock the PowerShell call and verify formatting."""
     from openbro.tools import process_tool as pt

@@ -14,7 +14,7 @@ expects:
     ~10% the input cost.
 
   - Tools schema: translated from OpenAI-style
-    `{"function": {"name": ..., "parameters": ...}}` to Claude-style
+    `{"function": {"name": ..., "parameters": ...}}` to the Anthropic
     `{"name": ..., "input_schema": ...}`. Falls through unchanged if a
     schema is already in Claude format.
 

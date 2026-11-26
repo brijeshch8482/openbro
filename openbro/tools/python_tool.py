@@ -5,7 +5,7 @@ don't cover ('count text files in OneDrive Desktop', 'how much RAM is
 free', 'parse this JSON'), the agent used to give up or report wrong
 data from a half-fitting tool (e.g. system_info reporting D's stats as
 C's). Real intelligence = write a short Python snippet, run it, return
-the answer. That's how Claude Code works.
+the answer.
 
 Risk: MODERATE. Python can do destructive things (delete files, hit
 the network) but stdout is captured and the call is sandboxed via a

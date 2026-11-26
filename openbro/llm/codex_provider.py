@@ -22,6 +22,7 @@ import subprocess
 import threading
 import time
 
+from openbro.core.tool_protocol import render_transcript
 from openbro.llm.base import LLMProvider, LLMResponse, Message
 
 
@@ -181,24 +182,10 @@ class CodexProvider(LLMProvider):
     @staticmethod
     def _flatten(messages: list[Message]) -> str:
         """Codex takes a single prompt string. Roll the conversation
-        into a Markdown-ish transcript so the model sees the history."""
-        parts: list[str] = []
-        for m in messages:
-            role = (m.role or "user").lower()
-            content = m.content or ""
-            if not content:
-                continue
-            if role == "system":
-                parts.append(f"## System\n{content}")
-            elif role == "user":
-                parts.append(f"## User\n{content}")
-            elif role == "assistant":
-                parts.append(f"## Assistant\n{content}")
-            elif role == "tool":
-                parts.append(f"## Tool output\n{content}")
-        # The last user message becomes the leading instruction; the
-        # earlier context follows so codex sees it as background.
-        return "\n\n".join(parts).strip()
+        into a transcript; earlier tool calls are written back as
+        <tool_call> tags and tool output as <tool_result> blocks so the
+        model sees the same text protocol it is asked to use."""
+        return render_transcript(messages)
 
     @classmethod
     def _extract_answer(cls, stdout: str) -> str:

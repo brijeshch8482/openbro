@@ -165,7 +165,7 @@ _OPENBRO_TOOL_EXAMPLES = [
         "input": "openbro kya hai?",
         "output": (
             "OpenBro tera personal AI agent hai bhai — pure offline kaam karta, "
-            "Hinglish me baat karta, tera laptop control kar sakta. JARVIS jaisa."
+            "Hinglish me baat karta, tera laptop control kar sakta."
         ),
     },
     {

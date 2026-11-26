@@ -9,6 +9,7 @@ from rich.console import Console
 from openbro.core import session_memory
 from openbro.core.activity import get_bus
 from openbro.core.permissions import PermissionGate, PermissionRequest
+from openbro.core.tool_protocol import parse_tool_calls, render_tool_instructions
 from openbro.core.workspace import detect_cached as detect_workspace
 from openbro.llm.base import LLMResponse, Message
 from openbro.llm.router import create_provider
@@ -193,7 +194,11 @@ class Agent:
             "Tu OpenBro hai - ek helpful AI bro. Friendly reh, user ki help kar.",
         )
         self.tool_names = ", ".join(self.tool_registry.list_tools())
-        self.history.append(Message(role="system", content=self._build_system_prompt(None)))
+        # Whether the current system prompt carries the text tool-call
+        # protocol. Tracked so a mid-session provider switch (native ⇄
+        # text-only) rebuilds the prompt exactly once.
+        self._prompt_text_tools = self._text_tool_mode()
+        self.history.append(Message(role="system", content=self._build_system_prompt()))
         self.max_history = config.get("agent", {}).get("max_history", 50)
 
         self.last_language = "hinglish"
@@ -208,8 +213,23 @@ class Agent:
         console.print(f"[dim]LLM: {self.provider.name()}[/dim]")
         self.bus.emit("system", f"agent ready: {self.provider.name()}")
 
-    def _build_system_prompt(self, lang: str | None) -> str:
-        memory_context = self.memory.context_prompt()
+    def _text_tool_mode(self) -> bool:
+        """True when the provider has no native function calling (Claude
+        CLI, Codex CLI, local specialists). Tools are then described in
+        the system prompt and parsed back out of the reply text."""
+        try:
+            return not self.provider.supports_tools()
+        except Exception:
+            return False
+
+    def _build_system_prompt(self) -> str:
+        """The STABLE part of the context — built once, not per turn.
+
+        Everything here stays byte-identical across turns so providers
+        with prompt caching reuse the prefix. Per-turn context
+        (workspace, memory facts, language) goes in the reminder that
+        `_messages_for_call` attaches to the latest user message.
+        """
         parts = [
             self.base_system_prompt,
             (
@@ -217,14 +237,52 @@ class Agent:
                 "Zaroorat padne pe inhe use kar."
             ),
             self._world_facts_block(),
-            self._workspace_block(),
             self._intent_check_block(),
         ]
-        if memory_context:
-            parts.append("\n" + memory_context)
-        if lang:
-            parts.append("\n" + language_instruction(lang))
+        if self._prompt_text_tools:
+            parts.append("\n" + render_tool_instructions(self.tool_registry.get_tools_schema()))
         return "\n".join(p for p in parts if p)
+
+    def refresh_system_prompt(self) -> None:
+        """Rebuild the stable system prompt (tool list or provider changed)."""
+        self._prompt_text_tools = self._text_tool_mode()
+        content = self._build_system_prompt()
+        if self.history and self.history[0].role == "system":
+            self.history[0] = Message(role="system", content=content)
+        else:
+            self.history.insert(0, Message(role="system", content=content))
+
+    def _reminder_block(self, lang: str | None) -> str:
+        """Per-turn context: workspace, remembered facts, reply language."""
+        parts = [self._workspace_block().strip()]
+        try:
+            parts.append(self.memory.context_prompt().strip())
+        except Exception:
+            pass
+        if lang:
+            parts.append(language_instruction(lang).strip())
+        return "\n\n".join(p for p in parts if p)
+
+    def _messages_for_call(self) -> list[Message]:
+        """History as sent to the provider: the latest user message gets
+        a <system-reminder> with per-turn context appended.
+
+        The reminder is NOT stored in `self.history`, so earlier turns
+        stay unchanged and the cached prompt prefix stays valid.
+        """
+        reminder = self._reminder_block(self.last_language)
+        if not reminder:
+            return list(self.history)
+        for i in range(len(self.history) - 1, -1, -1):
+            msg = self.history[i]
+            if msg.role == "user":
+                messages = list(self.history)
+                messages[i] = Message(
+                    role="user",
+                    content=f"{msg.content}\n\n<system-reminder>\n{reminder}\n</system-reminder>",
+                )
+                return messages
+        return list(self.history)
 
     # Goal-setting language we auto-persist via session_memory. Kept
     # conservative — only obvious imperative + theme phrases trigger
@@ -364,7 +422,7 @@ class Agent:
             " not just until the first plausible answer arrives. On"
             " local model (offline) the iteration cap is large — use"
             " it. The user explicitly asked for unbounded effort on"
-            " local: 'jab tak cheeje solve na ho jaise claude'.\n"
+            " local: 'jab tak cheeje solve na ho'.\n"
             "\n"
             "### 7. Permission denied → escalate via `elevate`, don't fail silently\n"
             "When a tool (especially `shell`) returns 'Access denied',"
@@ -384,7 +442,7 @@ class Agent:
             " elevation, not give up. Captured 2026-06-20: user said"
             " 'agar permission ki jaroorat hai to maangta kyo nhi'.\n"
             "\n"
-            "### 8. Reply tone — Claude / Codex style, not a tutorial\n"
+            "### 8. Reply tone — short and professional, not a tutorial\n"
             "After the tools have done the work, the final assistant"
             " message goes to a human reading a chat. Keep it short"
             " and professional:\n"
@@ -398,7 +456,7 @@ class Agent:
             " PowerShell', 'Let me try a different approach',"
             " 'attempting cleanup now'. Just dispatch the next tool."
             " Captured 2026-06-20: user said 'isko thoda professional"
-            " reply krne bolo...jaise claude aur codex krta hai'.\n"
+            " reply krne bolo'.\n"
             "  • Never paste the tool's raw command line back at the"
             ' user (`shell.command(command="powershell -Command …")`)'
             " — that's debug output, not a conversation. Tools run;"
@@ -464,8 +522,11 @@ class Agent:
         )
         return "\n".join(lines)
 
-    def _refresh_system_prompt(self, lang: str) -> None:
-        self.history[0] = Message(role="system", content=self._build_system_prompt(lang))
+    def _ensure_prompt_mode(self) -> None:
+        """Rebuild the system prompt only if the provider's tool mode
+        changed since it was built (e.g. `model switch` to Claude CLI)."""
+        if self._text_tool_mode() != self._prompt_text_tools:
+            self.refresh_system_prompt()
 
     def chat(self, user_input: str) -> str:
         """Single user turn — one LLM-driven loop.
@@ -491,18 +552,16 @@ class Agent:
     #
     #   MAX_TOOL_ITERATIONS_CLOUD = 25  — cloud calls cost real tokens
     #                                     + rate limit, so a tighter
-    #                                     cap is appropriate. Real
-    #                                     Claude Code loops 5-20+
-    #                                     times on hard tasks; 25 is
-    #                                     enough headroom for that
+    #                                     cap is appropriate. Hard
+    #                                     tasks take 5-20+ loops;
+    #                                     25 is enough headroom for that
     #                                     while still terminating on
     #                                     genuine loops.
     #
     #   MAX_TOOL_ITERATIONS_LOCAL = 80  — captured 2026-05-31 user
     #                                     ask: 'unlimited tokens lene
     #                                     do offline se...jab tak
-    #                                     cheeje solve na ho jaise
-    #                                     claude krta'. Local runs in-
+    #                                     cheeje solve na ho'. Local runs in-
     #                                     process so no rate limit;
     #                                     let it grind through. Hard
     #                                     ceiling of 80 keeps a real
@@ -566,7 +625,7 @@ class Agent:
         import time as _time
 
         self.last_language = detect_language(user_input)
-        self._refresh_system_prompt(self.last_language)
+        self._ensure_prompt_mode()
 
         self.bus.emit("user", user_input, lang=self.last_language)
         self.history.append(Message(role="user", content=user_input))
@@ -578,7 +637,12 @@ class Agent:
         self._maybe_record_goal(user_input)
         self._trim_history()
 
-        tools = self.tool_registry.get_tools_schema() if self.provider.supports_tools() else None
+        # Native function calling → send schemas. Text-only providers get
+        # the tool protocol in the system prompt instead (tools=None) and
+        # their replies are parsed for <tool_call> tags below.
+        text_tools = self._prompt_text_tools
+        tools = None if text_tools else self.tool_registry.get_tools_schema()
+        known_tools = self.tool_registry.list_tools()
         turn_started = _time.monotonic()
         # Per-turn counters so the UI can render "step N, X tokens, Ys"
         # without the agent having to thread them through every emit.
@@ -604,8 +668,7 @@ class Agent:
 
         # ─── Agent loop (was single-shot, which forced LLM to hallucinate
         # answers after one tool returned nothing). Loop till LLM stops
-        # calling tools and emits a final text response — same shape as
-        # Claude Code / OpenAI Assistants API ReAct loop.
+        # calling tools and emits a final text response (a ReAct loop).
         max_iterations = self._iteration_cap()
         for iteration in range(max_iterations):
             self.bus.emit(
@@ -616,13 +679,19 @@ class Agent:
             )
             llm_t0 = _time.monotonic()
             try:
-                response = self.provider.chat(self.history, tools=tools)
+                response = self.provider.chat(self._messages_for_call(), tools=tools)
             except Exception as e:
                 return _friendly_error(e)
 
+            if text_tools and not response.tool_calls:
+                clean, calls = parse_tool_calls(response.content or "", known_tools)
+                if calls:
+                    response.tool_calls = calls
+                    response.content = clean
+
             # Token accounting — every provider returns usage with at least
             # {input, output}. Cumulate per turn and emit so the UI can
-            # show a running counter (Claude Code parity).
+            # show a running counter.
             in_t = int(response.usage.get("input", 0) or 0)
             out_t = int(response.usage.get("output", 0) or 0)
             self._turn_tokens_in += in_t
@@ -672,9 +741,12 @@ class Agent:
 
         # Safety net — model is stuck looping. Force one final no-tools call.
         try:
-            response = self.provider.chat(self.history)
+            response = self.provider.chat(self._messages_for_call())
         except Exception as e:
             return f"Max iterations hit, fallback failed: {e}"
+        if text_tools:
+            # No more tool rounds — drop any stray tags from the answer.
+            response.content, _ = parse_tool_calls(response.content or "", known_tools)
         self.history.append(Message(role="assistant", content=response.content))
         self.memory.add("assistant", response.content)
         self.bus.emit("assistant", response.content)
@@ -691,7 +763,7 @@ class Agent:
 
     def _stream_chat_impl(self, user_input: str) -> Iterator[str]:
         self.last_language = detect_language(user_input)
-        self._refresh_system_prompt(self.last_language)
+        self._ensure_prompt_mode()
         self.bus.emit("user", user_input, lang=self.last_language)
 
         self.history.append(Message(role="user", content=user_input))
@@ -700,7 +772,7 @@ class Agent:
 
         full_response = ""
         try:
-            for token in self.provider.stream(self.history):
+            for token in self.provider.stream(self._messages_for_call()):
                 full_response += token
                 yield token
         except Exception as e:
@@ -901,6 +973,34 @@ class Agent:
             )
 
     def _trim_history(self):
-        if len(self.history) > self.max_history + 1:
-            system = self.history[0]
-            self.history = [system] + self.history[-(self.max_history) :]
+        """Drop the oldest WHOLE turns until history fits `max_history`.
+
+        A turn starts at a `user` message and runs until the next one,
+        so an assistant `tool_calls` message is never separated from its
+        `tool` results (an orphan `tool` message is a 400 on strict
+        APIs). The latest turn is always kept, even if it alone is over
+        the limit.
+        """
+        if not self.history:
+            return
+        has_system = self.history[0].role == "system"
+        head = self.history[:1] if has_system else []
+        body = self.history[1:] if has_system else list(self.history)
+        if len(body) <= self.max_history:
+            return
+
+        turns: list[list[Message]] = []
+        for msg in body:
+            if msg.role == "user" or not turns:
+                turns.append([msg])
+            else:
+                turns[-1].append(msg)
+        # A leading group that doesn't start with a user message is the
+        # leftover of an earlier cut — it can't stand alone, drop it first.
+        if turns and turns[0][0].role != "user" and len(turns) > 1:
+            turns.pop(0)
+
+        total = sum(len(t) for t in turns)
+        while len(turns) > 1 and total > self.max_history:
+            total -= len(turns.pop(0))
+        self.history = head + [m for t in turns for m in t]

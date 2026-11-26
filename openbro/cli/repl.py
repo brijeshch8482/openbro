@@ -175,7 +175,7 @@ def _format_args(name: str, args: dict) -> tuple[str, str]:
     """Pick a syntax-highlight lexer and pretty-print args for display.
 
     `python` / `shell` get their actual code rendered as syntax-highlighted
-    blocks (Claude Code parity — you see the bash command before it runs).
+    blocks — you see the command before it runs.
     Other tools get compact JSON. Returns (lexer, text).
     """
     if not isinstance(args, dict):
@@ -254,7 +254,7 @@ class _ToolCallRenderer:
                         highlight=False,
                     )
             elif ev.kind == "tool_start":
-                # Claude Code style — no box, just a header line +
+                # No box — just a header line +
                 # dim indented args. Less visual noise, more
                 # professional.
                 name = ev.meta.get("tool", "?")
@@ -329,7 +329,7 @@ class _ToolCallRenderer:
                         highlight=False,
                     )
             elif ev.kind == "tool_end":
-                # Claude Code style — no box for results. A marker
+                # No box for results. A marker
                 # line shows status + elapsed; the preview is dim
                 # indented text below.
                 name = ev.meta.get("tool", "?")
@@ -454,7 +454,7 @@ def _render_response(con: Console, text: str) -> None:
     """Render an assistant response with Markdown formatting.
 
     Falls back to plain print if Markdown rendering fails (e.g. very
-    long output that the parser chokes on). Claude Code parity:
+    long output that the parser chokes on).
     code fences become syntax-highlighted blocks, lists / tables /
     headings render properly instead of as raw backticks. Long code
     fences are folded to a 4-line preview with a file path the user
@@ -497,7 +497,7 @@ def print_banner():
 def _make_status_bar(agent, get_voice_state):
     """Build a prompt_toolkit bottom_toolbar callable.
 
-    Claude Code parity: a thin status line always visible under the prompt
+    A thin status line always visible under the prompt
     showing model, voice/boss state, cumulative token usage, and slash
     commands. Called fresh on every keystroke so toggling voice or
     completing a turn updates the bar immediately.
@@ -520,7 +520,7 @@ def _make_status_bar(agent, get_voice_state):
             and getattr(agent.permissions, "mode", "") == "boss"
             else "auto"
         )
-        # Cumulative session token spend — Claude Code-like at-a-glance
+        # Cumulative session token spend — an at-a-glance
         # gauge for how much the conversation has used.
         tok_in = getattr(agent, "session_tokens_in", 0)
         tok_out = getattr(agent, "session_tokens_out", 0)
@@ -662,7 +662,7 @@ def start_repl(resume_session: str | None = None):
 
                 console.print()
                 console.rule(style="grey23")
-                # Dim grey prompt glyph — Claude-style. Loud cyan was
+                # Dim grey prompt glyph. Loud cyan was
                 # competing with the user's typed text for attention.
                 try:
                     user_input = session.prompt(ANSI("\x1b[38;5;245m›\x1b[0m ")).strip()
@@ -719,7 +719,7 @@ def start_repl(resume_session: str | None = None):
                 # path cannot currently surface structured tool calls reliably.
                 #
                 # Render the assistant response as Markdown so code blocks, lists,
-                # tables, etc. format correctly — Claude Code does the same. A
+                # tables, etc. format correctly. A
                 # plain console.print() leaves '```python\n...' as raw backticks.
                 # (_render_response handles the Markdown import — see helper.)
                 response = ""
@@ -753,7 +753,7 @@ def start_repl(resume_session: str | None = None):
                         response = agent.chat(user_input)
                     console.print("\n[grey50]⏺[/grey50] ", end="")
                     _render_response(console, response)
-                # Turn footer — Claude Code-style "what just happened" line.
+                # Turn footer — a "what just happened" line.
                 # in/out token delta + wall-clock for this single turn so
                 # the user can spot a runaway loop (huge in tokens) or a
                 # network stall (high elapsed, low tokens).
@@ -1334,7 +1334,7 @@ def _test_fallback(agent):
 
 
 def _show_recap(agent: Agent):
-    """Claude Code-style recap line — Goal / Status / Next built from
+    """Recap line — Goal / Status / Next built from
     the last 30 turns of agent history. Cheap, deterministic, no LLM
     call. Renders as a single dim-magenta line so it doesn't compete
     with the chat content.
