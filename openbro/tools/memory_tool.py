@@ -1,19 +1,32 @@
-"""Memory tool - remember, recall, forget, and search user facts."""
+"""Memory tool — OpenBro's long-term memories (one note per memory).
+
+Raw operations only: save / read / delete / list / search. The model
+decides what is worth remembering (see the memory principle in the system
+prompt). Older actions (remember / recall / forget) still work and map
+onto notes.
+"""
 
 from openbro.memory import MemoryManager
+from openbro.memory.notes import NOTE_TYPES, Note
 from openbro.tools.base import BaseTool, RiskLevel
 
 
 class MemoryTool(BaseTool):
     name = "memory"
     description = (
-        "OpenBro's INTERNAL memory of user facts — name, preferences, "
-        "long-term info that should persist across chats. "
-        "Actions: remember/recall/forget/list/search. "
-        "NOT for Windows Sticky Notes (use `sticky_notes` tool for that), "
-        "NOT for creating files (use `file_ops` / `word` / `excel`). "
-        "Use only when the user explicitly wants you to remember a fact "
-        "(e.g. 'yaad rakh ki mera birthday X hai')."
+        "OpenBro's long-term memory about the user and their work, kept "
+        "across sessions. One memory = one note with a short name, a one-line "
+        "description, a type and a body.\n"
+        "Types: user (who they are, preferences), feedback (how they want you "
+        "to work — corrections and confirmed approaches, with why), project "
+        "(ongoing work, decisions, deadlines), reference (where things live: "
+        "paths, URLs, accounts).\n"
+        "Actions: save (create or update by name), read, delete, list, search "
+        "(memories + past conversations).\n"
+        "Save when the user tells you something lasting about themselves, "
+        "corrects you, or a durable decision appears. Update an existing note "
+        "instead of creating a duplicate. Never store passwords or secrets.\n"
+        "NOT for Windows Sticky Notes (use `sticky_notes`), NOT for files."
     )
     risk = RiskLevel.SAFE
 
@@ -28,59 +41,95 @@ class MemoryTool(BaseTool):
     def run(
         self,
         action: str,
+        name: str = "",
+        description: str = "",
+        type: str = "",
+        body: str = "",
+        scope: str = "global",
+        query: str = "",
         key: str = "",
         value: str = "",
         category: str = "general",
-        query: str = "",
     ) -> str:
-        action = action.lower().strip()
+        action = (action or "").lower().strip()
         m = self._mgr()
 
+        # Older action names → note operations.
         if action == "remember":
-            if not key or not value:
-                return "Both 'key' and 'value' required for remember"
-            m.remember(key, value, category=category)
-            return f"Got it. Yaad rakh liya: {key} = {value}"
+            action, name = "save", name or key
+            body = body or value
+            description = description or f"{key}: {value}"
+        elif action in ("recall", "forget"):
+            name = name or key
+            action = "read" if action == "recall" else "delete"
 
-        elif action == "recall":
-            if not key:
-                return "'key' required for recall"
-            val = m.recall(key)
-            return f"{key} = {val}" if val else f"Kuch yaad nahi '{key}' ke baare me"
+        if action == "save":
+            type = type or "user"
+            if not name or not (body or description):
+                return "save needs 'name' and 'body' (plus a one-line 'description')"
+            if type not in NOTE_TYPES:
+                return f"type must be one of: {', '.join(NOTE_TYPES)}"
+            if scope == "project":
+                from pathlib import Path
 
-        elif action == "forget":
-            if not key:
-                return "'key' required for forget"
-            removed = m.forget(key)
-            return f"Forgot: {key}" if removed else f"Nothing to forget for: {key}"
+                from openbro.memory.instructions import find_project_root
 
-        elif action == "list":
-            facts = m.all_facts(category=category if category != "general" else None)
-            if not facts:
-                return "No facts stored yet"
-            lines = [f"  - {f['key']}: {f['value']} [{f['category']}]" for f in facts[:30]]
-            return "Stored facts:\n" + "\n".join(lines)
+                root = find_project_root(Path.cwd())
+                scope = f"project:{root}" if root else "global"
+            existed = m.notes.get(name) is not None
+            note = m.save_note(
+                Note(
+                    name=name,
+                    description=(description or body.splitlines()[0])[:200],
+                    type=type,
+                    body=body or description,
+                    scope=scope or "global",
+                )
+            )
+            return f"{'Updated' if existed else 'Saved'} memory '{note.name}' ({note.type})"
 
-        elif action == "search":
+        if action == "read":
+            if not name:
+                return "read needs 'name'"
+            note = m.notes.get(name)
+            if note is None:
+                return f"No memory named '{name}'. Use action=list or action=search."
+            return (
+                f"{note.name} ({note.type}, scope {note.scope}, updated {note.updated})\n"
+                f"{note.description}\n\n{note.body}"
+            )
+
+        if action == "delete":
+            if not name:
+                return "delete needs 'name'"
+            return f"Deleted memory '{name}'" if m.forget(name) else f"No memory named '{name}'"
+
+        if action == "list":
+            notes = m.notes.all()
+            if type in NOTE_TYPES:
+                notes = [n for n in notes if n.type == type]
+            if not notes:
+                return "No memories saved yet"
+            return "Memories:\n" + "\n".join(n.index_line() for n in notes)
+
+        if action == "search":
             if not query:
-                return "'query' required for search"
+                return "search needs 'query'"
             results = m.search(query)
-            facts = results["facts"]
-            msgs = results["messages"]
-
             parts = []
-            if facts:
-                parts.append("Facts:")
-                parts.extend(f"  - {f['key']}: {f['value']}" for f in facts[:10])
-            if msgs:
-                parts.append("\nPast messages:")
-                for msg in msgs[:5]:
-                    preview = msg["content"][:100]
-                    parts.append(f"  [{msg['role']}] {preview}")
+            if results["notes"]:
+                parts.append("Memories:")
+                for n in results["notes"]:
+                    snippet = " ".join(n.body.split())[:160]
+                    parts.append(f"{n.index_line()}\n    {snippet}")
+            if results["messages"]:
+                parts.append("Past conversation messages:")
+                for msg in results["messages"][:6]:
+                    preview = " ".join((msg["content"] or "").split())[:160]
+                    parts.append(f"  [{msg['timestamp'][:10]} {msg['role']}] {preview}")
             return "\n".join(parts) if parts else f"Nothing found for '{query}'"
 
-        else:
-            return f"Unknown action: {action}. Available: remember, recall, forget, list, search"
+        return f"Unknown action: {action}. Available: save, read, delete, list, search"
 
     def schema(self) -> dict:
         return {
@@ -91,31 +140,35 @@ class MemoryTool(BaseTool):
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["remember", "recall", "forget", "list", "search"],
-                        "description": "Memory action to perform",
+                        "enum": ["save", "read", "delete", "list", "search"],
+                        "description": "What to do",
                     },
-                    "key": {
+                    "name": {
+                        "type": "string",
+                        "description": "Short kebab-case name, e.g. 'prefers-short-replies'",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "One line saying what this memory is (save)",
+                    },
+                    "type": {
+                        "type": "string",
+                        "enum": list(NOTE_TYPES),
+                        "description": "Memory type (save; filter for list)",
+                    },
+                    "body": {
                         "type": "string",
                         "description": (
-                            "Fact key (e.g. 'name', 'birthday', 'favorite_color'). "
-                            "Required for remember, recall, forget."
+                            "The memory itself (save). For feedback/project add "
+                            "'Why:' and 'How to apply:' lines."
                         ),
                     },
-                    "value": {
+                    "scope": {
                         "type": "string",
-                        "description": "Fact value (required for remember)",
+                        "enum": ["global", "project"],
+                        "description": "global (default) or only for the current project (save)",
                     },
-                    "category": {
-                        "type": "string",
-                        "description": (
-                            "Category for organizing facts: general, personal, "
-                            "work, preferences, etc."
-                        ),
-                    },
-                    "query": {
-                        "type": "string",
-                        "description": "Search query (for search action)",
-                    },
+                    "query": {"type": "string", "description": "Search text (search)"},
                 },
                 "required": ["action"],
             },

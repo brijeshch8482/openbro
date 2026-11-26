@@ -2,9 +2,12 @@
 
 import uuid
 from collections import deque
+from pathlib import Path
 
 from openbro.llm.base import Message
 from openbro.memory import store
+from openbro.memory.instructions import find_project_root
+from openbro.memory.notes import Note, NoteStore, build_note_store, memory_block
 from openbro.memory.transcript import Transcript, TranscriptStore, build_transcript_store
 
 
@@ -32,16 +35,16 @@ class MemoryManager:
 
         # Initialize DB
         store.init_db()
-        if transcripts is None:
-            try:
-                from openbro.utils.config import load_config
+        try:
+            from openbro.utils.config import load_config
 
-                transcripts = build_transcript_store(load_config())
-            except NotImplementedError:
-                raise
-            except Exception:
-                transcripts = build_transcript_store(None)
+            self._config = load_config()
+        except Exception:
+            self._config = {}
+        if transcripts is None:
+            transcripts = build_transcript_store(self._config)
         self.transcripts = transcripts
+        self._notes: NoteStore | None = None  # built on first use
 
     def _new_session_id(self) -> str:
         return str(uuid.uuid4())[:12]
@@ -102,38 +105,75 @@ class MemoryManager:
     def list_sessions(self) -> list[dict]:
         return store.list_sessions(self.user_id)
 
-    # === Tier 3: Long-term facts ===
+    # === Tier 3: Long-term memories (notes) ===
+
+    @property
+    def notes(self) -> NoteStore:
+        if self._notes is None:
+            self._notes = build_note_store(self.user_id, self._config)
+            self._migrate_facts()
+        return self._notes
+
+    def _migrate_facts(self) -> None:
+        """One-time copy of old key/value facts into notes."""
+        marker = self._notes.location() / ".facts-migrated"
+        if marker.exists():
+            return
+        try:
+            for f in store.list_facts(self.user_id):
+                if self._notes.get(f["key"]) is None:
+                    self._notes.save(_fact_note(f["key"], f["value"]))
+            marker.write_text("facts copied into notes\n", encoding="utf-8")
+        except Exception:
+            pass  # retried next start; old facts stay readable meanwhile
+
+    def save_note(self, note: Note) -> Note:
+        return self.notes.save(note)
 
     def remember(self, key: str, value: str, category: str = "general"):
-        """Store a long-term fact about the user."""
-        store.set_fact(key, value, user_id=self.user_id, category=category)
+        """Store a fact about the user (a `user` note named after the key)."""
+        self.notes.save(_fact_note(key, value))
 
     def recall(self, key: str) -> str | None:
-        return store.get_fact(key, user_id=self.user_id)
+        note = self.notes.get(key)
+        return note.body if note else None
 
     def forget(self, key: str) -> bool:
-        return store.delete_fact(key, user_id=self.user_id)
+        return self.notes.delete(key)
 
     def all_facts(self, category: str | None = None) -> list[dict]:
-        return store.list_facts(self.user_id, category=category)
+        """Every note as a key/value row (kept for the `memory` command)."""
+        return [
+            {"key": n.name, "value": n.body, "category": n.type, "updated_at": n.updated}
+            for n in sorted(self.notes.all(), key=lambda n: n.updated, reverse=True)
+            if category is None or n.type == category
+        ]
 
     def search(self, query: str) -> dict:
-        """Search across both facts and conversation history."""
+        """Search memories and past conversation messages."""
+        hits = self.notes.search(query)
         return {
-            "facts": store.search_facts(query, self.user_id),
+            "facts": [{"key": n.name, "value": n.body, "category": n.type} for n, _ in hits],
+            "notes": [n for n, _ in hits],
             "messages": store.search_messages(query, self.user_id, limit=10),
         }
 
-    def context_prompt(self) -> str:
-        """Generate a context block to inject into system prompt."""
-        facts = self.all_facts()
-        if not facts:
-            return ""
+    def memory_block(self, query: str = "", cwd: Path | None = None) -> str:
+        """Memories that matter for this turn, within the token budget."""
+        root = find_project_root(cwd or Path.cwd())
+        budget = int(
+            ((self._config or {}).get("memory", {}) or {}).get("index_budget_tokens", 1500)
+        )
+        return memory_block(self.notes.all(), query, str(root) if root else None, budget)
 
-        lines = ["Things you know about this user:"]
-        for f in facts[:20]:
-            lines.append(f"- {f['key']}: {f['value']}")
-        return "\n".join(lines)
+    def context_prompt(self) -> str:
+        return self.memory_block("")
 
     def stats(self) -> dict:
-        return store.get_stats()
+        stats = store.get_stats()
+        stats["facts"] = len(self.notes.all())
+        return stats
+
+
+def _fact_note(key: str, value: str) -> Note:
+    return Note(name=key, description=f"{key}: {value}"[:200], type="user", body=value)
