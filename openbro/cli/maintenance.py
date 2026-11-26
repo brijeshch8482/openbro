@@ -28,6 +28,7 @@ FEATURES = {
     "PDF / scans": (("pypdf", "pytesseract"), "docs"),
     "Word / Excel": (("docx", "openpyxl"), "office"),
     "Telegram bot": (("telegram",), "all"),
+    "web page control": (("playwright",), "browser"),
     "cloud providers": (("anthropic", "openai"), "all"),
 }
 

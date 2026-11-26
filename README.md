@@ -82,9 +82,10 @@ pip install --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
 
 | Extra | Adds |
 |---|---|
-| `all` | offline model engine, every cloud provider, Telegram, Word/Excel, PDF |
+| `all` | offline model engine, every cloud provider, Telegram, Word/Excel, PDF, document search, web page control |
 | `voice` | speech-to-text, text-to-speech, microphone |
 | `rag` | meaning-based document search (local embedding model) |
+| `browser` | web page control — drives your installed Chrome or Edge |
 | `docs` | OCR for scans and images, HTML parsing |
 | `office` | Word and Excel only |
 
@@ -188,6 +189,22 @@ The index is one SQLite file at `<storage>/docs/index.db`. Design: [docs/RAG.md]
 
 ---
 
+## Web pages
+
+OpenBro can operate websites for you in a real browser window — search inside a site, fill a form, follow links, read what's behind the navigation.
+
+```text
+You > flipkart pe 20000 ke andar best rated earbuds dhoondh, top 3 bata
+Bro: Top rated under Rs 20,000: … (opened the results, sorted by rating, read the first page)
+```
+
+- It sees each page as a numbered list of links, buttons and fields, acts by number, and gets the updated page back after every step.
+- It uses the Chrome or Edge already on your computer, with its **own profile** (under your storage folder), so sites stay logged in between sessions without touching your everyday browser.
+- **It asks before anything that matters:** clicking buy / pay / send / delete / submit, or typing into a password field, needs your OK. Captchas and OTPs are handed to you.
+- Want it hidden? `openbro config set browser.headless true`.
+
+---
+
 ## Memory and instructions
 
 **Memories** are small notes OpenBro keeps about you and your work — who you are, how you like replies, ongoing projects, where things live. Each is a Markdown file you can read and edit (`memory open`). OpenBro saves them when you tell it something lasting or correct it, updates instead of duplicating, and never stores passwords. Each turn it brings in the notes relevant to what you asked.
@@ -249,7 +266,8 @@ Full design: [docs/HARNESS.md](docs/HARNESS.md).
 | `python` | Run Python for calculations, data, automation | moderate |
 | `shell` · `elevate` | Run commands · run one as administrator (asks via the OS prompt) | moderate, dangerous for destructive commands · dangerous |
 | `app` · `process` | Open/close apps · find and stop processes | moderate |
-| `browser` · `web` · `download` | Open sites and searches · fetch pages / search · download files | moderate / safe |
+| `webpage` | Operate web pages in a real browser: open, click, type, choose, scroll, read, screenshot, tabs | safe to look · moderate to act · dangerous for buy/pay/send/delete and passwords |
+| `browser` · `web` · `download` | Open a site for you · fetch pages / search · download files | moderate / safe |
 | `screenshot` · `clipboard` · `system_control` | Capture screen · copy/paste · volume, lock, sleep | safe / dangerous |
 | `word` · `excel` | Create and edit Office files | moderate |
 | `system_info` · `network` · `datetime` | Disk, RAM, OS · IP, ping, DNS · time and dates | safe |
@@ -345,6 +363,7 @@ Everything lives in `~/.openbro/config.yaml`. Use `openbro config show | get | s
 | `rag.embedder` · `rag.embed_model` | `auto` · `intfloat/multilingual-e5-small` | document search |
 | `agent.tool_loading` · `agent.deferred_tools` | `auto` · `cli_agent, sticky_notes, notification` | which tools load on demand |
 | `agent.subagent_max_steps` | `15` | step cap for sub-agents |
+| `browser.headless` · `browser.channel` | `false` · `auto` | show the browser window; `auto` = Chrome, then Edge, then Playwright's own |
 | `agent.playbooks_enabled` | `true` | instant answers for a few fixed questions |
 
 ---
@@ -359,6 +378,7 @@ Everything lives in `~/.openbro/config.yaml`. Use `openbro config show | get | s
   memory/notes/<user>/      memories, one .md each
   docs/index.db             document index
   docs/library/             uploaded copies
+  browser-profile/          the webpage tool's own browser profile (stays logged in)
   models/                   offline models
   audit.log · logs/         tool audit and activity log
 ```
@@ -377,6 +397,7 @@ Start with `openbro doctor` — it points at most problems directly.
 | Rate limit on a free tier | wait a minute, `model switch` to another model, or set `llm.fallback` |
 | First offline reply is slow | the first load of a model takes 30–90 s; `llama3.2:3b` is the best everyday choice on CPU |
 | Document search says "keyword only" | `pip install 'openbro[rag]'`, then `docs reindex` |
+| `webpage` can't start a browser | install Chrome or Edge, or run `python -m playwright install chromium` |
 | Voice doesn't hear you | Windows: Settings → Privacy → Microphone → allow desktop apps; run `voice test` |
 | `llama-cpp-python` tries to compile | install with `--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu` (the installer and `openbro update` do this) |
 
@@ -412,7 +433,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
 
 - [x] Agent harness v2 — tool protocol, transcripts, compaction, memory, search tools, documents, lean requests, sub-agents, rules and hooks
 - [x] Offline document search (v1)
-- [ ] Browser automation — open, click, type and read web pages
+- [x] Web page control — open, click, type and read pages in a real browser
 - [ ] OpenBro server — `storage.backend: remote`, phone uploads through Telegram, shared index
 - [ ] Docs site and skill marketplace
 
