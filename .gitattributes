@@ -1,0 +1,4 @@
+# Container files must keep Unix line endings (a CR breaks `\` continuations).
+Dockerfile text eol=lf
+deploy/** text eol=lf
+*.sh text eol=lf

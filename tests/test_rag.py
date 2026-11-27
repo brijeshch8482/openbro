@@ -312,3 +312,16 @@ def test_docs_tool_risk_by_action():
     assert tool.compute_risk({"action": "search"}) == RiskLevel.SAFE
     assert tool.compute_risk({"action": "add"}) == RiskLevel.MODERATE
     assert tool.compute_risk({"action": "remove"}) == RiskLevel.MODERATE
+
+
+def test_legacy_default_model_moves_to_fastembed_model(monkeypatch):
+    from openbro.rag import embedder
+
+    monkeypatch.setattr(embedder.LocalEmbedder, "available", staticmethod(lambda: True))
+    cfg = {"rag": {"embed_model": embedder.LEGACY_DEFAULT}}
+    monkeypatch.setattr(embedder, "sentence_transformers_usable", lambda: False)
+    assert embedder.build_embedder(cfg).model_id == embedder.DEFAULT_MODEL
+    monkeypatch.setattr(embedder, "sentence_transformers_usable", lambda: True)
+    assert embedder.build_embedder(cfg).model_id == embedder.LEGACY_DEFAULT
+    other = {"rag": {"embed_model": "BAAI/bge-small-en-v1.5"}}
+    assert embedder.build_embedder(other).model_id == "BAAI/bge-small-en-v1.5"

@@ -225,6 +225,8 @@ The page is public, so visitors get a **locked-down agent**:
 
 Each visitor has a separate, unsaved conversation. Limits keep a free API key alive: 20 messages per IP per hour (`--per-ip`), 300 per hour in total, 25 turns per chat, 1,500 characters per message, 4 answers at a time, and short tool results. Behind a hosting proxy, add `--trust-proxy` so limits use the visitor's real IP.
 
+**Put it online:** a free Hugging Face Space or any container host — step by step in [docs/DEPLOY.md](docs/DEPLOY.md). The `Dockerfile` bakes in the embedding model and the demo index, so the page is ready seconds after it starts.
+
 ---
 
 ## Memory and instructions
@@ -382,7 +384,7 @@ Everything lives in `~/.openbro/config.yaml`. Use `openbro config show | get | s
 | `hooks.*` | none | [Hooks](#safety-and-control) |
 | `memory.max_context_tokens` | `24000` | context budget before summarising |
 | `memory.auto_extract` | `off` | at `exit`, let the model propose memory updates (`on` / `auto`) |
-| `rag.embedder` · `rag.embed_model` | `auto` · `intfloat/multilingual-e5-small` | document search |
+| `rag.embedder` · `rag.embed_model` | `auto` · `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | document search |
 | `agent.tool_loading` · `agent.deferred_tools` | `auto` · `cli_agent, sticky_notes, notification` | which tools load on demand |
 | `agent.subagent_max_steps` | `15` | step cap for sub-agents |
 | `browser.headless` · `browser.channel` | `false` · `auto` | show the browser window; `auto` = Chrome, then Edge, then Playwright's own |

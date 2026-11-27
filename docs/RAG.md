@@ -184,10 +184,12 @@ file ─► 1 detect change ─► 2 parse ─► 3 chunk ─► 4 embed ─► 
    chunks overlap by `chunk_overlap` (50) tokens so a sentence cut at a
    boundary is whole in one of them. Each chunk keeps page and heading.
    Spreadsheets chunk by row blocks with the header row repeated.
-4. **Embed.** `intfloat/multilingual-e5-small` (384 dims, CPU, handles
-   Hindi). Passages are prefixed `passage: `, queries `query: ` (the
-   model's training format). Vectors are L2-normalised so cosine
-   similarity is a dot product. Batched (32 chunks per call).
+4. **Embed.** `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`
+   (384 dims, ~220 MB, CPU, handles Hindi and 50+ languages; available in
+   both fastembed and sentence-transformers). e5 models, if configured,
+   get `passage: ` / `query: ` prefixes (their training format). Vectors
+   are L2-normalised so cosine similarity is a dot product. Batched
+   (32 chunks per call).
 5. **Store.** One transaction per document: delete old chunks, insert
    new chunks, FTS rows and vectors.
 
@@ -261,7 +263,7 @@ storage:
 
 rag:
   embedder: local                # local | backend  (remote mode → server embeds)
-  embed_model: intfloat/multilingual-e5-small
+  embed_model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
   chunk_tokens: 500
   chunk_overlap: 50
   top_k: 5

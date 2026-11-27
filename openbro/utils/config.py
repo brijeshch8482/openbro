@@ -335,7 +335,7 @@ def default_config() -> dict:
         # keyword-only search.
         "rag": {
             "embedder": "auto",
-            "embed_model": "intfloat/multilingual-e5-small",
+            "embed_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
             "chunk_tokens": 500,
             "chunk_overlap": 50,
             "top_k": 5,

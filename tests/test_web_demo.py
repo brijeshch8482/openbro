@@ -339,3 +339,25 @@ def test_empty_final_reply_gets_one_nudge():
     agent = demo.build_demo_agent("s3", provider, ActivityBus())
     assert agent.chat("time?") == "It is 9 AM."
     assert provider.chat.call_count == 3
+
+
+def test_prepare_indexes_given_paths(monkeypatch, tmp_path, capsys):
+    from openbro.web import prepare
+
+    seen = {}
+
+    def fake_build(data_dir, paths):
+        seen["args"] = (data_dir, paths)
+        svc = MagicMock()
+        svc.status.return_value = {"documents": 4}
+        svc.mode.return_value = "hybrid"
+        return svc
+
+    monkeypatch.setattr(demo, "build_demo_docs_service", fake_build)
+    doc = tmp_path / "README.md"
+    doc.write_text("# hi", encoding="utf-8")
+    assert prepare.main(["--data-dir", str(tmp_path / "data"), str(doc)]) == 0
+    assert seen["args"] == (tmp_path / "data", [doc])
+    assert "Indexed 4 documents" in capsys.readouterr().out
+    with pytest.raises(SystemExit):
+        prepare.main(["--data-dir", str(tmp_path), str(tmp_path / "missing")])
