@@ -284,12 +284,29 @@ def default_demo_docs() -> list[Path]:
     return [p for p in (root / "README.md", root / "docs") if p.exists()]
 
 
+def demo_rag_config() -> dict:
+    """Embedding settings for the demo, from the environment.
+
+    `OPENBRO_WEB_EMBED_MODEL` picks the embedding model (the host's
+    default when unset); `none` turns meaning search off (keywords only).
+    Small hosts use a small English model: the multilingual default
+    needs ~640 MB of RAM, `BAAI/bge-small-en-v1.5` ~240 MB."""
+    model = os.environ.get("OPENBRO_WEB_EMBED_MODEL", "").strip()
+    if not model:
+        return {}
+    if model.lower() == "none":
+        return {"embedder": "none"}
+    return {"embed_model": model}
+
+
 def build_demo_docs_service(data_dir: Path, sources: list[Path]):
     """A separate document index for the demo (never the host's own)."""
     from openbro.rag import build_docs_service
 
     data_dir.mkdir(parents=True, exist_ok=True)
-    svc = build_docs_service({"storage": {"base_dir": str(data_dir), "backend": "local"}})
+    svc = build_docs_service(
+        {"storage": {"base_dir": str(data_dir), "backend": "local"}, "rag": demo_rag_config()}
+    )
     for src in sources:
         try:
             svc.add(str(src))

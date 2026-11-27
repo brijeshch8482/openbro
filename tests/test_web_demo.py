@@ -361,3 +361,24 @@ def test_prepare_indexes_given_paths(monkeypatch, tmp_path, capsys):
     assert "Indexed 4 documents" in capsys.readouterr().out
     with pytest.raises(SystemExit):
         prepare.main(["--data-dir", str(tmp_path), str(tmp_path / "missing")])
+
+
+def test_demo_embed_model_from_environment(monkeypatch):
+    monkeypatch.delenv("OPENBRO_WEB_EMBED_MODEL", raising=False)
+    assert demo.demo_rag_config() == {}
+    monkeypatch.setenv("OPENBRO_WEB_EMBED_MODEL", "BAAI/bge-small-en-v1.5")
+    assert demo.demo_rag_config() == {"embed_model": "BAAI/bge-small-en-v1.5"}
+    monkeypatch.setenv("OPENBRO_WEB_EMBED_MODEL", "none")
+    assert demo.demo_rag_config() == {"embedder": "none"}
+
+
+def test_warm_up_loads_embedder_in_background():
+    from openbro.web.server import warm_up
+
+    assert warm_up(None) is None
+    assert warm_up(MagicMock(embedder=None)) is None
+    svc = MagicMock()
+    warm_up(svc).join(timeout=5)
+    svc.embedder.embed_query.assert_called_once()
+    svc.embedder.embed_query.side_effect = RuntimeError("no model")
+    warm_up(svc).join(timeout=5)  # errors are swallowed

@@ -256,6 +256,26 @@ def create_app(backend: DemoBackend):
     return app
 
 
+def warm_up(docs_service) -> threading.Thread | None:
+    """Load the embedding model in the background as the server starts.
+
+    On a small instance (0.1 CPU) the first load takes ~15 s; doing it
+    now means the first visitor's search doesn't wait for it."""
+    embedder = getattr(docs_service, "embedder", None)
+    if embedder is None:
+        return None
+
+    def _run() -> None:
+        try:
+            embedder.embed_query("warm up")
+        except Exception:
+            pass  # search falls back to keywords; nothing to do here
+
+    thread = threading.Thread(target=_run, name="openbro-warmup", daemon=True)
+    thread.start()
+    return thread
+
+
 def build_backend(settings: WebSettings, docs: list[Path] | None, data_dir: Path) -> DemoBackend:
     """The real backend: demo provider, demo docs index, demo agents."""
     from openbro.web.demo import (
@@ -274,6 +294,7 @@ def build_backend(settings: WebSettings, docs: list[Path] | None, data_dir: Path
     if sources:
         docs_root = Path(os.path.commonpath([str(p.resolve().parent) for p in sources]))
     tool_names = build_demo_registry(docs_service).list_tools()
+    warm_up(docs_service)
 
     def factory(sid: str, bus: ActivityBus):
         return build_demo_agent(

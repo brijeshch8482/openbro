@@ -225,7 +225,7 @@ The page is public, so visitors get a **locked-down agent**:
 
 Each visitor has a separate, unsaved conversation. Limits keep a free API key alive: 20 messages per IP per hour (`--per-ip`), 300 per hour in total, 25 turns per chat, 1,500 characters per message, 4 answers at a time, and short tool results. Behind a hosting proxy, add `--trust-proxy` so limits use the visitor's real IP.
 
-**Put it online:** a free Hugging Face Space or any container host — step by step in [docs/DEPLOY.md](docs/DEPLOY.md). The `Dockerfile` bakes in the embedding model and the demo index, so the page is ready seconds after it starts.
+**Put it online:** free on Render (`render.yaml` included) or any container host — step by step in [docs/DEPLOY.md](docs/DEPLOY.md). The LLM is not deployed; the server calls it through the API key. The `Dockerfile` bakes in the embedding model and the demo index, so the page is ready seconds after it starts.
 
 ---
 

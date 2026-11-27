@@ -3,8 +3,9 @@
 #   docker build -t openbro-web .
 #   docker run -p 7860:7860 -e GROQ_API_KEY=gsk_... openbro-web
 #
-# Works on any container host (Render, Railway, Fly.io, a VPS). For
-# Hugging Face Spaces use deploy/huggingface/ — see docs/DEPLOY.md.
+# Works on any container host: Render (render.yaml), Railway, Fly.io, a
+# VPS. The LLM is not in the image — it is called through an API
+# (GROQ_API_KEY). See docs/DEPLOY.md.
 
 FROM python:3.12-slim
 
@@ -24,6 +25,12 @@ ENV HOME=/home/user \
     FASTEMBED_CACHE_PATH=/home/user/.cache/fastembed \
     OPENBRO_WEB_DATA=/home/user/.openbro/web \
     PORT=7860
+
+# Document search embedding model. The small English model keeps runtime
+# RAM near 240 MB, so the demo fits a 512 MB free instance. "none" =
+# keyword search only; empty = the multilingual default (~640 MB).
+ARG OPENBRO_WEB_EMBED_MODEL=BAAI/bge-small-en-v1.5
+ENV OPENBRO_WEB_EMBED_MODEL=${OPENBRO_WEB_EMBED_MODEL}
 
 # Bake the embedding model and the demo index into the image so the
 # container answers seconds after it starts.

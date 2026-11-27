@@ -1,0 +1,12 @@
+# Render Blueprint for the OpenBro web demo (free plan).
+# Render: New → Blueprint → connect this repo → enter GROQ_API_KEY → Deploy.
+# See docs/DEPLOY.md.
+services:
+  - type: web
+    name: openbro
+    runtime: docker
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false # Render asks for the value when the service is created
