@@ -1,8 +1,7 @@
 """OpenAI (GPT) LLM provider."""
 
-import json
-
 from openbro.llm.base import LLMProvider, LLMResponse, Message
+from openbro.llm.wire import parse_arguments, to_openai_messages
 
 
 class OpenAIProvider(LLMProvider):
@@ -15,7 +14,8 @@ class OpenAIProvider(LLMProvider):
         self.model = model
 
     def chat(self, messages: list[Message], tools: list[dict] | None = None) -> LLMResponse:
-        chat_msgs = [{"role": m.role, "content": m.content} for m in messages]
+        # Structured history: the model must see its own tool calls.
+        chat_msgs = to_openai_messages(messages)
 
         kwargs = {"model": self.model, "messages": chat_msgs}
         if tools:
@@ -32,7 +32,7 @@ class OpenAIProvider(LLMProvider):
                         "id": tc.id,
                         "function": {
                             "name": tc.function.name,
-                            "arguments": json.loads(tc.function.arguments),
+                            "arguments": parse_arguments(tc.function.arguments),
                         },
                     }
                 )

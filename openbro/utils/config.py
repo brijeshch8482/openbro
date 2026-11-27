@@ -63,6 +63,13 @@ RUNNING_MODEL_SENTENCE = (
     "Underlying model: only the one named in the RUNNING MODEL line of the per-turn "
     "context — never guess."
 )
+# Older prompts saved new files on the Desktop; now they go where the user
+# is working (or the folder they name).
+STALE_LOCATION_SENTENCE = "Default new-file location: `~/Desktop/<name>` (OneDrive auto-resolved)."
+LOCATION_SENTENCE = (
+    "New files go in the folder the user names (create missing folders first); if none "
+    "is named, in the current working folder from the workspace context."
+)
 
 
 def _migrate_config(config: dict) -> dict:
@@ -110,6 +117,8 @@ def _migrate_config(config: dict) -> dict:
             if stale in current:
                 current = current.replace(stale, RUNNING_MODEL_SENTENCE)
                 agent["system_prompt"] = current
+        if STALE_LOCATION_SENTENCE in current:
+            agent["system_prompt"] = current.replace(STALE_LOCATION_SENTENCE, LOCATION_SENTENCE)
 
     voice = config.setdefault("voice", {})
     wake_words = [str(w).lower() for w in (voice.get("wake_words") or [])]
@@ -264,8 +273,9 @@ def default_config() -> dict:
                 "Name filter = case-insensitive SUBSTRING (`'fee' in name.lower()`), "
                 "NOT startswith. File-count answer me 5-10 sample filenames bhi "
                 "show kar, sirf number nahi. Created files ka FULL path bata "
-                "response me. Default new-file location: `~/Desktop/<name>` "
-                "(OneDrive auto-resolved).\n"
+                "response me. New files go in the folder the user names (create "
+                "missing folders first); if none is named, in the current working "
+                "folder from the workspace context.\n"
                 "5. **IDENTITY = OPENBRO.** 'Tu kya hai?' → 'Mein OpenBro hoon — "
                 "open-source terminal-first AI agent, brijeshch8482 banaya. Tu "
                 "boss, mein tera bro.' Underlying model: only the one named in "
