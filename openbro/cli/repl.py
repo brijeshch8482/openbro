@@ -1339,39 +1339,9 @@ def _set_config(args: str):
 
 _MODEL_SUBCOMMANDS = {"add", "remove", "rm", "switch", "list", "ls"}
 
-# Providers `/model <name>` can switch to, with what each one needs.
-SWITCHABLE_PROVIDERS = {
-    "claude": "Claude subscription via the `claude` CLI",
-    "codex": "ChatGPT subscription via the `codex` CLI",
-    "groq": "Groq API key (free tier)",
-    "google": "Google AI Studio API key (free tier)",
-    "anthropic": "Anthropic API key",
-    "openai": "OpenAI API key",
-    "deepseek": "DeepSeek API key",
-    "local": "offline model on this computer (`openbro model download …`)",
-}
 
-
-def _provider_ready(name: str, config: dict) -> bool:
-    """Whether `name` looks usable: its CLI is installed, key set, or model downloaded."""
-    import shutil
-
-    providers = config.get("providers", {}) or {}
-    if name in ("claude", "codex"):
-        binary = (providers.get(name) or {}).get("binary", name)
-        return shutil.which(binary) is not None
-    if name == "local":
-        try:
-            from openbro.utils.local_llm_setup import list_installed
-
-            return bool(list_installed())
-        except Exception:
-            return False
-    return bool((providers.get(name) or {}).get("api_key"))
-
-
-def _model_status_lines(agent: Agent, config: dict) -> list[str]:
-    """What `/model` prints: running provider, backup, last answer, choices."""
+def _model_status_lines(agent: Agent) -> list[str]:
+    """What is running now: main LLM, backup, and which one answered last."""
     from openbro.llm.fallback_provider import FallbackProvider
 
     provider = agent.provider
@@ -1385,47 +1355,30 @@ def _model_status_lines(agent: Agent, config: dict) -> list[str]:
             lines.append(f"[cyan]Last answer from:[/cyan] {last.name()}")
     else:
         lines.append(f"[cyan]Main:[/cyan]   {provider.name()}")
-    current = (config.get("llm", {}) or {}).get("provider", "")
-    lines.append("")
-    lines.append("[bold]Switch with[/bold] /model <name>:")
-    for name, what in SWITCHABLE_PROVIDERS.items():
-        mark = "[green]✓[/green]" if _provider_ready(name, config) else "[dim]·[/dim]"
-        here = "  [cyan]← current[/cyan]" if name == current else ""
-        lines.append(f"  {mark} {name:<9} [dim]{what}[/dim]{here}")
-    lines.append(
-        "[dim]✓ = ready on this computer. To change only the model of the "
-        "current provider: /model <model-id>[/dim]"
-    )
     return lines
 
 
 def _show_model(agent: Agent):
-    for line in _model_status_lines(agent, load_config()):
+    """`/model`: show what is running, then pick from the list."""
+    from openbro.cli.model_picker import run_picker
+
+    for line in _model_status_lines(agent):
         console.print(line)
     console.print()
+    run_picker(agent, console, load_config, save_config)
 
 
 def _switch_model(model_name: str, agent: Agent):
+    from openbro.cli.model_picker import BY_NAME, connect_and_switch
     from openbro.llm.router import create_provider
 
     config = load_config()
     name = model_name.strip()
-    if name.lower() in ("ollama",):  # old alias for the local engine
+    if name.lower() == "ollama":  # old alias for the local engine
         name = "local"
-    is_provider = name.lower() in SWITCHABLE_PROVIDERS
-    if is_provider:
-        name = name.lower()
-        try:
-            new_provider = create_provider(name)
-        except Exception as e:
-            # Leave config and the running provider untouched.
-            console.print(f"[red]Can't switch to {name}:[/red] {e}")
-            console.print(f"[dim]Needs: {SWITCHABLE_PROVIDERS[name]}[/dim]\n")
-            return
-        config["llm"]["provider"] = name
-        save_config(config)
-        agent.provider = new_provider
-        console.print(f"[green]Switched to {name}[/green] — now running {agent.provider.name()}\n")
+    if name.lower() in BY_NAME:
+        # Same flow as picking it from the list: asks for and tests a key if needed.
+        connect_and_switch(name.lower(), agent, console, load_config, save_config)
         return
 
     # A model id for the current provider (e.g. /model openai/gpt-oss-20b on groq).

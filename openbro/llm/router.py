@@ -224,7 +224,7 @@ def _build_one(provider_name: str, config: dict, providers_config: dict) -> LLMP
             )
         return GoogleProvider(
             api_key=api_key,
-            model=google_cfg.get("model", "gemini-1.5-flash"),
+            model=google_cfg.get("model", "gemini-2.5-flash"),
         )
 
     elif provider_name == "deepseek":

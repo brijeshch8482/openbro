@@ -96,7 +96,7 @@ PROVIDER_CATALOG = [
         "id": "google",
         "name": "Google Gemini",
         "tier": "FREE",
-        "default_model": "gemini-1.5-flash",
+        "default_model": "gemini-2.5-flash",
         "signup": "https://aistudio.google.com/apikey",
         "blurb": "Free tier 1500 req/day, huge context window, Gemini 1.5 Flash/Pro",
         "tags": [],

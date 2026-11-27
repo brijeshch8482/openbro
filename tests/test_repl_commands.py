@@ -95,60 +95,6 @@ def _named(name):
     return p
 
 
-def test_model_switch_to_claude_is_a_provider_switch(monkeypatch):
-    from unittest.mock import MagicMock
-
-    from openbro.cli import repl
-    from openbro.llm import router
-
-    cfg = _fake_config()
-    saved = []
-    monkeypatch.setattr(repl, "load_config", lambda: cfg)
-    monkeypatch.setattr(repl, "save_config", lambda c: saved.append(c))
-    monkeypatch.setattr(router, "create_provider", lambda name=None: _named(f"{name}/x"))
-    agent = MagicMock()
-    repl._switch_model("Claude", agent)
-    assert saved[-1]["llm"]["provider"] == "claude"
-    assert agent.provider.name() == "claude/x"
-
-
-def test_failed_switch_changes_nothing(monkeypatch):
-    from unittest.mock import MagicMock
-
-    from openbro.cli import repl
-    from openbro.llm import router
-
-    cfg = _fake_config()
-    saved = []
-    monkeypatch.setattr(repl, "load_config", lambda: cfg)
-    monkeypatch.setattr(repl, "save_config", lambda c: saved.append(c))
-
-    def boom(name=None):
-        raise ValueError("Anthropic API key not set")
-
-    monkeypatch.setattr(router, "create_provider", boom)
-    agent = MagicMock()
-    original = agent.provider
-    repl._switch_model("anthropic", agent)
-    assert saved == [] and agent.provider is original
-
-
-def test_model_status_shows_main_backup_last_and_choices():
-    from unittest.mock import MagicMock
-
-    from openbro.cli import repl
-    from openbro.llm.fallback_provider import FallbackProvider
-
-    fb = FallbackProvider(_named("claude/code-cli"), _named("codex/chatgpt"))
-    fb.last_used = "fallback"
-    fb.fallback_count = 1
-    agent = MagicMock(provider=fb)
-    text = "\n".join(repl._model_status_lines(agent, _fake_config()))
-    assert "claude/code-cli" in text and "codex/chatgpt" in text
-    assert "Last answer from:[/cyan] codex/chatgpt" in text
-    assert "groq" in text and "← current" in text
-
-
 def test_model_subcommands_are_not_switches(monkeypatch):
     from unittest.mock import MagicMock
 

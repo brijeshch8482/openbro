@@ -18,7 +18,7 @@ API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 class GoogleProvider(LLMProvider):
     """Provider for Google's Gemini models (gemini-1.5-pro, gemini-2.0-flash, etc.)."""
 
-    def __init__(self, api_key: str, model: str = "gemini-1.5-flash"):
+    def __init__(self, api_key: str, model: str = "gemini-2.5-flash"):
         self.api_key = api_key
         self.model = model
 
@@ -27,6 +27,9 @@ class GoogleProvider(LLMProvider):
 
     def supports_tools(self) -> bool:
         return True
+
+    def _headers(self) -> dict:
+        return {"x-goog-api-key": self.api_key}
 
     @staticmethod
     def _to_gemini_messages(messages: list[Message]) -> tuple[str, list[dict]]:
@@ -61,7 +64,9 @@ class GoogleProvider(LLMProvider):
                 }
             ]
 
-        url = f"{API_BASE}/models/{self.model}:generateContent?key={self.api_key}"
+        # The key goes in a header, never the URL: URLs end up in error
+        # messages and logs.
+        url = f"{API_BASE}/models/{self.model}:generateContent"
         # Let HTTP and connection errors RAISE so the FallbackProvider
         # can categorise them (429/5xx as recoverable → retry +
         # cascade to local; 401/403/400 as non-recoverable → surface
@@ -71,7 +76,7 @@ class GoogleProvider(LLMProvider):
         # treated as a successful turn — so neither the 1+2 retry chain
         # nor the local cascade fired. User saw the literal error text
         # as the final answer.
-        r = httpx.post(url, json=payload, timeout=60)
+        r = httpx.post(url, json=payload, headers=self._headers(), timeout=60)
         r.raise_for_status()
         data = r.json()
 
@@ -115,9 +120,9 @@ class GoogleProvider(LLMProvider):
         if system:
             payload["systemInstruction"] = {"parts": [{"text": system}]}
 
-        url = f"{API_BASE}/models/{self.model}:streamGenerateContent?alt=sse&key={self.api_key}"
+        url = f"{API_BASE}/models/{self.model}:streamGenerateContent?alt=sse"
         try:
-            with httpx.stream("POST", url, json=payload, timeout=60) as r:
+            with httpx.stream("POST", url, json=payload, headers=self._headers(), timeout=60) as r:
                 for line in r.iter_lines():
                     if not line or not line.startswith("data: "):
                         continue
