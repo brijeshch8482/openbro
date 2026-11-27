@@ -32,8 +32,11 @@ function inline(s) {
 function isTableSep(line) { return /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(line); }
 function cells(line) { return line.trim().replace(/^\||\|$/g, "").split("|").map((c) => inline(c.trim())); }
 
+// Some models add citation markers like 【2†doc=…】; they mean nothing to readers.
+function stripMarkers(s) { return (s || "").replace(/【[^】]*】/g, ""); }
+
 function renderMarkdown(src) {
-  const lines = esc(src || "").replace(/\r\n?/g, "\n").split("\n");
+  const lines = esc(stripMarkers(src)).replace(/\r\n?/g, "\n").split("\n");
   const out = [];
   let i = 0;
   while (i < lines.length) {
