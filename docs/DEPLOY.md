@@ -1,37 +1,40 @@
 # Deploying the OpenBro web demo
 
 `openbro web` serves a public chat page (see the README, "Web demo"). This
-guide puts it online. You need a free LLM key — a [Groq](https://console.groq.com/keys)
-key works out of the box.
+guide puts it online.
 
-## Option A — Hugging Face Spaces (free, recommended)
+**What runs where:** the LLM is **not** deployed — it stays with the API
+provider (Groq's free tier by default) and the server calls it with your
+key. The server itself only runs OpenBro: the agent loop, the chat page and
+document search over README + `docs/`, with a small embedding model.
 
-A Space gives you a public link like `https://huggingface.co/spaces/<you>/openbro`.
-The free CPU tier is enough; it sleeps when nobody visits and wakes on the
-next visit (about 30 seconds).
+You need a free [Groq API key](https://console.groq.com/keys).
 
-1. Sign in at [huggingface.co](https://huggingface.co) and choose **New Space**.
-   - Name: `openbro` · SDK: **Docker** · template: **Blank** · hardware: **CPU basic (free)** · visibility: **Public**.
-2. Add the two files from `deploy/huggingface/` to the Space — either upload
-   them in the Space's **Files** tab, or with git:
+## Option A — Render (free, recommended)
 
-   ```bash
-   git clone https://huggingface.co/spaces/<you>/openbro hf-openbro
-   cp deploy/huggingface/README.md deploy/huggingface/Dockerfile hf-openbro/
-   cd hf-openbro && git add . && git commit -m "OpenBro web demo" && git push
-   ```
+Render's free web service runs our `Dockerfile` straight from GitHub:
+0.1 CPU and 512 MB RAM, enough for the demo (it uses about 240 MB). It
+sleeps after 15 minutes without visitors; the next visit wakes it in about
+a minute (Render shows a loading page meanwhile).
 
-3. In the Space: **Settings → Variables and secrets → New secret**
-   `GROQ_API_KEY` = your key. (Optional variable `OPENBRO_WEB_MODEL` to pick
-   another Groq model.)
-4. The Space builds (about 5 minutes the first time) and shows the chat page.
+1. Sign in at [render.com](https://render.com) with GitHub.
+2. **New → Blueprint**, connect the `openbro` repository, branch `main`.
+   Render reads `render.yaml` from the repo root.
+3. Enter `GROQ_API_KEY` when asked, then **Deploy Blueprint**.
+4. The first build takes a few minutes. Your link is
+   `https://openbro-<something>.onrender.com`.
 
-**Updating:** the Space clones the GitHub repo when it builds. After merging
-changes, open **Settings → Factory rebuild**.
+Every push to `main` redeploys automatically.
 
-## Option B — any container host
+## Option B — Hugging Face Spaces (needs PRO)
 
-The root `Dockerfile` builds from your checkout:
+Hugging Face now requires a PRO plan for Docker Spaces (Static Spaces stay
+free but cannot run a server). With PRO, create a Space with SDK **Docker**,
+add the two files from `deploy/huggingface/`, and set `GROQ_API_KEY` under
+**Settings → Variables and secrets**. The Space clones this repo when it
+builds; use **Settings → Factory rebuild** to update.
+
+## Option C — any container host
 
 ```bash
 docker build -t openbro-web .
@@ -39,25 +42,27 @@ docker run -p 7860:7860 -e GROQ_API_KEY=gsk_... openbro-web
 # open http://localhost:7860
 ```
 
-On Render, Railway or Fly.io, point a new web service at the GitHub repo,
-choose the Dockerfile, and set `GROQ_API_KEY`. The container listens on
-`$PORT` (default 7860). On a VPS, run the container behind Caddy or nginx
-for HTTPS.
+The container listens on `$PORT` (default 7860). On a VPS, put Caddy or
+nginx in front for HTTPS.
 
-## What the image contains
+## Settings
 
-- OpenBro with the `web` and `rag` extras.
-- The embedding model (`paraphrase-multilingual-MiniLM-L12-v2`, ~220 MB)
-  and a ready index of `README.md` + `docs/`, built during `docker build`
-  by `python -m openbro.web.prepare`, so the page answers seconds after start.
-- It runs as an unprivileged user and keeps no visitor data: each chat lives
-  in memory and expires after 30 idle minutes.
+| Variable | Default | What it does |
+|---|---|---|
+| `GROQ_API_KEY` | — | the LLM key (required) |
+| `OPENBRO_WEB_MODEL` | `openai/gpt-oss-120b` | Groq model; two fallbacks are tried when it is busy |
+| `OPENBRO_WEB_EMBED_MODEL` | `BAAI/bge-small-en-v1.5` (build arg) | document-search embedding model; `none` = keywords only (~80 MB RAM); empty = the multilingual default (~640 MB RAM) |
+
+The embedding model and the document index are built into the image by
+`python -m openbro.web.prepare`, so the page answers seconds after the
+container starts. The container runs as an unprivileged user and keeps no
+visitor data: each chat lives in memory and expires after 30 idle minutes.
 
 ## Limits and cost
 
-The demo is built for free tiers. Groq's free tier allows about 8,000
-tokens per minute per model; OpenBro rotates across three models
-(`gpt-oss-120b`, `qwen3.8-27b`, `gpt-oss-20b`) when one is busy.
-Visitors are limited to 20 messages per hour each and 300 per hour in total
-(`openbro web --per-ip N` to change the first). If many people use it at
-once, answers slow down or ask them to wait a minute — nothing is billed.
+Built for free tiers. Groq's free tier allows about 8,000 tokens per minute
+per model; OpenBro rotates across three models (`gpt-oss-120b`,
+`qwen3.8-27b`, `gpt-oss-20b`) when one is busy. Visitors are limited to 20
+messages per hour each and 300 per hour in total (`openbro web --per-ip N`
+changes the first). If many people use it at once, answers slow down or ask
+them to wait a minute — nothing is billed.
