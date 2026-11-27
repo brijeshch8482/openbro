@@ -12,7 +12,11 @@ from openbro.core.activity import get_bus
 from openbro.core.hooks import HookRunner
 from openbro.core.permission_rules import PermissionRules
 from openbro.core.permissions import PermissionGate, PermissionRequest
-from openbro.core.tool_protocol import parse_tool_calls, render_tool_instructions
+from openbro.core.tool_protocol import (
+    parse_tool_calls,
+    render_tool_instructions,
+    unknown_tool_names,
+)
 from openbro.core.workspace import detect_cached as detect_workspace
 from openbro.llm.base import LLMResponse, Message
 from openbro.llm.router import create_provider
@@ -813,6 +817,7 @@ class Agent:
         # made AND response had fake Output: blocks).
         turn_tool_calls_made = 0
         empty_nudged = False
+        unknown_nudged = False
 
         # ─── Agent loop (was single-shot, which forced LLM to hallucinate
         # answers after one tool returned nothing). Loop till LLM stops
@@ -842,9 +847,31 @@ class Agent:
                 return _friendly_error(e)
 
             if text_tools and not response.tool_calls:
-                clean, calls = parse_tool_calls(response.content or "", known_tools)
+                raw = response.content or ""
+                clean, calls = parse_tool_calls(raw, known_tools)
                 if calls:
                     response.tool_calls = calls
+                    response.content = clean
+                else:
+                    unknown = unknown_tool_names(raw, known_tools)
+                    if unknown and not unknown_nudged and iteration + 1 < max_iterations:
+                        # The model called a tool OpenBro doesn't have (e.g. an
+                        # image generator). Say so, so it picks a real one or
+                        # explains — instead of the raw tag reaching the user.
+                        unknown_nudged = True
+                        self.bus.emit("system", f"unknown tool: {', '.join(unknown)}")
+                        self._append(Message(role="assistant", content=raw))
+                        self._append(
+                            Message(
+                                role="user",
+                                content=(
+                                    f"(OpenBro has no tool named {', '.join(unknown)}. "
+                                    "Use only the tools listed in your instructions, or "
+                                    "tell me plainly what you can't do.)"
+                                ),
+                            )
+                        )
+                        continue
                     response.content = clean
 
             # Token accounting — every provider returns usage with at least
