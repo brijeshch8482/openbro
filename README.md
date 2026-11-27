@@ -205,6 +205,28 @@ Bro: Top rated under Rs 20,000: … (opened the results, sorted by rating, read 
 
 ---
 
+## Web demo
+
+`openbro web` serves a chat page where anyone can talk to OpenBro in a browser and watch it think and call tools live — useful for showing the project to people who won't install it.
+
+```bash
+pip install "openbro[web,rag]"
+export GROQ_API_KEY=gsk_...        # free key from console.groq.com (or use your configured provider)
+openbro web --port 8000            # http://127.0.0.1:8000
+```
+
+The page is public, so visitors get a **locked-down agent**:
+
+| Visitors can | Visitors can't |
+|---|---|
+| Search the web and read public pages | Run commands, read or write files, open apps |
+| Search the demo documents (README + `docs/` by default, or `--docs <path>`) | Add or remove documents, reach internal network addresses |
+| Ask about dates and times | See your memory, `OPENBRO.md`, folders or hooks |
+
+Each visitor has a separate, unsaved conversation. Limits keep a free API key alive: 20 messages per IP per hour (`--per-ip`), 300 per hour in total, 25 turns per chat, 1,500 characters per message, 4 answers at a time, and short tool results. Behind a hosting proxy, add `--trust-proxy` so limits use the visitor's real IP.
+
+---
+
 ## Memory and instructions
 
 **Memories** are small notes OpenBro keeps about you and your work — who you are, how you like replies, ongoing projects, where things live. Each is a Markdown file you can read and edit (`memory open`). OpenBro saves them when you tell it something lasting or correct it, updates instead of duplicating, and never stores passwords. Each turn it brings in the notes relevant to what you asked.

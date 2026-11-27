@@ -95,8 +95,8 @@ def _friendly_error(e: Exception) -> str:
     ):
         return (
             "⏱️  Rate limit reached, and every fallback model is exhausted too.\n"
-            "   Fix: wait 30-60 seconds, or `openbro config set providers.groq.model "
-            "llama-3.3-70b-versatile` (looser cap)."
+            "   Fix: wait a minute and try again, or switch models with "
+            "`openbro config set providers.groq.model openai/gpt-oss-20b`."
         )
     # Network — likely offline
     if (
@@ -132,10 +132,13 @@ class Agent:
         tool_registry: ToolRegistry | None = None,
         role_prompt: str | None = None,
         max_steps: int | None = None,
+        bus=None,
     ):
         """`provider`, `tool_registry`, `role_prompt` and `max_steps` are
         set when this agent runs as a sub-agent (the `task` tool): it then
-        shares the parent's provider and a filtered view of its tools."""
+        shares the parent's provider and a filtered view of its tools.
+        `bus` gives the agent its own ActivityBus (one per web visitor);
+        by default it uses the process-wide bus."""
         config = load_config()
         self.role_prompt = role_prompt
         self._max_steps = max_steps
@@ -191,7 +194,7 @@ class Agent:
 
         self.memory = memory or MemoryManager()
         self.interactive = interactive
-        self.bus = get_bus()
+        self.bus = bus if bus is not None else get_bus()
 
         self.tool_registry = tool_registry or ToolRegistry(config=config)
         # Inject memory into the memory tool so it uses this agent's user/session
@@ -778,6 +781,7 @@ class Agent:
         # of calling python tool" (captured failure: zero tool calls
         # made AND response had fake Output: blocks).
         turn_tool_calls_made = 0
+        empty_nudged = False
 
         # ─── Agent loop (was single-shot, which forced LLM to hallucinate
         # answers after one tool returned nothing). Loop till LLM stops
@@ -833,6 +837,26 @@ class Agent:
                 session_tokens_out=self.session_tokens_out,
                 elapsed=_time.monotonic() - llm_t0,
             )
+
+            if (
+                not response.tool_calls
+                and not (response.content or "").strip()
+                and not empty_nudged
+                and iteration + 1 < max_iterations
+            ):
+                # Some models (gpt-oss) end a turn with reasoning only and
+                # no visible text. Ask once for the actual answer instead of
+                # showing the user nothing.
+                empty_nudged = True
+                self.bus.emit("system", "empty reply — asking the model to answer")
+                self._append(
+                    Message(
+                        role="user",
+                        content="(Your last reply was empty. Answer my question now, "
+                        "using the tool results above.)",
+                    )
+                )
+                continue
 
             if not response.tool_calls:
                 # Trust the model: no more tool calls = it's done. The

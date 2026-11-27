@@ -210,7 +210,7 @@ def _build_one(provider_name: str, config: dict, providers_config: dict) -> LLMP
             )
         return GroqProvider(
             api_key=api_key,
-            model=groq_cfg.get("model", "meta-llama/llama-4-scout-17b-16e-instruct"),
+            model=groq_cfg.get("model", "openai/gpt-oss-120b"),
         )
 
     elif provider_name == "google":

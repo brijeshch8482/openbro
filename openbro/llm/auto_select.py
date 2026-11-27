@@ -40,6 +40,7 @@ CAPABILITY = {
     # acting. llama-3.3-70b's 'glued-arg' bug is benign — the
     # sanitizer in groq_provider rebuilds the JSON. 70B reasoning >
     # 17B fabrication.
+    "groq-gpt-oss-120b": 92,  # Groq default since its Llama models were retired
     "groq-llama-3.3": 96,  # NEW PRIMARY — 70B, reliable tool calls
     "groq-llama-4-maverick": 90,  # 128-expert variant of Llama 4
     "groq-llama-4-scout": 78,  # DOWNGRADED — fabricates / lazy
@@ -119,8 +120,8 @@ def probe_available() -> list[dict]:
     candidates.append(
         {
             "provider": "groq",
-            "model": "meta-llama/llama-4-scout-17b-16e-instruct",
-            "score": _capability_for("groq-llama-4-scout"),
+            "model": "openai/gpt-oss-120b",
+            "score": _capability_for("groq-gpt-oss-120b"),
             "available": False,
             "source": "groq-cloud",
         }
