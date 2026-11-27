@@ -1,12 +1,12 @@
 """Embedders — turn text into vectors for meaning-based search.
 
-The default model, `intfloat/multilingual-e5-small` (384 dims), handles
-English and Hindi on a CPU. It is loaded lazily, through `fastembed`
-(ONNX, no torch) if installed, otherwise `sentence-transformers`. With
-neither installed, `build_embedder` returns None and search runs on
-keywords (BM25) alone.
+The default model, `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`
+(384 dims, ~220 MB), handles English, Hindi and 50+ other languages on a CPU.
+It is loaded lazily, through `fastembed` (ONNX, no torch) if installed,
+otherwise `sentence-transformers`. With neither installed, `build_embedder`
+returns None and search runs on keywords (BM25) alone.
 
-e5 models expect `query: ` / `passage: ` prefixes; they are added here.
+e5 models expect `query: ` / `passage: ` prefixes; they are added for them.
 Vectors are L2-normalised so cosine similarity is a plain dot product.
 """
 
@@ -18,7 +18,11 @@ from typing import Protocol
 
 from openbro.utils.optional import has_module, sentence_transformers_usable
 
-DEFAULT_MODEL = "intfloat/multilingual-e5-small"
+DEFAULT_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+# The first default. fastembed does not ship it, so with the `rag` extra
+# (fastembed only) it never loaded; configs still naming it move to the
+# new default unless sentence-transformers + torch can load it.
+LEGACY_DEFAULT = "intfloat/multilingual-e5-small"
 
 
 class Embedder(Protocol):
@@ -113,4 +117,7 @@ def build_embedder(config: dict | None) -> Embedder | None:
         return None
     if mode == "auto" and not LocalEmbedder.available():
         return None
-    return LocalEmbedder(str(rag.get("embed_model", DEFAULT_MODEL)))
+    model = str(rag.get("embed_model") or DEFAULT_MODEL)
+    if model == LEGACY_DEFAULT and not sentence_transformers_usable():
+        model = DEFAULT_MODEL
+    return LocalEmbedder(model)
