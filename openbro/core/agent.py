@@ -317,11 +317,33 @@ class Agent:
             parts.append(self.memory.memory_block(query).strip())
         except Exception:
             pass
+        parts.append(self._running_model_block())
         if lang:
             parts.append(language_instruction(lang).strip())
         if self._hook_context:
             parts.append("## FROM THE USER'S HOOKS\n" + self._hook_context)
         return "\n\n".join(p for p in parts if p)
+
+    def _running_model_block(self) -> str:
+        """Which LLM is answering, read from the live provider each turn.
+
+        A model cannot know who serves it, so without this it guesses (or
+        repeats a stale name). Per turn, not in the stable prompt, so a
+        `/model` switch shows up on the very next message."""
+        from openbro.llm.fallback_provider import FallbackProvider
+
+        try:
+            if isinstance(self.provider, FallbackProvider):
+                main = self.provider.primary.name()
+                backup = f" (backup if it fails: {self.provider.fallback.name()})"
+            else:
+                main, backup = self.provider.name(), ""
+        except Exception:
+            return ""
+        return (
+            f"## RUNNING MODEL\nOpenBro is running on {main}{backup}. If asked which model "
+            "or LLM you are, say this — never another provider or model name."
+        )
 
     def _messages_for_call(self) -> list[Message]:
         """History as sent to the provider: the latest user message gets

@@ -46,6 +46,25 @@ def _merge_defaults(defaults: dict, config: dict) -> dict:
     return apply(merged, config)
 
 
+RETIRED_GROQ_MODELS = frozenset(
+    {
+        "llama-3.3-70b-versatile",
+        "llama-3.1-70b-versatile",
+        "llama-3.1-8b-instant",
+        "meta-llama/llama-4-scout-17b-16e-instruct",
+        "meta-llama/llama-4-maverick-17b-128e-instruct",
+    }
+)
+
+STALE_MODEL_SENTENCES = (
+    "Underlying model: 'filhal Groq pe Llama 4 use kar raha, multi-provider switch sakta'.",
+)
+RUNNING_MODEL_SENTENCE = (
+    "Underlying model: only the one named in the RUNNING MODEL line of the per-turn "
+    "context — never guess."
+)
+
+
 def _migrate_config(config: dict) -> dict:
     """Lightweight migrations for old stock OpenBro configs."""
     defaults = default_config()
@@ -72,8 +91,25 @@ def _migrate_config(config: dict) -> dict:
         or "PERSONALITY (yeh tera character" in prompt
         or any(m in prompt for m in legacy_prompt_markers)
     )
+    # Groq retired its Llama models; a saved one would 404 on every call.
+    groq = (config.get("providers", {}) or {}).get("groq")
+    if isinstance(groq, dict) and groq.get("model") in RETIRED_GROQ_MODELS:
+        groq["model"] = defaults["providers"]["groq"]["model"]
+    llm = config.get("llm", {}) or {}
+    if llm.get("provider") == "groq" and llm.get("model") in RETIRED_GROQ_MODELS:
+        llm["model"] = defaults["providers"]["groq"]["model"]
+
     if needs_upgrade:
         agent["system_prompt"] = defaults["agent"]["system_prompt"]
+    else:
+        # Older prompts hard-coded the model ('Groq pe Llama 4'), so the agent
+        # named Groq even after a switch. Replace just that sentence and keep
+        # any other edits the user made.
+        current = str(agent.get("system_prompt") or "")
+        for stale in STALE_MODEL_SENTENCES:
+            if stale in current:
+                current = current.replace(stale, RUNNING_MODEL_SENTENCE)
+                agent["system_prompt"] = current
 
     voice = config.setdefault("voice", {})
     wake_words = [str(w).lower() for w in (voice.get("wake_words") or [])]
@@ -232,9 +268,9 @@ def default_config() -> dict:
                 "(OneDrive auto-resolved).\n"
                 "5. **IDENTITY = OPENBRO.** 'Tu kya hai?' → 'Mein OpenBro hoon — "
                 "open-source terminal-first AI agent, brijeshch8482 banaya. Tu "
-                "boss, mein tera bro.' Underlying model: 'filhal Groq pe Llama 4 "
-                "use kar raha, multi-provider switch sakta'. NEVER 'mein "
-                "Claude/GPT/Llama pe based' (jab tak specifically pooche).\n"
+                "boss, mein tera bro.' Underlying model: only the one named in "
+                "the RUNNING MODEL line of the per-turn context — never guess. "
+                "NEVER 'mein Claude/GPT/Llama pe based' (jab tak specifically pooche).\n"
                 "6. **BROWSER ONLY ON EXPLICIT REQUEST.** Weather/news/facts/"
                 "prices = `web` ya `python httpx` (text, desktop undisturbed). "
                 "`browser` sirf jab user EXPLICITLY 'open browser/chrome/navigate' "

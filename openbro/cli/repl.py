@@ -1,6 +1,7 @@
 """Interactive terminal REPL for OpenBro."""
 
 import json as _json
+import sys
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import WordCompleter
@@ -407,6 +408,66 @@ completer = WordCompleter(COMMANDS + ["/" + c for c in COMMANDS], ignore_case=Tr
 _SLASH_RE = __import__("re").compile(r"/([A-Za-z][\w-]*)(?=\s|$)")
 
 
+def _ctrl_c_pressed() -> bool:
+    """True if Ctrl+C was pressed since the last check (Windows console).
+
+    After prompt_toolkit has run, the Windows console delivers Ctrl+C as a
+    plain key (no SIGINT), so nobody would notice it while an answer is
+    being worked on. Read pending keys and look for it. Other keys typed
+    meanwhile are dropped. Elsewhere Ctrl+C is a normal SIGINT and this
+    returns False."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import msvcrt
+    except ImportError:
+        return False
+    pressed = False
+    while msvcrt.kbhit():
+        if msvcrt.getwch() == "\x03":
+            pressed = True
+    return pressed
+
+
+def _run_turn(agent, user_input: str, poll: float = 0.1, ctrl_c=None) -> str:
+    """Run one agent turn in a worker thread so Ctrl+C can end it at once.
+
+    Raises KeyboardInterrupt when Ctrl+C is pressed (or SIGINT arrives)
+    while the answer is in progress; the worker is a daemon and is left
+    behind as OpenBro exits."""
+    import threading
+
+    ctrl_c = ctrl_c or _ctrl_c_pressed
+    result: dict = {}
+
+    def _work() -> None:
+        try:
+            result["answer"] = agent.chat(user_input)
+        except BaseException as e:  # handed to the main thread below
+            result["error"] = e
+
+    worker = threading.Thread(target=_work, name="openbro-turn", daemon=True)
+    worker.start()
+    while worker.is_alive():
+        worker.join(poll)
+        if ctrl_c():
+            raise KeyboardInterrupt
+    if "error" in result:
+        raise result["error"]
+    return result.get("answer", "")
+
+
+def _print_resume_hint(agent) -> None:
+    """On exit: the command that brings this chat back."""
+    try:
+        sid = agent.memory.session_id
+        if not any(m.role == "user" for m in agent.history):
+            return  # nothing said yet — nothing worth resuming
+    except Exception:
+        return
+    console.print(f"[dim]Resume this chat:[/dim] [bold]openbro --resume {sid}[/bold]")
+
+
 def _slash_command(text: str) -> str | None:
     """`/help`, `/docs add x` → the command without its slash.
 
@@ -676,7 +737,7 @@ def start_repl(resume_session: str | None = None):
     # we still try to stop the voice listener and release the mic.
     import atexit
 
-    atexit.register(_stop_voice)
+    atexit.register(lambda: _stop_voice(quiet=True))
 
     try:
         while True:
@@ -745,6 +806,7 @@ def start_repl(resume_session: str | None = None):
                     except Exception:
                         pass
                     console.print("[dim cyan]◆ session ended.[/dim cyan]")
+                    _print_resume_hint(agent)
                     break
 
                 # Handle built-in commands
@@ -777,7 +839,7 @@ def start_repl(resume_session: str | None = None):
                 # _LiveStatus draws a bottom-pinned bar (phase, elapsed,
                 # tokens); tool panels print above it as scrollback.
                 with _LiveStatus(agent, console):
-                    response = agent.chat(user_input)
+                    response = _run_turn(agent, user_input)
                 console.print("\n[grey50]⏺[/grey50] ", end="")
                 _render_response(console, response)
                 # Turn footer — a "what just happened" line.
@@ -795,13 +857,16 @@ def start_repl(resume_session: str | None = None):
                 console.print("")
 
             except KeyboardInterrupt:
-                console.print("\n[bold cyan]OpenBro interrupted.[/bold cyan]")
+                # One Ctrl+C ends the chat — at the prompt or mid-answer.
+                console.print("\n[bold cyan]◆ OpenBro stopped.[/bold cyan]")
+                _print_resume_hint(agent)
                 break
             except EOFError:
+                _print_resume_hint(agent)
                 break
     finally:
         # Hard cleanup so mic / threads release even if an exception escapes.
-        _stop_voice()
+        _stop_voice(quiet=True)
 
 
 def _handle_command(cmd: str, agent: Agent) -> bool:
@@ -2146,10 +2211,12 @@ def _start_voice(agent: Agent):
         )
 
 
-def _stop_voice():
+def _stop_voice(quiet: bool = False):
+    """Stop the mic listener. `quiet`: used on exit, says nothing when idle."""
     global _voice_listener, _voice_thread
     if not _voice_listener:
-        console.print("[dim]Voice is not active.[/dim]")
+        if not quiet:
+            console.print("[dim]Voice is not active.[/dim]")
         return
     _voice_listener.stop()
     _voice_listener = None

@@ -176,3 +176,54 @@ def test_errors_never_show_keys():
     err = RuntimeError("404 for url https://x/models/m:generate?key=AIzaSyAbcdef1234567890")
     assert "AIza" not in mp._short_error(err)
     assert "gsk_" not in mp._short_error(RuntimeError("bad gsk_abcdefghijklmnop123 key"))
+
+
+def test_groq_reports_the_model_that_answered_and_skips_retired(monkeypatch):
+    from openbro.llm.groq_provider import GroqProvider
+
+    provider = GroqProvider("k", model="llama-3.3-70b-versatile")
+    calls = []
+
+    def fake(model, messages, tools):
+        calls.append(model)
+        if model == "llama-3.3-70b-versatile":
+            raise RuntimeError("Groq 404: model does not exist")
+        return LLMResponse(content="ok")
+
+    monkeypatch.setattr(provider, "_chat_with_model", fake)
+    provider.chat([], None)
+    provider.chat([], None)
+    assert provider.name() == "groq/openai/gpt-oss-120b"
+    assert calls == ["llama-3.3-70b-versatile", "openai/gpt-oss-120b", "openai/gpt-oss-120b"]
+
+
+def test_running_model_is_in_every_turn(monkeypatch):
+    from openbro.core.agent import Agent
+
+    provider = MagicMock()
+    provider.name.return_value = "google/gemini-2.5-flash"
+    provider.supports_tools.return_value = True
+    provider.chat.return_value = LLMResponse(content="hi")
+    agent = Agent(interactive=False, provider=provider)
+    agent.playbooks_enabled = False
+    agent.chat("which model are you?")
+    sent_last = provider.chat.call_args[0][0][-1].content
+    assert "RUNNING MODEL" in sent_last and "google/gemini-2.5-flash" in sent_last
+
+
+def test_config_migrates_stale_model_identity_and_retired_groq():
+    from openbro.utils.config import (
+        RUNNING_MODEL_SENTENCE,
+        STALE_MODEL_SENTENCES,
+        _migrate_config,
+        default_config,
+    )
+
+    cfg = default_config()
+    cfg["agent"]["system_prompt"] = "My own rules. " + STALE_MODEL_SENTENCES[0] + " More."
+    cfg["providers"]["groq"]["model"] = "llama-3.3-70b-versatile"
+    out = _migrate_config(cfg)
+    assert out["agent"]["system_prompt"].startswith("My own rules. ")  # user edits kept
+    assert RUNNING_MODEL_SENTENCE in out["agent"]["system_prompt"]
+    assert "Groq pe Llama" not in out["agent"]["system_prompt"]
+    assert out["providers"]["groq"]["model"] == "openai/gpt-oss-120b"

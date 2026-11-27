@@ -409,14 +409,23 @@ class GroqProvider(LLMProvider):
             if m not in chain:
                 chain.append(m)
         self._chain = chain
+        self._retired: set[str] = set()
+        self.active_model: str | None = None
 
     def chat(self, messages: list[Message], tools: list[dict] | None = None) -> LLMResponse:
         last_error: Exception | None = None
-        for attempt_model in self._chain:
+        for attempt_model in list(self._chain):
+            if attempt_model in self._retired:
+                continue
             try:
-                return self._chat_with_model(attempt_model, messages, tools)
+                response = self._chat_with_model(attempt_model, messages, tools)
+                self.active_model = attempt_model  # name() reports who answered
+                return response
             except RuntimeError as e:
                 msg = str(e).lower()
+                if "404" in msg or "does not exist" in msg or "decommissioned" in msg:
+                    # Retired: don't ask it again this session.
+                    self._retired.add(attempt_model)
                 # Failover triggers:
                 # - 429 / rate_limit: primary model out of quota
                 # - 400 + 'failed to parse tool call arguments as json':
@@ -581,4 +590,5 @@ class GroqProvider(LLMProvider):
         return True
 
     def name(self) -> str:
-        return f"groq/{self.model}"
+        # The model that answered last (after any failover), else the configured one.
+        return f"groq/{getattr(self, 'active_model', None) or self.model}"
