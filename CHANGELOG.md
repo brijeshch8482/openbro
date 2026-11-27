@@ -4,6 +4,9 @@ All notable changes to OpenBro are tracked here.
 
 ## [Unreleased]
 
+- **`openbro web` — public demo chat page.** FastAPI server plus a dependency-free chat page (dark/light, mobile) that streams each step live: thinking, tool calls with timings, then the Markdown answer. Visitors get a locked-down agent: `web` (public addresses only, every redirect re-checked), `datetime` and `docs` over a separate demo index (search/read/list only); SAFE-risk calls only; no host memory, instruction files, workspace, hooks or playbooks; per-visitor event bus and in-memory history. Rate limits per IP and overall, turn and message caps, concurrency cap, capped tool output and a small history budget for free-tier token limits. New `web` extra.
+- **Groq:** its Llama models were retired, so the default is now `openai/gpt-oss-120b` with `qwen/qwen3.8-27b` and `openai/gpt-oss-20b` as fallbacks. A saved config naming a retired model, a rejected tool call or a rate limit moves to the next model instead of failing.
+- **Agent:** an empty final reply (some models end with reasoning only) gets one nudge to answer instead of showing nothing. Agents can take their own event bus.
 - **`webpage` tool — operate web pages in a real browser.** Open, snapshot (numbered links / buttons / fields), click (by number or visible text), type, select, press, scroll, read, screenshot, tabs, wait. Drives the installed Chrome or Edge (Playwright's Chromium as a fallback) with a persistent OpenBro profile, from one worker thread. Buy / pay / send / delete clicks and password typing are dangerous-risk, so the user is asked first. New `browser` extra; `all` now also includes `playwright` and `fastembed`. `doctor` reports web page control.
 
 ## [1.1.0] — Agent harness v2

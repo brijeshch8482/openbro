@@ -162,10 +162,9 @@ def default_config() -> dict:
             },
             "groq": {
                 "api_key": None,
-                # Llama 4 Scout: clean tool_calls + 128K context + fast.
-                # Avoid llama-3.3-70b-versatile (glued-argument bug) and
-                # llama-3.1-70b-versatile (decommissioned May 2026).
-                "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+                # Groq retired its Llama models (Nov 2026); gpt-oss-120b has
+                # native tool calling on the free tier.
+                "model": "openai/gpt-oss-120b",
             },
             "google": {
                 "api_key": None,

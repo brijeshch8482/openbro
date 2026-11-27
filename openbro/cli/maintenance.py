@@ -29,6 +29,7 @@ FEATURES = {
     "Word / Excel": (("docx", "openpyxl"), "office"),
     "Telegram bot": (("telegram",), "all"),
     "web page control": (("playwright",), "browser"),
+    "web demo (openbro web)": (("fastapi", "uvicorn"), "web"),
     "cloud providers": (("anthropic", "openai"), "all"),
 }
 

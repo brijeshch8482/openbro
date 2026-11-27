@@ -378,15 +378,15 @@ def _serialize_message(m: Message) -> dict:
     return base
 
 
+DEFAULT_MODEL = "openai/gpt-oss-120b"
+
 _DEFAULT_FALLBACK_CHAIN = [
-    # Order is failover priority: try primary first, then these on 429 /
-    # 503. All currently active on Groq free tier (May 2026). 3.1-70b is
-    # decommissioned and omitted; 3.3-70b has tool-call quirks the
-    # sanitizer recovers.
-    "meta-llama/llama-4-scout-17b-16e-instruct",
-    "llama-3.3-70b-versatile",
+    # Failover order on 429 / 413 / retired models. Groq retired its Llama
+    # models (checked Nov 2026: /v1/models lists gpt-oss and qwen); a saved
+    # config naming a retired model rolls over to these instead of failing.
+    "openai/gpt-oss-120b",
+    "qwen/qwen3.8-27b",
     "openai/gpt-oss-20b",
-    "llama-3.1-8b-instant",
 ]
 
 
@@ -394,7 +394,7 @@ class GroqProvider(LLMProvider):
     def __init__(
         self,
         api_key: str,
-        model: str = "meta-llama/llama-4-scout-17b-16e-instruct",
+        model: str = DEFAULT_MODEL,
         fallback_models: list[str] | None = None,
     ):
         self.api_key = api_key
@@ -441,6 +441,15 @@ class GroqProvider(LLMProvider):
                     # arguments. Both warrant trying a different model.
                     or ("400" in msg and "failed to call a function" in msg)
                     or ("400" in msg and "failed to parse tool call arguments" in msg)
+                    # gpt-oss sometimes leaks a channel token into the
+                    # tool name ('docs<|channel|>commentary'); Groq
+                    # rejects it as a validation failure.
+                    or ("400" in msg and "tool call validation failed" in msg)
+                    # Retired or unknown model: try the next one.
+                    or "404" in msg
+                    or "does not exist" in msg
+                    or "decommissioned" in msg
+                    or "model_not_found" in msg
                 )
                 if not failover:
                     raise

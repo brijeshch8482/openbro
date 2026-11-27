@@ -472,6 +472,57 @@ def doctor():
         raise SystemExit(1)
 
 
+@main.command("web")
+@click.option("--host", default="127.0.0.1", show_default=True, help="Address to listen on.")
+@click.option("--port", default=8000, show_default=True, type=int, help="Port to listen on.")
+@click.option(
+    "--docs",
+    "docs",
+    multiple=True,
+    type=click.Path(exists=True),
+    help="File or folder visitors can search (repeatable). Default: README + docs/.",
+)
+@click.option("--no-docs", is_flag=True, help="Run without document search (no `docs` tool).")
+@click.option(
+    "--data-dir",
+    type=click.Path(file_okay=False),
+    default=None,
+    help="Where the demo's document index lives. Default: ~/.openbro/web.",
+)
+@click.option("--per-ip", default=20, show_default=True, type=int, help="Messages per IP per hour.")
+@click.option(
+    "--trust-proxy",
+    is_flag=True,
+    help="Take the client IP from X-Forwarded-For (behind a hosting proxy).",
+)
+def web(host, port, docs, no_docs, data_dir, per_ip, trust_proxy):
+    """Serve the public demo: a chat page where anyone can talk to OpenBro.
+
+    Visitors get a locked-down agent — web search, date/time and search over
+    the demo documents only; no shell, files, memory or host context.
+    Set GROQ_API_KEY to answer with a free Groq model.
+    """
+    from pathlib import Path
+
+    try:
+        import uvicorn
+    except ImportError:
+        click.echo("The web demo needs FastAPI + uvicorn:  pip install 'openbro[web]'", err=True)
+        raise SystemExit(1)
+
+    from openbro.web.server import build_backend, create_app
+    from openbro.web.sessions import WebSettings
+
+    settings = WebSettings(per_ip_per_hour=per_ip, trust_proxy=trust_proxy)
+    sources = [] if no_docs else ([Path(d) for d in docs] if docs else None)
+    base = Path(data_dir) if data_dir else Path.home() / ".openbro" / "web"
+    click.echo("Preparing the demo (indexing documents on first run)…")
+    backend = build_backend(settings, sources, base)
+    click.echo(f"Model: {backend.model_name}  ·  tools: {', '.join(backend.tool_names)}")
+    click.echo(f"OpenBro web demo on http://{host}:{port}")
+    uvicorn.run(create_app(backend), host=host, port=port, log_level="warning")
+
+
 @main.command("update")
 @click.option(
     "--source",
