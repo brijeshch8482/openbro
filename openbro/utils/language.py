@@ -8,60 +8,122 @@ Lightweight heuristic — no ML. Used to:
 import re
 
 DEVANAGARI = re.compile(r"[ऀ-ॿ]")
+# Words that only appear in Hinglish (Roman-script Hindi).
 HINGLISH_KEYWORDS = {
     "hai",
     "hain",
+    "hoon",
+    "hu",
+    "ho",
+    "tha",
+    "thi",
     "kar",
     "kr",
     "kro",
     "kre",
+    "karo",
+    "karna",
+    "karke",
+    "kiya",
     "kya",
     "kyu",
     "kyun",
+    "kaise",
+    "kaisa",
+    "kitna",
+    "kitne",
+    "kab",
+    "kaha",
+    "kahan",
     "mai",
     "mei",
-    "main",
+    "mein",
     "tu",
     "tum",
+    "aap",
     "wo",
+    "woh",
     "ye",
     "yeh",
+    "mujhe",
+    "mera",
+    "meri",
+    "mere",
+    "tera",
+    "teri",
+    "tere",
+    "hum",
+    "humko",
     "bhai",
-    "bro",
+    "yaar",
     "bata",
     "batao",
+    "bolo",
     "khol",
     "kholo",
-    "de",
-    "do",
+    "dekh",
+    "dekho",
+    "chal",
+    "chalo",
+    "ruk",
+    "ruko",
+    "bana",
+    "banao",
+    "banani",
     "haan",
     "nahi",
+    "nahin",
     "nai",
     "abhi",
+    "aur",
+    "lekin",
+    "magar",
+    "phir",
+    "agar",
+    "toh",
+    "bhi",
+    "sirf",
+    "bas",
+    "thoda",
+    "zyada",
+    "accha",
+    "achha",
+    "acha",
+    "theek",
+    "thik",
+    "sahi",
+    "ek",
+    "koi",
+    "kuch",
+    "sab",
+    "wala",
+    "wali",
+    "raha",
+    "rahi",
+    "gaya",
+    "gayi",
+    "liye",
+    "chahiye",
+    "badhiya",
+    "kaam",
+    "isko",
+    "usko",
+    "yaha",
+    "yahan",
+    "waha",
+    "wahan",
     "se",
     "ko",
     "ka",
     "ki",
     "ke",
-    "me",
-    "mein",
-    "par",
     "pe",
-    "aur",
-    "lekin",
-    "magar",
-    "phir",
-    "jab",
-    "tab",
-    "agar",
-    "to",
-    "thoda",
-    "zyada",
     "kam",
-    "accha",
-    "theek",
-    "sahi",
 }
+# Hinglish words that are also everyday English ("to", "me", "do", "main",
+# "bro"…). They count toward density but never decide on their own:
+# "have you tool to make image?" is English.
+AMBIGUOUS_KEYWORDS = {"to", "me", "do", "de", "main", "bro", "par", "tab", "jab"}
 
 
 def detect_language(text: str) -> str:
@@ -73,24 +135,30 @@ def detect_language(text: str) -> str:
     words = re.findall(r"[a-zA-Z]+", text.lower())
     if not words:
         return "en"
-    matches = sum(1 for w in words if w in HINGLISH_KEYWORDS)
-    # ≥15% Hinglish keyword density → call it Hinglish
-    if matches / len(words) >= 0.15:
+    strong = sum(1 for w in words if w in HINGLISH_KEYWORDS)
+    if strong >= 2:
+        return "hinglish"
+    loose = sum(1 for w in words if w in AMBIGUOUS_KEYWORDS)
+    # One clear Hinglish word plus ≥15% Hinglish-ish density → Hinglish.
+    if strong == 1 and (strong + loose) / len(words) >= 0.15:
         return "hinglish"
     return "en"
 
 
 def language_instruction(lang: str) -> str:
     """Return a one-liner to append to the system prompt."""
+    # Mirror the user's language for this turn. This instruction overrides
+    # the language of the persona prompt.
     if lang == "hi":
-        return (
-            "USER ne Hindi (Devanagari) me likha hai. Tu bhi pure Hindi (Devanagari) me reply de."
-        )
+        return "The user wrote in Hindi (Devanagari). Reply in Hindi, in Devanagari script."
     if lang == "en":
-        return "USER wrote in English. Reply in pure English only — no Hindi words."
+        return (
+            "The user wrote in English. Reply in pure English only — no Hindi or "
+            "Hinglish words, even if earlier turns were in Hinglish."
+        )
     return (
-        "USER ne Hinglish me likha hai (Roman script). "
-        "Tu bhi casual Hinglish me reply de — Hindi words Roman script me."
+        "The user wrote in Hinglish (Hindi in Roman script). Reply in casual Hinglish, "
+        "in Roman script."
     )
 
 

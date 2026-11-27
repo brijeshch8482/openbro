@@ -158,9 +158,9 @@ class VoiceListener:
         self.speak_replies = speak_replies
         self.assistant_name = assistant_name
         self.ack_phrases = ack_phrases or [
-            "Yes bro, bolo.",
-            "Yes boss, boliye.",
-            "Ji sir, main sun raha hoon.",
+            "Yes, I'm listening.",
+            "Go ahead.",
+            "I'm listening.",
         ]
         self.stt = SpeechToText(
             model_size=stt_model,
@@ -265,7 +265,7 @@ class VoiceListener:
                 # mode can still say "bye bro" to exit without typing.
                 if self.is_stop_phrase(text):
                     if self.tts and self.speak_replies:
-                        self._speak_with_mic_paused("Voice band kar raha hoon. Bye bro.")
+                        self._speak_with_mic_paused("Turning voice off. Bye.")
                     self._running = False
                     break
 

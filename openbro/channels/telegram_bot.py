@@ -67,8 +67,8 @@ class TelegramBot(Channel):
             return
 
         await update.message.reply_text(
-            "Hey bhai! Tera OpenBro ready hai. "
-            "Type kuch bhi aur main help karunga.\n\n"
+            "Hi! OpenBro is ready. "
+            "Type anything and I will help.\n\n"
             "Commands:\n"
             "/help - show commands\n"
             "/reset - clear chat history\n"
@@ -79,7 +79,7 @@ class TelegramBot(Channel):
         await update.message.reply_text(
             "OpenBro Telegram Bot\n\n"
             "Just type your message in natural language.\n"
-            "Hindi, English, Hinglish - sab chalega.\n\n"
+            "Hindi, English and Hinglish all work.\n\n"
             "Commands:\n"
             "/start - initial greeting\n"
             "/reset - clear current chat history\n"
@@ -123,7 +123,7 @@ class TelegramBot(Channel):
             response = await asyncio.to_thread(agent.chat, text)
         except Exception as e:
             logger.exception("Agent error")
-            response = f"Bro, error aa gaya: {e}"
+            response = f"Something went wrong: {e}"
 
         # Telegram has a 4096 char limit per message
         for chunk in self._chunk_message(response, 4000):

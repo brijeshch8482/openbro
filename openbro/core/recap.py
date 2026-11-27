@@ -78,7 +78,7 @@ class Recap:
         return not (self.goal or self.status or self.next_step)
 
     def render(self) -> str:
-        """One-paragraph Claude-Code-style line."""
+        """One-paragraph status line."""
         parts: list[str] = []
         if self.goal:
             parts.append(f"**Goal**: {self.goal}")

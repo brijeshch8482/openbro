@@ -27,14 +27,18 @@ class _LiveStatus:
 
     Shows: spinner · step N/M · current activity (thinking / running TOOL) ·
     elapsed for current phase · turn tokens · turn elapsed. Updates in place
-    so the user sees a live clock instead of a frozen "OpenBro kaam kar
-    raha hai" spinner. Tool-call panels print ABOVE the live area (Rich
-    keeps the live block pinned at the bottom).
+    so the user sees a live clock, not a frozen line. Tool-call panels print
+    ABOVE the live area (Rich keeps the live block pinned at the bottom).
     """
 
     def __init__(self, agent, con: Console):
         import time as _time
 
+        from rich.spinner import Spinner
+
+        # ONE spinner for the whole turn: Rich picks the frame from the time
+        # since the spinner was created, so a new one per render never moves.
+        self._spinner = Spinner("dots", style="cyan")
         self.agent = agent
         self.con = con
         self.live = None
@@ -132,7 +136,6 @@ class _LiveStatus:
 
     def _render(self):
         """Build the one-line live status. Called ~10x per second."""
-        from rich.spinner import Spinner
         from rich.table import Table
 
         agent = self.agent
@@ -161,8 +164,9 @@ class _LiveStatus:
         table.add_column(no_wrap=True)
         table.add_column(no_wrap=True)
         table.add_column(no_wrap=True)
+        self._spinner.style = activity_style
         table.add_row(
-            Spinner("dots", style="cyan"),
+            self._spinner,
             f"[dim]step {step}[/dim]",
             f"[{activity_style}]{activity}[/{activity_style}] [dim]· {phase_elapsed:.1f}s[/dim]",
             f"[dim]turn:[/dim] [grey50]{turn_elapsed:.1f}s[/grey50]",
@@ -199,7 +203,7 @@ def _format_args(name: str, args: dict) -> tuple[str, str]:
 
 
 class _ToolCallRenderer:
-    """Subscribe to ActivityBus events and render Claude-Code-style panels.
+    """Subscribe to ActivityBus events and render tool-call panels.
 
     Bus events drive the UI: `llm_start`/`llm_end` produce a thin status
     line with step + tokens + elapsed; `tool_start`/`tool_end` render a
@@ -397,7 +401,19 @@ COMMANDS = [
     "docs",
     "context",
 ]
-completer = WordCompleter(COMMANDS, ignore_case=True)
+# Both `help` and `/help` complete; WORD=True keeps the slash part of the word.
+completer = WordCompleter(COMMANDS + ["/" + c for c in COMMANDS], ignore_case=True, WORD=True)
+
+_SLASH_RE = __import__("re").compile(r"/([A-Za-z][\w-]*)(?=\s|$)")
+
+
+def _slash_command(text: str) -> str | None:
+    """`/help`, `/docs add x` → the command without its slash.
+
+    None when the input is not slash-command shaped (a path such as
+    `/usr/bin` or `D:/x` is not a command)."""
+    m = _SLASH_RE.match(text)
+    return text[1:] if m else None
 
 
 _CODE_FENCE_RE = __import__("re").compile(
@@ -479,7 +495,7 @@ def _render_response(con: Console, text: str) -> None:
 
 
 def print_banner():
-    # Minimal, professional banner — Claude-Code-style. No bold caps, no
+    # Minimal, professional banner. No bold caps, no
     # ASCII glyphs at headline size. One muted intro line + cwd + hint,
     # all in `dim` so the eye lands on the user's input first. Status
     # bar at the bottom carries the persistent details (model, voice,
@@ -512,13 +528,14 @@ def _make_status_bar(agent, get_voice_state):
 
     def _bar():
         cfg = load_config()
-        provider = cfg.get("llm", {}).get("provider", "?")
-        model = cfg.get("llm", {}).get("model", "?")
-        # Model names like 'meta-llama/llama-4-scout-17b-16e-instruct' get
-        # noisy in a single-line toolbar — trim the org/version cruft.
-        short_model = model.split("/")[-1]
-        if len(short_model) > 32:
-            short_model = short_model[:29] + "…"
+        # The provider actually running (e.g. 'claude/code-cli+codex/chatgpt'),
+        # not llm.model from config, which goes stale for CLI providers.
+        try:
+            label = agent.provider.name()
+        except Exception:
+            label = f"{cfg.get('llm', {}).get('provider', '?')}"
+        if len(label) > 40:
+            label = label[:39] + "…"
         voice_state = "on" if get_voice_state() else "off"
         boss_state = (
             "boss"
@@ -558,7 +575,7 @@ def _make_status_bar(agent, get_voice_state):
             fb_text = ""
 
         return HTML(
-            f" <ansigray>◆</ansigray> <ansigray>{_esc(provider)}/{_esc(short_model)}</ansigray>"
+            f" <ansigray>◆</ansigray> <ansigray>{_esc(label)}</ansigray>"
             f"  <ansigray>·</ansigray>  <ansigray>voice {voice_state}</ansigray>"
             f"  <ansigray>·</ansigray>  <ansigray>{boss_state}</ansigray>"
             f"  <ansigray>·</ansigray>  <ansigray>"
@@ -639,7 +656,7 @@ def start_repl(resume_session: str | None = None):
 
     # Subscribe a rich renderer to the ActivityBus — shows each LLM step,
     # tool call (with syntax-highlighted python/shell args), and result
-    # preview. This is the Claude-Code-style "see what's happening"
+    # preview. This is the "see what's happening"
     # surface above the chat box.
     progress = _ToolCallRenderer(console)
     progress.attach()
@@ -664,7 +681,7 @@ def start_repl(resume_session: str | None = None):
     try:
         while True:
             try:
-                # Claude-Code-style prompt: a subtle thin separator above the
+                # Prompt: a subtle thin separator above the
                 # input so each turn has visual breathing room, then a cyan
                 # `›` glyph. Status bar (bottom_toolbar) sits below the input
                 # showing model + voice + boss + shortcut hints.
@@ -717,7 +734,11 @@ def start_repl(resume_session: str | None = None):
                 if not user_input:
                     continue
 
-                if user_input.lower() in ("exit", "quit", "bye"):
+                # Commands work with or without a leading slash.
+                slashed = _slash_command(user_input)
+                command_input = slashed if slashed is not None else user_input
+
+                if command_input.lower() in ("exit", "quit", "bye"):
                     try:
                         for line in agent.end_session():
                             console.print(f"[dim magenta]※ memory: {line}[/dim magenta]")
@@ -727,12 +748,18 @@ def start_repl(resume_session: str | None = None):
                     break
 
                 # Handle built-in commands
-                if _handle_command(user_input, agent):
+                if _handle_command(command_input, agent):
+                    continue
+                if slashed is not None:
+                    # A slash command we don't know: say so instead of
+                    # sending it to the model, which would improvise.
+                    name = command_input.split(maxsplit=1)[0]
+                    console.print(
+                        f"[yellow]Unknown command: /{name}[/yellow] "
+                        "[dim]— type /help to see the commands.[/dim]"
+                    )
                     continue
 
-                # Tool-capable providers need the full agent loop. The streaming
-                # path cannot currently surface structured tool calls reliably.
-                #
                 # Render the assistant response as Markdown so code blocks, lists,
                 # tables, etc. format correctly. A
                 # plain console.print() leaves '```python\n...' as raw backticks.
@@ -743,31 +770,16 @@ def start_repl(resume_session: str | None = None):
                 import time as _t
 
                 turn_t0 = _t.monotonic()
-                try:
-                    if agent.provider.supports_tools():
-                        # _LiveStatus replaces console.status — gives a
-                        # bottom-pinned bar that ticks every 100ms with
-                        # the current phase (thinking / running TOOL),
-                        # phase elapsed, turn elapsed, and live token
-                        # counters. Tool panels and step lines print
-                        # ABOVE the live bar as scrollback.
-                        with _LiveStatus(agent, console):
-                            response = agent.chat(user_input)
-                        # ⏺ (filled circle) for the assistant marker — Claude
-                        # Code's same glyph. Cleaner than ◆ when output is
-                        # immediately followed by code or markdown.
-                        console.print("\n[grey50]⏺[/grey50] ", end="")
-                        _render_response(console, response)
-                    else:
-                        console.print("\n[grey50]⏺[/grey50] ", end="")
-                        for token in agent.stream_chat(user_input):
-                            console.print(token, end="", highlight=False)
-                            response += token
-                except Exception:
-                    with _LiveStatus(agent, console):
-                        response = agent.chat(user_input)
-                    console.print("\n[grey50]⏺[/grey50] ", end="")
-                    _render_response(console, response)
+                # Every provider goes through the agent loop — including
+                # text-only ones (CLI subscriptions, local models), whose
+                # <tool_call> tags the loop parses and runs. Streaming raw
+                # tokens here would print those tags instead of running them.
+                # _LiveStatus draws a bottom-pinned bar (phase, elapsed,
+                # tokens); tool panels print above it as scrollback.
+                with _LiveStatus(agent, console):
+                    response = agent.chat(user_input)
+                console.print("\n[grey50]⏺[/grey50] ", end="")
+                _render_response(console, response)
                 # Turn footer — a "what just happened" line.
                 # in/out token delta + wall-clock for this single turn so
                 # the user can spot a runaway loop (huge in tokens) or a
@@ -1225,7 +1237,7 @@ def _show_help():
     table.add_row("wait <id>", "Block on a background job, show result panel")
     table.add_row("kill <id>", "Cancel a running background job (cooperative)")
     table.add_row("workspace", "Show detected cwd / project / git context")
-    table.add_row("recap", "Claude-Code-style 'where are we' summary of recent turns")
+    table.add_row("recap", "'Where are we' summary of recent turns")
     table.add_row("fallback", "Show local-fallback model status (ready / downloading)")
     table.add_row("fallback download", "Manually kick off the fallback model download")
     table.add_row("fallback test", "Send a tiny query through the local fallback")
@@ -1277,7 +1289,10 @@ def _show_help():
     table.add_row("exit / quit", "Exit OpenBro")
 
     console.print(table)
-    console.print("\n[dim]Or just type naturally and OpenBro will use tools when needed.[/dim]\n")
+    console.print(
+        "\n[dim]Type a command with or without the slash (/help or help). "
+        "Anything else goes to OpenBro, which uses tools when needed.[/dim]\n"
+    )
 
 
 def _show_config():
@@ -2086,7 +2101,7 @@ def _start_voice(agent: Agent):
     if is_continuous:
         console.print(
             "[green]🎤 Voice ACTIVE — continuous mode.[/green] "
-            "[dim]Bol bhai, har baat command hai. Stop: 'voice off' / "
+            "[dim]Everything you say is a command. To stop: 'voice off' / "
             "'bye bro' / Ctrl+C.[/dim]"
         )
     else:
@@ -2422,20 +2437,24 @@ def _brain_check_llm(agent):
 def _maybe_suggest_llm_upgrade(agent, cfg):
     """Non-blocking 24h-cooldown LLM upgrade suggestion at REPL startup."""
     try:
-        brain = _get_brain()
         current = (
             cfg.get("llm", {}).get("provider", ""),
             cfg.get("llm", {}).get("model", ""),
         )
+        # Subscription CLI providers have no comparable model score; the
+        # catalogue would "upgrade" them to a weaker API model.
+        if current[0] in ("claude", "codex"):
+            return
+        brain = _get_brain()
         suggestion = brain.check_for_better_llm(current, cfg, force=False)
         if suggestion:
             console.print(
-                f"\n[bold yellow]Naya LLM available:[/bold yellow] "
+                f"\n[bold yellow]Better model available:[/bold yellow] "
                 f"{suggestion['provider']}/{suggestion['model']} "
                 f"(score {suggestion['score']} vs current "
                 f"{current[0]}/{current[1]})"
             )
-            console.print(f"[dim]Switch anytime: 'model switch {suggestion['provider']}'[/dim]\n")
+            console.print(f"[dim]To switch: model switch {suggestion['provider']}[/dim]\n")
     except Exception:
         # Never block startup on the upgrade check
         pass

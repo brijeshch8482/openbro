@@ -51,6 +51,12 @@ class SemanticMemory:
     def _get_model(self):
         if self._model is not None:
             return self._model
+        from openbro.utils.optional import sentence_transformers_usable
+
+        if not sentence_transformers_usable():
+            # Without torch, importing sentence_transformers prints a
+            # "PyTorch was not found" warning; skip straight to keywords.
+            return None
         try:
             from sentence_transformers import SentenceTransformer
         except ImportError:
