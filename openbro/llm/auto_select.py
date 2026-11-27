@@ -32,7 +32,7 @@ CAPABILITY = {
     "gemini-2.0-pro": 96,
     "gemini-2.0-flash": 90,
     "gemini-1.5-pro": 92,
-    "gemini-1.5-flash": 85,
+    "gemini-2.5-flash": 85,
     # Groq (open-source via fast cloud)
     # Rankings re-tuned 2026-05-30 after captured failures: scout-17b
     # fabricated tool outputs (NDLS_FDB), rendered tool args as chat

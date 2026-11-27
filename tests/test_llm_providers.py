@@ -12,8 +12,8 @@ from openbro.llm.google_provider import GoogleProvider
 
 
 def test_google_name():
-    p = GoogleProvider(api_key="x", model="gemini-1.5-flash")
-    assert p.name() == "google/gemini-1.5-flash"
+    p = GoogleProvider(api_key="x", model="gemini-2.5-flash")
+    assert p.name() == "google/gemini-2.5-flash"
 
 
 def test_google_supports_tools():
@@ -142,8 +142,8 @@ def test_deepseek_chat_extracts_tool_calls():
 
 def test_router_creates_google_provider(tmp_path, monkeypatch):
     fake_cfg = {
-        "llm": {"provider": "google", "model": "gemini-1.5-flash"},
-        "providers": {"google": {"api_key": "AIza_x", "model": "gemini-1.5-flash"}},
+        "llm": {"provider": "google", "model": "gemini-2.5-flash"},
+        "providers": {"google": {"api_key": "AIza_x", "model": "gemini-2.5-flash"}},
     }
     monkeypatch.setattr("openbro.llm.router.load_config", lambda: fake_cfg)
     from openbro.llm.router import create_provider
@@ -166,7 +166,7 @@ def test_router_creates_deepseek_provider(monkeypatch):
 
 def test_router_google_missing_key_raises(monkeypatch):
     fake_cfg = {
-        "llm": {"provider": "google", "model": "gemini-1.5-flash"},
+        "llm": {"provider": "google", "model": "gemini-2.5-flash"},
         "providers": {"google": {"api_key": None}},
     }
     monkeypatch.setattr("openbro.llm.router.load_config", lambda: fake_cfg)
