@@ -109,13 +109,15 @@ def test_deepseek_get_client_lazy():
     assert p._client is None  # not loaded yet
 
 
-def test_deepseek_chat_handles_error():
+def test_deepseek_chat_raises_errors():
+    # Raised, not returned as reply text, so the fallback provider and the
+    # agent's error messages can handle it.
     p = DeepSeekProvider("k")
     fake_client = MagicMock()
     fake_client.chat.completions.create.side_effect = RuntimeError("boom")
     p._client = fake_client
-    out = p.chat([Message(role="user", content="hi")])
-    assert "DeepSeek error" in out.content
+    with pytest.raises(RuntimeError, match="boom"):
+        p.chat([Message(role="user", content="hi")])
 
 
 def test_deepseek_chat_extracts_tool_calls():

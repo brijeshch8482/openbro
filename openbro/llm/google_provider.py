@@ -6,11 +6,13 @@ similar to OpenAI but with its own endpoint and request shape.
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Iterator
 
 import httpx
 
 from openbro.llm.base import LLMProvider, LLMResponse, Message
+from openbro.llm.wire import parse_arguments
 
 API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 
@@ -33,15 +35,55 @@ class GoogleProvider(LLMProvider):
 
     @staticmethod
     def _to_gemini_messages(messages: list[Message]) -> tuple[str, list[dict]]:
-        """Translate OpenBro messages to Gemini's contents+systemInstruction shape."""
+        """Translate OpenBro messages to Gemini's contents+systemInstruction shape.
+
+        Tool calls go back as `functionCall` parts on the model turn and their
+        results as `functionResponse` parts, all results of one round in one
+        user turn. Without them Gemini never sees that it already called a
+        tool, so it calls it again and again."""
         system = ""
-        contents = []
+        contents: list[dict] = []
+        names_by_id: dict[str, str] = {}
+        pending_names: list[str] = []  # calls of the last model turn, in order
         for m in messages:
             if m.role == "system":
-                system = (system + "\n" + m.content).strip()
+                system = (system + "\n" + (m.content or "")).strip()
+            elif m.role == "assistant":
+                parts: list[dict] = [{"text": m.content}] if m.content else []
+                pending_names = []
+                for call in m.tool_calls or []:
+                    fn = call.get("function", {}) if isinstance(call, dict) else {}
+                    name = fn.get("name", "")
+                    if not name:
+                        continue
+                    args = parse_arguments(fn.get("arguments"))
+                    part: dict = {"functionCall": {"name": name, "args": args}}
+                    if call.get("thought_signature"):
+                        part["thoughtSignature"] = call["thought_signature"]
+                    parts.append(part)
+                    names_by_id[call.get("id") or ""] = name
+                    pending_names.append(name)
+                if parts:
+                    contents.append({"role": "model", "parts": parts})
+            elif m.role == "tool":
+                name = names_by_id.get(m.tool_call_id or "") or (
+                    pending_names.pop(0) if pending_names else ""
+                )
+                if not name:  # a result we can't pair: show it as text
+                    contents.append(
+                        {"role": "user", "parts": [{"text": f"[tool result]\n{m.content}"}]}
+                    )
+                    continue
+                part = {"functionResponse": {"name": name, "response": {"result": m.content}}}
+                last = contents[-1] if contents else None
+                if last and last.get("_results"):
+                    last["parts"].append(part)
+                else:
+                    contents.append({"role": "user", "parts": [part], "_results": True})
             else:
-                role = "model" if m.role == "assistant" else "user"
-                contents.append({"role": role, "parts": [{"text": m.content}]})
+                contents.append({"role": "user", "parts": [{"text": m.content or " "}]})
+        for c in contents:
+            c.pop("_results", None)
         return system, contents
 
     def chat(self, messages: list[Message], tools: list[dict] | None = None) -> LLMResponse:
@@ -89,14 +131,20 @@ class GoogleProvider(LLMProvider):
                     text_parts.append(part["text"])
                 elif "functionCall" in part:
                     fc = part["functionCall"]
-                    tool_calls.append(
-                        {
-                            "function": {
-                                "name": fc.get("name", ""),
-                                "arguments": fc.get("args", {}),
-                            }
-                        }
-                    )
+                    call = {
+                        # Gemini gives no call id; one is needed to pair the
+                        # result with this call when the history goes back.
+                        "id": f"gemini_{uuid.uuid4().hex[:12]}",
+                        "function": {
+                            "name": fc.get("name", ""),
+                            "arguments": fc.get("args", {}),
+                        },
+                    }
+                    # Thinking models sign their calls; the signature must be
+                    # sent back with the call or the next request may fail.
+                    if part.get("thoughtSignature"):
+                        call["thought_signature"] = part["thoughtSignature"]
+                    tool_calls.append(call)
         # Gemini reports tokens via usageMetadata. Captured 2026-05-31:
         # status bar showed '0↓ 0↑ tokens' for every Gemini turn
         # because we weren't passing the usage dict into LLMResponse.

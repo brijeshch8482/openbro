@@ -121,7 +121,22 @@ class LocalLLMProvider(LLMProvider):
         self.model_name = model_name or self.model_path.stem
 
     def _to_dicts(self, messages: list[Message]) -> list[dict]:
-        return [{"role": m.role, "content": m.content} for m in messages]
+        """Chat messages for llama.cpp. Local chat templates don't all accept
+        structured tool calls, so an assistant turn's calls are written into
+        its text — the model must still see that it already called a tool."""
+        out = []
+        for m in messages:
+            content = m.content or ""
+            if m.role == "assistant" and m.tool_calls:
+                calls = []
+                for tc in m.tool_calls:
+                    fn = tc.get("function", {}) if isinstance(tc, dict) else {}
+                    args = json.dumps(fn.get("arguments", {}), ensure_ascii=False, default=str)
+                    calls.append(f"{fn.get('name', '?')}({args[:300]})")
+                note = "[called tools: " + "; ".join(calls) + "]"
+                content = f"{content}\n{note}" if content else note
+            out.append({"role": m.role, "content": content})
+        return out
 
     def chat(self, messages: list[Message], tools: list[dict] | None = None) -> LLMResponse:
         response = self.engine.chat(self._to_dicts(messages), tools=tools)

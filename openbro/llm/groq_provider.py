@@ -6,6 +6,7 @@ import re
 import httpx
 
 from openbro.llm.base import LLMProvider, LLMResponse, Message
+from openbro.llm.wire import to_openai_messages
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
@@ -341,43 +342,6 @@ def _extract_bare_tool_calls(content: str) -> list[dict]:
     return out
 
 
-def _serialize_message(m: Message) -> dict:
-    """Render a Message in OpenAI/Groq wire format, preserving tool_calls.
-
-    Why this matters: the previous serialization dropped Message.tool_calls
-    and Message.tool_call_id and only kept role+content. After a tool
-    round-trip, the LLM saw 'Tools called: X(...)' and 'Tool results: ...'
-    as plain assistant/user text — and on the next iteration it echoed
-    those lines back as its own response (user saw 'Tools called:
-    browser({"action": "search"...})' in the chat). Using the proper
-    tool_calls + role='tool' schema makes the LLM treat them as
-    structured tool round-trips and reply with prose.
-    """
-    base = {"role": m.role, "content": m.content or ""}
-    if m.tool_calls:
-        # Assistant message that called tools. content may be empty.
-        base["tool_calls"] = [
-            {
-                "id": tc.get("id", ""),
-                "type": "function",
-                "function": {
-                    "name": tc.get("function", {}).get("name", ""),
-                    "arguments": (
-                        json.dumps(tc.get("function", {}).get("arguments", {}))
-                        if isinstance(tc.get("function", {}).get("arguments"), dict)
-                        else tc.get("function", {}).get("arguments", "")
-                    ),
-                },
-            }
-            for tc in m.tool_calls
-        ]
-    if m.tool_call_id:
-        # Tool result message — must include tool_call_id linking back
-        # to the call that produced it.
-        base["tool_call_id"] = m.tool_call_id
-    return base
-
-
 DEFAULT_MODEL = "openai/gpt-oss-120b"
 
 _DEFAULT_FALLBACK_CHAIN = [
@@ -480,7 +444,7 @@ class GroqProvider(LLMProvider):
         }
         payload = {
             "model": model,
-            "messages": [_serialize_message(m) for m in messages],
+            "messages": to_openai_messages(messages),
         }
         if tools:
             payload["tools"] = [{"type": "function", "function": t} for t in tools]

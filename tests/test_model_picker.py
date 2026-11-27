@@ -227,3 +227,154 @@ def test_config_migrates_stale_model_identity_and_retired_groq():
     assert RUNNING_MODEL_SENTENCE in out["agent"]["system_prompt"]
     assert "Groq pe Llama" not in out["agent"]["system_prompt"]
     assert out["providers"]["groq"]["model"] == "openai/gpt-oss-120b"
+
+
+# ─── Gemini sees its own tool calls ──────────────────────────────────
+
+
+def test_gemini_history_keeps_tool_calls_and_results():
+    from openbro.llm.base import Message
+    from openbro.llm.google_provider import GoogleProvider
+
+    calls = [
+        {
+            "id": "g1",
+            "function": {"name": "python", "arguments": {"code": "print(1)"}},
+            "thought_signature": "sig-abc",
+        },
+        {"id": "g2", "function": {"name": "datetime", "arguments": '{"action": "now"}'}},
+    ]
+    system, contents = GoogleProvider._to_gemini_messages(
+        [
+            Message(role="system", content="rules"),
+            Message(role="user", content="make an image"),
+            Message(role="assistant", content="", tool_calls=calls),
+            Message(role="tool", content="saved art.png", tool_call_id="g1"),
+            Message(role="tool", content="10:00", tool_call_id="g2"),
+            Message(role="assistant", content="Done: art.png"),
+        ]
+    )
+    assert system == "rules"
+    assert [c["role"] for c in contents] == ["user", "model", "user", "model"]
+    model_parts = contents[1]["parts"]
+    assert model_parts[0] == {
+        "functionCall": {"name": "python", "args": {"code": "print(1)"}},
+        "thoughtSignature": "sig-abc",
+    }
+    assert model_parts[1]["functionCall"]["args"] == {"action": "now"}
+    results = contents[2]["parts"]  # both results in ONE user turn
+    assert results == [
+        {"functionResponse": {"name": "python", "response": {"result": "saved art.png"}}},
+        {"functionResponse": {"name": "datetime", "response": {"result": "10:00"}}},
+    ]
+    assert all("_results" not in c for c in contents)
+
+
+def test_gemini_calls_get_ids_and_keep_signatures(monkeypatch):
+    from openbro.llm import google_provider
+    from openbro.llm.base import Message
+
+    part = {"functionCall": {"name": "python", "args": {"code": "x"}}, "thoughtSignature": "s1"}
+    resp = MagicMock()
+    resp.json.return_value = {"candidates": [{"content": {"parts": [part]}}]}
+    monkeypatch.setattr(google_provider.httpx, "post", lambda *a, **k: resp)
+    out = google_provider.GoogleProvider("k").chat([Message(role="user", content="hi")])
+    call = out.tool_calls[0]
+    assert call["id"].startswith("gemini_") and call["thought_signature"] == "s1"
+    assert call["function"] == {"name": "python", "arguments": {"code": "x"}}
+
+
+def test_config_moves_saved_desktop_rule_to_working_folder():
+    from openbro.utils.config import (
+        LOCATION_SENTENCE,
+        STALE_LOCATION_SENTENCE,
+        _migrate_config,
+        default_config,
+    )
+
+    cfg = default_config()
+    assert STALE_LOCATION_SENTENCE not in cfg["agent"]["system_prompt"]
+    cfg["agent"]["system_prompt"] = "Mine. " + STALE_LOCATION_SENTENCE
+    out = _migrate_config(cfg)["agent"]["system_prompt"]
+    assert out == "Mine. " + LOCATION_SENTENCE
+
+
+# ─── every provider sends structured tool history ────────────────────
+
+
+def _round_trip():
+    from openbro.llm.base import Message
+
+    return [
+        Message(role="system", content="rules"),
+        Message(role="user", content="make an image"),
+        Message(
+            role="assistant",
+            content="",
+            tool_calls=[{"function": {"name": "python", "arguments": {"code": "x"}}}],  # no id
+        ),
+        Message(role="tool", content="saved art.png", tool_call_id=""),
+    ]
+
+
+def test_openai_wire_pairs_calls_and_results_even_without_ids():
+    from openbro.llm.wire import to_openai_messages
+
+    out = to_openai_messages(_round_trip())
+    call = out[2]["tool_calls"][0]
+    assert call["id"] and call["function"] == {"name": "python", "arguments": '{"code": "x"}'}
+    assert out[3] == {"role": "tool", "content": "saved art.png", "tool_call_id": call["id"]}
+
+
+def test_orphan_tool_result_becomes_plain_context():
+    from openbro.llm.base import Message
+    from openbro.llm.wire import to_openai_messages
+
+    out = to_openai_messages([Message(role="tool", content="r", tool_call_id="")])
+    assert out == [{"role": "user", "content": "[tool result]\nr"}]
+
+
+@pytest.mark.parametrize("provider_name", ["openai", "deepseek", "groq"])
+def test_openai_style_providers_send_tool_calls(monkeypatch, provider_name):
+    sent = {}
+
+    def create(**kwargs):
+        sent.update(kwargs)
+        msg = MagicMock(content="done", tool_calls=None)
+        return MagicMock(choices=[MagicMock(message=msg)])
+
+    if provider_name == "groq":
+        from openbro.llm import groq_provider
+
+        def fake_post(url, json=None, headers=None, timeout=None):
+            sent.update(json)
+            resp = MagicMock(status_code=200)
+            resp.json.return_value = {"choices": [{"message": {"content": "done"}}]}
+            return resp
+
+        monkeypatch.setattr(groq_provider.httpx, "post", fake_post)
+        provider = groq_provider.GroqProvider("k")
+    elif provider_name == "deepseek":
+        from openbro.llm.deepseek_provider import DeepSeekProvider
+
+        provider = DeepSeekProvider("k")
+        provider._client = MagicMock()
+        provider._client.chat.completions.create.side_effect = create
+    else:
+        pytest.importorskip("openai")
+        from openbro.llm.openai_provider import OpenAIProvider
+
+        provider = OpenAIProvider("k")
+        provider.client = MagicMock()
+        provider.client.chat.completions.create.side_effect = create
+    provider.chat(_round_trip())
+    msgs = sent["messages"]
+    assert msgs[2]["tool_calls"][0]["function"]["name"] == "python"
+    assert msgs[3]["role"] == "tool" and msgs[3]["tool_call_id"] == msgs[2]["tool_calls"][0]["id"]
+
+
+def test_local_engine_sees_its_own_calls():
+    from openbro.llm.local_provider import LocalLLMProvider
+
+    dicts = LocalLLMProvider._to_dicts(None, _round_trip())
+    assert "[called tools: python(" in dicts[2]["content"]

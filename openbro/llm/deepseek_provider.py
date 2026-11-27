@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 from openbro.llm.base import LLMProvider, LLMResponse, Message
+from openbro.llm.wire import parse_arguments, to_openai_messages
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 
@@ -42,27 +43,26 @@ class DeepSeekProvider(LLMProvider):
         client = self._get_client()
         payload = {
             "model": self.model,
-            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            # Structured history: the model must see its own tool calls.
+            "messages": to_openai_messages(messages),
         }
         if tools and self.supports_tools():
             payload["tools"] = [{"type": "function", "function": t} for t in tools]
-        try:
-            resp = client.chat.completions.create(**payload)
-            msg = resp.choices[0].message
-            tool_calls = []
-            if getattr(msg, "tool_calls", None):
-                for tc in msg.tool_calls:
-                    tool_calls.append(
-                        {
-                            "function": {
-                                "name": tc.function.name,
-                                "arguments": tc.function.arguments,
-                            }
-                        }
-                    )
-            return LLMResponse(content=msg.content or "", tool_calls=tool_calls)
-        except Exception as e:
-            return LLMResponse(content=f"DeepSeek error: {e}", tool_calls=[])
+        # Errors are raised, not returned as text, so the fallback provider
+        # and the agent's error messages can handle them.
+        resp = client.chat.completions.create(**payload)
+        msg = resp.choices[0].message
+        tool_calls = [
+            {
+                "id": tc.id,
+                "function": {
+                    "name": tc.function.name,
+                    "arguments": parse_arguments(tc.function.arguments),
+                },
+            }
+            for tc in (getattr(msg, "tool_calls", None) or [])
+        ]
+        return LLMResponse(content=msg.content or "", tool_calls=tool_calls)
 
     def stream(self, messages: list[Message], tools: list[dict] | None = None) -> Iterator[str]:
         client = self._get_client()
