@@ -3,6 +3,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 from openbro.cli.repl import _slash_command
 
 
@@ -27,7 +29,7 @@ def test_repl_runs_every_turn_through_the_agent_loop():
         encoding="utf-8"
     )
     assert "agent.stream_chat(" not in source
-    assert "response = agent.chat(user_input)" in source
+    assert "response = _run_turn(agent, user_input)" in source
 
 
 def test_embedder_checks_torch_without_importing(monkeypatch):
@@ -107,3 +109,73 @@ def test_model_subcommands_are_not_switches(monkeypatch):
     monkeypatch.setattr(mm, "list_available", lambda *a, **k: None)
     repl._handle_command("model list", MagicMock())
     assert called == []
+
+
+# ─── Ctrl+C and resume hint ──────────────────────────────────────────
+
+
+class _SlowAgent:
+    def __init__(self, seconds=5.0, answer="done", error=None):
+        self.seconds, self.answer, self.error = seconds, answer, error
+
+    def chat(self, text):
+        import time
+
+        time.sleep(self.seconds)
+        if self.error:
+            raise self.error
+        return self.answer
+
+
+def test_run_turn_returns_answer_and_errors():
+    from openbro.cli.repl import _run_turn
+
+    assert _run_turn(_SlowAgent(0.05), "hi", ctrl_c=lambda: False) == "done"
+    with pytest.raises(ValueError):
+        _run_turn(_SlowAgent(0.05, error=ValueError("boom")), "hi", ctrl_c=lambda: False)
+
+
+def test_ctrl_c_key_stops_a_long_answer_at_once():
+    import time
+
+    from openbro.cli.repl import _run_turn
+
+    presses = iter([False, False, True])
+    t0 = time.monotonic()
+    with pytest.raises(KeyboardInterrupt):
+        _run_turn(_SlowAgent(10), "hi", poll=0.05, ctrl_c=lambda: next(presses, True))
+    assert time.monotonic() - t0 < 2
+
+
+def test_sigint_stops_a_long_answer_at_once():
+    # A real Ctrl+C arrives as SIGINT in the main thread; interrupt_main()
+    # delivers it exactly like that.
+    import _thread
+    import threading
+    import time
+
+    from openbro.cli.repl import _run_turn
+
+    threading.Timer(0.3, _thread.interrupt_main).start()
+    t0 = time.monotonic()
+    with pytest.raises(KeyboardInterrupt):
+        _run_turn(_SlowAgent(10), "hi", ctrl_c=lambda: False)
+    assert time.monotonic() - t0 < 2
+
+
+def test_resume_hint_only_after_a_message(capsys):
+    from unittest.mock import MagicMock
+
+    from openbro.cli import repl
+    from openbro.llm.base import Message
+
+    agent = MagicMock()
+    agent.memory.session_id = "abc123def456"
+    agent.history = [Message(role="system", content="s")]
+    with repl.console.capture() as cap:
+        repl._print_resume_hint(agent)
+    assert cap.get() == ""
+    agent.history.append(Message(role="user", content="hi"))
+    with repl.console.capture() as cap:
+        repl._print_resume_hint(agent)
+    assert "openbro --resume abc123def456" in cap.get()
