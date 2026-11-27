@@ -37,8 +37,42 @@ def _get_activity_bus():
         return None
 
 
+# Codex's own built-in tools. They are switched off so Codex answers as the
+# model only and acts through OpenBro's tools: anything Codex did by itself
+# (run a shell, generate an image into ~/.codex/generated_images) would skip
+# OpenBro's permission gate, and OpenBro could not tell the user what was
+# made or where.
+_CODEX_BUILTIN_FEATURES = (
+    "shell_tool",
+    "image_generation",
+    "view_image",
+    "apps",
+    "plugins",
+    "browser_use",
+    "in_app_browser",
+    "computer_use",
+    "skill_search",
+    "tool_suggest",
+)
+# Codex is a full agent with tools of its own. Inside OpenBro it is only the
+# model: it runs read-only, and is told to act through OpenBro's tools.
+_ROLE_NOTE = (
+    "[Your role] You are the language model inside OpenBro, not a coding agent. "
+    "Do not use your own built-in tools (exec, shell, apply_patch, image "
+    "generation, web search, sub-agents): they are switched off or read-only here, "
+    "and nothing they do reaches the user. To act, reply with <tool_call> tags "
+    "exactly as the OpenBro instructions below describe; OpenBro runs each call "
+    "and sends you the result.\n\n"
+)
+_UNKNOWN_FEATURE_RE = re.compile(r"Unknown feature flag:\s*([\w.-]+)")
+
+
 class CodexProvider(LLMProvider):
     """Shell out to `codex exec` for every chat turn."""
+
+    # Feature names this Codex version doesn't know (older or newer CLI);
+    # dropped from later calls instead of failing every turn.
+    _unknown_features: set[str] = set()
 
     # Patterns to strip from Codex stdout so the user only sees the
     # actual answer. Captured 2026-06-16 against codex 0.130.0:
@@ -104,33 +138,6 @@ class CodexProvider(LLMProvider):
         # works — long turns can easily hit 30 s. Same fix as
         # ClaudeProvider; captured 2026-06-20 user complaint about
         # the agent appearing stuck.
-        try:
-            # --skip-git-repo-check lets Codex run from any cwd; without
-            # it the CLI refuses with "Not inside a trusted directory"
-            # whenever OpenBro is invoked from a non-git folder (e.g.
-            # D:/OpenBro-teting/). The user already signed in, so the
-            # safety gate is unnecessary at this layer — OpenBro's own
-            # permission system gates write actions anyway.
-            proc = subprocess.Popen(
-                [resolved, "exec", "--skip-git-repo-check", "-"],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-            )
-        except FileNotFoundError as e:
-            raise RuntimeError(f"Could not spawn {resolved}: {e}") from e
-
-        try:
-            proc.stdin.write(prompt)
-        finally:
-            try:
-                proc.stdin.close()
-            except Exception:
-                pass
-
         bus = _get_activity_bus()
         started = time.time()
         stop_flag = threading.Event()
@@ -150,32 +157,67 @@ class CodexProvider(LLMProvider):
 
         beater = threading.Thread(target=_heartbeat, daemon=True)
         beater.start()
-
         try:
-            try:
-                stdout_text, stderr_text = proc.communicate(timeout=self._timeout)
-            except subprocess.TimeoutExpired as e:
-                proc.kill()
-                raise RuntimeError(f"Codex CLI timed out after {self._timeout}s") from e
+            while True:
+                returncode, stdout_text, stderr_text = self._run(resolved, prompt)
+                unknown = _UNKNOWN_FEATURE_RE.search(stderr_text or "")
+                if returncode in (0, None) or not unknown:
+                    break
+                if unknown.group(1) in self._unknown_features:
+                    break  # dropping it didn't help; report the error
+                self._unknown_features.add(unknown.group(1))
         finally:
             stop_flag.set()
             beater.join(timeout=0.5)
 
-        if proc.returncode not in (0, None):
-            raise RuntimeError(
-                f"Codex exited {proc.returncode}: {(stderr_text or '').strip()[:500]}"
-            )
+        if returncode not in (0, None):
+            raise RuntimeError(f"Codex exited {returncode}: {(stderr_text or '').strip()[:500]}")
         answer = self._extract_answer(stdout_text or "")
         # Codex prints "tokens used\n<n>" at the end; pull the count out
         # so the REPL status line keeps working even without an API
         # usage object.
-        usage = self._extract_usage(stdout_text or "")
+        # (newer CLIs print it on stderr, older ones on stdout)
+        usage = self._extract_usage(stderr_text or "") or self._extract_usage(stdout_text or "")
         return LLMResponse(
             content=answer,
             tool_calls=[],
             usage=usage,
             model="chatgpt-via-codex",
         )
+
+    def _command(self, resolved: str) -> list[str]:
+        # --skip-git-repo-check lets Codex run from any folder.
+        # --sandbox read-only plus the disabled features keep Codex to
+        # answering: every action goes through OpenBro's tools instead.
+        cmd = [resolved, "exec", "--skip-git-repo-check", "--sandbox", "read-only"]
+        cmd += ["-c", 'web_search="disabled"']
+        for feature in _CODEX_BUILTIN_FEATURES:
+            if feature not in self._unknown_features:
+                cmd += ["--disable", feature]
+        cmd.append("-")  # read the prompt from stdin
+        return cmd
+
+    def _run(self, resolved: str, prompt: str) -> tuple[int | None, str, str]:
+        # The prompt goes in on stdin: OpenBro's prompt (system + tools +
+        # history) is far over Windows' 8 KB command-line limit.
+        try:
+            proc = subprocess.Popen(
+                self._command(resolved),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+        except FileNotFoundError as e:
+            raise RuntimeError(f"Could not spawn {resolved}: {e}") from e
+        try:
+            stdout_text, stderr_text = proc.communicate(prompt, timeout=self._timeout)
+        except subprocess.TimeoutExpired as e:
+            proc.kill()
+            raise RuntimeError(f"Codex CLI timed out after {self._timeout}s") from e
+        return proc.returncode, stdout_text or "", stderr_text or ""
 
     # ─── Helpers ───────────────────────────────────────────────────
 
@@ -185,7 +227,7 @@ class CodexProvider(LLMProvider):
         into a transcript; earlier tool calls are written back as
         <tool_call> tags and tool output as <tool_result> blocks so the
         model sees the same text protocol it is asked to use."""
-        return render_transcript(messages)
+        return _ROLE_NOTE + render_transcript(messages)
 
     @classmethod
     def _extract_answer(cls, stdout: str) -> str:

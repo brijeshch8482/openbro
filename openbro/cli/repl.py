@@ -171,9 +171,39 @@ class _LiveStatus:
             f"[dim]step {step}[/dim]",
             f"[{activity_style}]{activity}[/{activity_style}] [dim]· {phase_elapsed:.1f}s[/dim]",
             f"[dim]turn:[/dim] [grey50]{turn_elapsed:.1f}s[/grey50]",
-            f"[grey50]{in_t}↓ {out_t}↑[/grey50]",
+            f"[grey50]{_token_label(in_t, out_t)}[/grey50]",
         )
         return table
+
+
+def _fallback_reason(error: str) -> str:
+    """Why the main model failed, in a few words (empty if unclear)."""
+    low = (error or "").lower()
+    if "413" in low or "too large" in low:
+        return " (request too large for its free limit)"
+    if "429" in low or "rate limit" in low:
+        return " (rate limit reached)"
+    if "401" in low or "403" in low:
+        return " (API key rejected)"
+    if "timed out" in low or "timeout" in low:
+        return " (timed out)"
+    if any(code in low for code in ("500", "502", "503", "504")):
+        return " (server error)"
+    return ""
+
+
+def _short_count(n: int) -> str:
+    return f"{n / 1000:.1f}K" if n >= 1000 else str(n)
+
+
+def _token_label(sent: int, received: int) -> str:
+    """Tokens sent to the model and received back, in words. Empty when the
+    model doesn't report them (the Claude and Codex apps) rather than 0."""
+    if not sent and not received:
+        return ""
+    if not sent:
+        return f"{_short_count(received)} tokens"
+    return f"{_short_count(sent)} tokens sent · {_short_count(received)} received"
 
 
 def _format_args(name: str, args: dict) -> tuple[str, str]:
@@ -252,10 +282,10 @@ class _ToolCallRenderer:
                         highlight=False,
                     )
                 else:
+                    tokens = _token_label(in_t, out_t)
+                    tokens = f"{tokens} · " if tokens else ""
                     self.con.print(
-                        f"[dim]  ↳ step {step} done · "
-                        f"[cyan]{in_t}↓[/cyan] [magenta]{out_t}↑[/magenta] tokens · "
-                        f"{elapsed:.1f}s[/dim]",
+                        f"[dim]  ↳ step {step} done · {tokens}{elapsed:.1f}s[/dim]",
                         highlight=False,
                     )
             elif ev.kind == "tool_start":
@@ -313,9 +343,10 @@ class _ToolCallRenderer:
                 # transient enough that it doesn't dominate the screen.
                 primary = ev.meta.get("primary", "primary")
                 fallback = ev.meta.get("fallback", "fallback")
+                reason = _fallback_reason(ev.meta.get("error", ""))
                 self.con.print(
-                    f"\n[yellow]⚠ {primary} unavailable — switching to "
-                    f"{fallback} for this turn.[/yellow]",
+                    f"\n[yellow]⚠ {primary} didn't answer{reason} — "
+                    f"using backup {fallback} for this turn.[/yellow]",
                     highlight=False,
                 )
             elif ev.kind == "subagent":
@@ -608,7 +639,6 @@ def _make_status_bar(agent, get_voice_state):
         # gauge for how much the conversation has used.
         tok_in = getattr(agent, "session_tokens_in", 0)
         tok_out = getattr(agent, "session_tokens_out", 0)
-        tok_total = tok_in + tok_out
 
         def _fmt_tok(n: int) -> str:
             if n < 1000:
@@ -639,8 +669,8 @@ def _make_status_bar(agent, get_voice_state):
             f" <ansigray>◆</ansigray> <ansigray>{_esc(label)}</ansigray>"
             f"  <ansigray>·</ansigray>  <ansigray>voice {voice_state}</ansigray>"
             f"  <ansigray>·</ansigray>  <ansigray>{boss_state}</ansigray>"
-            f"  <ansigray>·</ansigray>  <ansigray>"
-            f"{_fmt_tok(tok_in)}↓ {_fmt_tok(tok_out)}↑ ({_fmt_tok(tok_total)})</ansigray>"
+            f"  <ansigray>·</ansigray>  <ansigray>tokens "
+            f"{_fmt_tok(tok_in)} sent · {_fmt_tok(tok_out)} received</ansigray>"
             + (f"  <ansigray>·</ansigray>  <ansigray>{fb_text}</ansigray>" if fb_text else "")
             + "  <ansigray>·</ansigray>  <ansigray>/help /tools /voice /model /quit</ansigray>"
         )
@@ -851,7 +881,7 @@ def start_repl(resume_session: str | None = None):
                 turn_elapsed = _t.monotonic() - turn_t0
                 if turn_in or turn_out:
                     console.print(
-                        f"  [dim]· {turn_in}↓ {turn_out}↑ tokens · {turn_elapsed:.1f}s[/dim]",
+                        f"  [dim]· {_token_label(turn_in, turn_out)} · {turn_elapsed:.1f}s[/dim]",
                         highlight=False,
                     )
                 console.print("")
