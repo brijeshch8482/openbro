@@ -824,7 +824,9 @@ def _handle_command(cmd: str, agent: Agent) -> bool:
         _show_model(agent)
         return True
 
-    if cmd_lower.startswith("model "):
+    # `model add/remove/switch/list` are handled further down; everything
+    # else after "model " is a provider or model to switch to.
+    if cmd_lower.startswith("model ") and cmd_lower.split()[1] not in _MODEL_SUBCOMMANDS:
         _switch_model(cmd[6:].strip(), agent)
         return True
 
@@ -1229,8 +1231,9 @@ def _show_help():
     table.add_row("help", "Show this help")
     table.add_row("config", "Show current configuration")
     table.add_row("config set <key> <val>", "Update config (e.g. config set llm.provider openai)")
-    table.add_row("model", "Show current LLM model")
-    table.add_row("model <name>", "Switch model (e.g. model gpt-4o)")
+    table.add_row("model", "Show the running LLM, its backup, and what you can switch to")
+    table.add_row("model <provider>", "Switch LLM: claude, codex, groq, google, local, …")
+    table.add_row("model <model-id>", "Change the model of the current provider")
     table.add_row("tools", "List available tools")
     table.add_row("playbooks", "List pre-built workflows (0 LLM tokens when matched)")
     table.add_row("jobs / tasks", "Show running + recent background jobs")
@@ -1334,34 +1337,113 @@ def _set_config(args: str):
     console.print(f"[green]Set {key_path} = {value}[/green]\n")
 
 
+_MODEL_SUBCOMMANDS = {"add", "remove", "rm", "switch", "list", "ls"}
+
+# Providers `/model <name>` can switch to, with what each one needs.
+SWITCHABLE_PROVIDERS = {
+    "claude": "Claude subscription via the `claude` CLI",
+    "codex": "ChatGPT subscription via the `codex` CLI",
+    "groq": "Groq API key (free tier)",
+    "google": "Google AI Studio API key (free tier)",
+    "anthropic": "Anthropic API key",
+    "openai": "OpenAI API key",
+    "deepseek": "DeepSeek API key",
+    "local": "offline model on this computer (`openbro model download …`)",
+}
+
+
+def _provider_ready(name: str, config: dict) -> bool:
+    """Whether `name` looks usable: its CLI is installed, key set, or model downloaded."""
+    import shutil
+
+    providers = config.get("providers", {}) or {}
+    if name in ("claude", "codex"):
+        binary = (providers.get(name) or {}).get("binary", name)
+        return shutil.which(binary) is not None
+    if name == "local":
+        try:
+            from openbro.utils.local_llm_setup import list_installed
+
+            return bool(list_installed())
+        except Exception:
+            return False
+    return bool((providers.get(name) or {}).get("api_key"))
+
+
+def _model_status_lines(agent: Agent, config: dict) -> list[str]:
+    """What `/model` prints: running provider, backup, last answer, choices."""
+    from openbro.llm.fallback_provider import FallbackProvider
+
+    provider = agent.provider
+    lines = []
+    if isinstance(provider, FallbackProvider):
+        lines.append(f"[cyan]Main:[/cyan]   {provider.primary.name()}")
+        backup = provider.fallback.name()
+        lines.append(f"[cyan]Backup:[/cyan] {backup}  [dim](used if main fails)[/dim]")
+        if getattr(provider, "_last_primary_response", None) is not None or provider.fallback_count:
+            last = provider.primary if provider.last_used == "primary" else provider.fallback
+            lines.append(f"[cyan]Last answer from:[/cyan] {last.name()}")
+    else:
+        lines.append(f"[cyan]Main:[/cyan]   {provider.name()}")
+    current = (config.get("llm", {}) or {}).get("provider", "")
+    lines.append("")
+    lines.append("[bold]Switch with[/bold] /model <name>:")
+    for name, what in SWITCHABLE_PROVIDERS.items():
+        mark = "[green]✓[/green]" if _provider_ready(name, config) else "[dim]·[/dim]"
+        here = "  [cyan]← current[/cyan]" if name == current else ""
+        lines.append(f"  {mark} {name:<9} [dim]{what}[/dim]{here}")
+    lines.append(
+        "[dim]✓ = ready on this computer. To change only the model of the "
+        "current provider: /model <model-id>[/dim]"
+    )
+    return lines
+
+
 def _show_model(agent: Agent):
-    console.print(f"[cyan]Current model:[/cyan] {agent.provider.name()}\n")
+    for line in _model_status_lines(agent, load_config()):
+        console.print(line)
+    console.print()
 
 
 def _switch_model(model_name: str, agent: Agent):
+    from openbro.llm.router import create_provider
+
     config = load_config()
-
-    # Check if it's a provider switch (e.g. "anthropic" or "openai")
-    if model_name in ("local", "ollama", "anthropic", "openai", "groq", "google", "deepseek"):
-        # 'ollama' kept as alias — both route to the in-process local engine
-        if model_name == "ollama":
-            model_name = "local"
-        config["llm"]["provider"] = model_name
+    name = model_name.strip()
+    if name.lower() in ("ollama",):  # old alias for the local engine
+        name = "local"
+    is_provider = name.lower() in SWITCHABLE_PROVIDERS
+    if is_provider:
+        name = name.lower()
+        try:
+            new_provider = create_provider(name)
+        except Exception as e:
+            # Leave config and the running provider untouched.
+            console.print(f"[red]Can't switch to {name}:[/red] {e}")
+            console.print(f"[dim]Needs: {SWITCHABLE_PROVIDERS[name]}[/dim]\n")
+            return
+        config["llm"]["provider"] = name
         save_config(config)
-        agent.provider = __import__(
-            "openbro.llm.router", fromlist=["create_provider"]
-        ).create_provider(model_name)
-        console.print(
-            f"[green]Switched to provider: {model_name} ({agent.provider.name()})[/green]\n"
-        )
-    else:
-        # Just change the model name
-        config["llm"]["model"] = model_name
-        save_config(config)
-        from openbro.llm.router import create_provider
+        agent.provider = new_provider
+        console.print(f"[green]Switched to {name}[/green] — now running {agent.provider.name()}\n")
+        return
 
+    # A model id for the current provider (e.g. /model openai/gpt-oss-20b on groq).
+    import copy
+
+    before = copy.deepcopy(config)
+    current = (config.get("llm", {}) or {}).get("provider", "")
+    config["llm"]["model"] = name
+    if current in ("groq", "google", "anthropic", "openai", "deepseek"):
+        config.setdefault("providers", {}).setdefault(current, {})["model"] = name
+    save_config(config)
+    try:
         agent.provider = create_provider()
-        console.print(f"[green]Switched model to: {agent.provider.name()}[/green]\n")
+    except Exception as e:
+        save_config(before)  # put everything back
+        console.print(f"[red]Can't use model {name}:[/red] {e}\n")
+        return
+    console.print(f"[green]Switched model[/green] — now running {agent.provider.name()}\n")
 
 
 def _show_tools(agent: Agent):
