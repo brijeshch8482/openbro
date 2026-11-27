@@ -62,14 +62,14 @@ def _friendly_error(e: Exception) -> str:
             # to collapse spaces around them, mangling the error
             # text into 'instantin organizationordiya' etc.
             return (
-                "⏱️ Cloud aur local dono temporarily reach nahi ho paaye.\n"
-                f"  Cloud ({e.primary}): {e.primary_error[:120]}\n"
-                f"  Local ({e.fallback}): {e.fallback_error[:120]}\n"
+                "⏱️ Neither the primary nor the fallback model could be reached.\n"
+                f"  Primary ({e.primary}): {e.primary_error[:120]}\n"
+                f"  Fallback ({e.fallback}): {e.fallback_error[:120]}\n"
                 "\n"
                 "Fix options:\n"
-                "  • 30-60 sec ruk ke phir try kar — cloud usually recovers\n"
-                "  • /recap se goal state dekh\n"
-                "  • Local model swap kar (openbro config set "
+                "  • Wait 30-60 seconds and try again — it usually recovers\n"
+                "  • Run /recap to see where the task stands\n"
+                "  • Switch the local model (openbro config set "
                 "providers.local.model <name>) — bigger context helps"
             )
     except ImportError:
@@ -80,9 +80,9 @@ def _friendly_error(e: Exception) -> str:
     # Auth — recoverable by setting API key
     if "401" in msg or "unauthorized" in low or "invalid api key" in low:
         return (
-            "❌ API key invalid hai bhai.\n"
+            "❌ The API key is invalid.\n"
             "   Fix: `openbro config set providers.groq.api_key gsk_YOUR_KEY`\n"
-            "   Naya key: https://console.groq.com/keys"
+            "   Get a new key: https://console.groq.com/keys"
         )
     # Rate / quota — wait or switch model
     if (
@@ -94,8 +94,8 @@ def _friendly_error(e: Exception) -> str:
         or "request too large" in low
     ):
         return (
-            "⏱️  Rate limit hit ho gaya — saare fallback models bhi exhausted.\n"
-            "   Fix: 30-60 sec ruk OR `openbro config set providers.groq.model "
+            "⏱️  Rate limit reached, and every fallback model is exhausted too.\n"
+            "   Fix: wait 30-60 seconds, or `openbro config set providers.groq.model "
             "llama-3.3-70b-versatile` (looser cap)."
         )
     # Network — likely offline
@@ -107,15 +107,15 @@ def _friendly_error(e: Exception) -> str:
         or "getaddrinfo" in low
     ):
         return (
-            "🌐 LLM se connect nahi ho pa raha bhai.\n"
-            "   Fix: internet check kar; ya offline use kar — `openbro --offline` "
-            "(local llama.cpp model chahiye, `openbro model download llama3.1:8b`)."
+            "🌐 Could not connect to the LLM.\n"
+            "   Fix: check your internet connection, or go offline with `openbro --offline` "
+            "(needs a local model: `openbro model download llama3.1:8b`)."
         )
     # Tool call schema mismatch — model generated bad args
     if "tool call validation failed" in low or "failed to parse tool call" in low:
         return (
-            "🔧 Model ne tool ko galat call kiya (schema mismatch).\n"
-            "   Try same query phir se — agent ka fallback chain dusra model try karega.\n"
+            "🔧 The model called a tool with the wrong arguments (schema mismatch).\n"
+            "   Try the same request again — the fallback chain will use another model.\n"
             f"   Raw: {msg[:200]}"
         )
     # Catch-all — show type + message so it's debuggable
@@ -278,10 +278,7 @@ class Agent:
         """
         parts = [
             self.base_system_prompt,
-            (
-                f"\nTere paas ye tools available hai: {self.tool_names}. "
-                "Zaroorat padne pe inhe use kar."
-            ),
+            f"\nTools available to you: {self.tool_names}. Use them whenever the task needs them.",
             self._world_facts_block(),
             self._intent_check_block(),
             self._instructions_block(),

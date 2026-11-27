@@ -55,7 +55,7 @@ def _migrate_config(config: dict) -> dict:
         "ek helpful AI bro",
         "a helpful AI assistant",
         "ek helpful AI assistant",
-        # First Claude-Code-style prompt — too soft, model wrote code as
+        # An earlier default prompt — too soft, model wrote code as
         # chat text instead of calling python tool. Force-upgrade to the
         # ruthless version that forbids code-in-chat.
         "first try writing the smallest correct code",
@@ -460,9 +460,9 @@ def default_config() -> dict:
                 "hello bro",
             ],
             "ack_phrases": [
-                "Yes bro, bolo.",
-                "Yes boss, boliye.",
-                "Ji sir, main sun raha hoon.",
+                "Yes, I'm listening.",
+                "Go ahead.",
+                "I'm listening.",
             ],
             # Spoken stop phrases for continuous mode — say one of these and
             # the listener exits without typing anything in the REPL.

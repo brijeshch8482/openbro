@@ -75,7 +75,7 @@ def run_voice_mode():
     console.print("[bold cyan]Voice mode active.[/bold cyan]")
     if listener.mode == "continuous":
         console.print(
-            "[dim]Continuous mode — har baat command hai. "
+            "[dim]Continuous mode — everything you say is a command. "
             f"Permission: {gate.mode}. Stop: 'voice off' / 'bye bro' / Ctrl+C.[/dim]\n"
         )
     else:

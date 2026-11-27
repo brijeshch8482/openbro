@@ -154,7 +154,7 @@ def remove_model(name: str) -> bool:
 
     if (provider, model) == current:
         if not Confirm.ask(
-            f"Yeh tera active model hai ({provider}/{model}). Remove karna hai?",
+            f"{provider}/{model} is your active model. Remove it anyway?",
             default=False,
         ):
             return False
@@ -197,7 +197,7 @@ def switch_model(name: str, prompt_remove_old: bool = True) -> bool:
 
         path = find_installed_match(new_model)
         if not path:
-            if Confirm.ask(f"{new_model} not downloaded. Download abhi karu?", default=True):
+            if Confirm.ask(f"{new_model} is not downloaded. Download it now?", default=True):
                 if not add_model(name):
                     return False
                 path = find_installed_match(new_model)
@@ -230,8 +230,8 @@ def switch_model(name: str, prompt_remove_old: bool = True) -> bool:
         if old_path and old_path.exists():
             size_gb = old_path.stat().st_size / 1e9
             if Confirm.ask(
-                f"Purana model '{old_model}' ({size_gb:.1f} GB) disk pe hai. "
-                "Free karne ke liye delete karu?",
+                f"The previous model '{old_model}' ({size_gb:.1f} GB) is still on disk. "
+                "Delete it to free the space?",
                 default=False,
             ):
                 try:

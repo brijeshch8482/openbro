@@ -72,16 +72,16 @@ class StickyNotesTool(BaseTool):
         try:
             # Universal Windows Platform protocol handler.
             subprocess.run(["cmd", "/c", "start", "", "ms-stickynotes:"], check=False)
-            return "Sticky Notes app khol diya."
+            return "Opened the Sticky Notes app."
         except Exception as e:
-            return f"App khol nahi paya: {e}"
+            return f"Could not open the app: {e}"
 
     def _list_notes(self) -> str:
         db = _db_path()
         if db is None:
             return (
-                "Sticky Notes DB nahi mila. Either app installed nahi hai "
-                "ya tu pehli baar khol raha hai (DB tab create hota hai)."
+                "Sticky Notes database not found. Either the app is not installed "
+                "or it has never been opened (it creates the database on first launch)."
             )
         try:
             # Open read-only so we don't disturb the app if it's open.
@@ -98,7 +98,7 @@ class StickyNotesTool(BaseTool):
             return f"DB read fail: {e}"
 
         if not rows:
-            return "Koi sticky note nahi mili."
+            return "No sticky notes found."
         out = [f"{len(rows)} sticky notes:"]
         for i, (text,) in enumerate(rows[:20], 1):
             snippet = (text or "").strip().replace("\n", " ")[:120]
@@ -123,8 +123,8 @@ class StickyNotesTool(BaseTool):
         self._open_app()
         preview = text[:60] + ("..." if len(text) > 60 else "")
         return (
-            f'Text clipboard pe copy kar diya ("{preview}") aur Sticky Notes khol diya. '
-            "Naya note me Ctrl+V se paste kar bhai."
+            f'Copied the text to the clipboard ("{preview}") and opened Sticky Notes. '
+            "Paste it into a new note with Ctrl+V."
         )
 
     def schema(self) -> dict:

@@ -23,6 +23,22 @@ def test_detect_hinglish():
     assert detect_language("kya tum mera kaam kar sakte ho") == "hinglish"
 
 
+def test_english_with_overlapping_words_stays_english():
+    # "to", "me", "do", "main", "bro" are Hinglish words too, but alone
+    # they must not flip an English message to Hinglish.
+    assert detect_language("have you tool to make image?") == "en"
+    assert detect_language("how are you bro?") == "en"
+    assert detect_language("tell me about this pdf") == "en"
+    assert detect_language("do you know the main reason") == "en"
+
+
+def test_hinglish_with_english_words():
+    assert detect_language("bro, flipkart se ek badhiya headphone search karke batao") == (
+        "hinglish"
+    )
+    assert detect_language("theek hai") == "hinglish"
+
+
 def test_detect_empty():
     assert detect_language("") == "en"
     assert detect_language("   ") == "en"

@@ -108,6 +108,10 @@ class Router:
     def _ensure_embedder(self):
         if self._embedder is not None:
             return
+        from openbro.utils.optional import sentence_transformers_usable  # noqa: PLC0415
+
+        if not sentence_transformers_usable():
+            raise ImportError("sentence-transformers with torch is needed for embedding routing")
         from sentence_transformers import SentenceTransformer  # noqa: PLC0415
 
         self._embedder = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")

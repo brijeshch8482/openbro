@@ -273,7 +273,7 @@ class PermissionGate:
 
     def _ask_voice(self, req: PermissionRequest) -> bool:
         question = (
-            f"Bhai, {req.tool} tool chalana hai. Risk {req.risk} hai. Permission du? Haan ya nahi?"
+            f"OpenBro wants to run the {req.tool} tool. Risk: {req.risk}. Allow it? Say yes or no."
         )
         if self.tts:
             self.tts.speak(question)
@@ -297,6 +297,6 @@ class PermissionGate:
                 Console().print(f"[dim]Heard: '{heard}' → {'YES' if decision else 'NO'}[/dim]")
                 return decision
             if self.tts:
-                self.tts.speak("Samjha nahi. Haan ya nahi bolo.")
+                self.tts.speak("Sorry, I did not catch that. Please say yes or no.")
         # Give up after retries → deny by default (safety)
         return False

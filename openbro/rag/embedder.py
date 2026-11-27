@@ -16,6 +16,8 @@ import math
 import threading
 from typing import Protocol
 
+from openbro.utils.optional import has_module, sentence_transformers_usable
+
 DEFAULT_MODEL = "intfloat/multilingual-e5-small"
 
 
@@ -46,18 +48,9 @@ class LocalEmbedder:
 
     @staticmethod
     def available() -> bool:
-        for mod in ("fastembed", "sentence_transformers"):
-            try:
-                __import__(mod)
-            except Exception:  # missing, or installed without its runtime (torch)
-                continue
-            if mod == "sentence_transformers":
-                try:
-                    __import__("torch")
-                except Exception:
-                    continue
-            return True
-        return False
+        # Look modules up instead of importing them: importing
+        # sentence_transformers without torch prints a warning to the terminal.
+        return has_module("fastembed") or sentence_transformers_usable()
 
     def _load(self):
         with self._lock:
@@ -73,18 +66,24 @@ class LocalEmbedder:
                 except Exception as e:  # not installed, or model not in its list
                     errors.append(f"fastembed: {e}")
             if self._model is None and self._backend in ("auto", "sentence-transformers"):
-                try:
-                    from sentence_transformers import (  # type: ignore[import-not-found]
-                        SentenceTransformer,
-                    )
-
-                    self._model = SentenceTransformer(self.model_id)
-                    self._kind = "st"
-                except Exception as e:
-                    errors.append(f"sentence-transformers: {e}")
+                if not sentence_transformers_usable():
+                    errors.append("sentence-transformers: not installed with torch")
+                else:
+                    self._load_sentence_transformers(errors)
             if self._model is None:
                 raise RuntimeError("no embedding backend could load: " + "; ".join(errors))
             self.dim = len(self._encode(["probe"])[0])
+
+    def _load_sentence_transformers(self, errors: list[str]) -> None:
+        try:
+            from sentence_transformers import (  # type: ignore[import-not-found]
+                SentenceTransformer,
+            )
+
+            self._model = SentenceTransformer(self.model_id)
+            self._kind = "st"
+        except Exception as e:
+            errors.append(f"sentence-transformers: {e}")
 
     def _encode(self, texts: list[str]) -> list[list[float]]:
         if self._kind == "fastembed":
