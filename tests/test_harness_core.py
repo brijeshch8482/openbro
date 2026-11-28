@@ -190,6 +190,34 @@ def test_text_provider_tool_calls_run_through_the_loop():
     assert assistant_call.tool_calls[0]["function"]["name"] == "echo"
 
 
+def test_unknown_tool_names_found():
+    from openbro.core.tool_protocol import unknown_tool_names
+
+    text = (
+        '<tool_call name="imagegen">{"prompt": "x"}</tool_call>'
+        '<tool_call>{"name": "echo", "arguments": {}}</tool_call>'
+        '<tool_call>{"name": "paint", "arguments": {}}</tool_call>'
+    )
+    assert unknown_tool_names(text, KNOWN) == ["imagegen", "paint"]
+    assert unknown_tool_names("no tags here", KNOWN) == []
+
+
+def test_text_provider_told_when_tool_does_not_exist():
+    # A model that calls a tool OpenBro lacks is told so and answers again;
+    # the raw tag never reaches the user.
+    agent, provider = _make_agent(
+        supports_tools=False,
+        replies=[
+            LLMResponse(content='<tool_call name="imagegen">{"prompt": "sunset"}</tool_call>'),
+            LLMResponse(content="I can't generate photos here."),
+        ],
+    )
+    out = agent.chat("make a sunset photo")
+    assert out == "I can't generate photos here."
+    second = provider.chat.call_args_list[1].args[0]
+    assert any("no tool named imagegen" in (m.content or "") for m in second)
+
+
 def test_native_provider_gets_schemas_and_no_protocol_block():
     agent, provider = _make_agent(supports_tools=True, replies=[LLMResponse(content="ok")])
     assert "## TOOLS — how to call them" not in agent.history[0].content

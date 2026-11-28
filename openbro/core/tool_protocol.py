@@ -170,6 +170,23 @@ def parse_tool_calls(text: str, known_names: Iterable[str]) -> tuple[str, list[d
     return clean, calls
 
 
+def unknown_tool_names(text: str, known_names: Iterable[str]) -> list[str]:
+    """Tool names in `<tool_call>` tags that aren't registered tools, so the
+    model can be told they don't exist instead of the tag reaching the user."""
+    if not text or "<tool_call" not in text.lower():
+        return []
+    known = set(known_names)
+    names: list[str] = []
+    for m in _NAMED_RE.finditer(text):
+        names.append(m.group("name"))
+    for m in _BARE_RE.finditer(text):
+        payload = _load_json_object(m.group("body")) or {}
+        name = payload.get("name") or payload.get("tool")
+        if isinstance(name, str):
+            names.append(name)
+    return list(dict.fromkeys(n for n in names if n and n not in known))
+
+
 def render_transcript(messages) -> str:
     """Flatten a message list into one prompt string for CLI providers.
 

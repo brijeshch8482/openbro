@@ -179,3 +179,19 @@ def test_resume_hint_only_after_a_message(capsys):
     with repl.console.capture() as cap:
         repl._print_resume_hint(agent)
     assert "openbro --resume abc123def456" in cap.get()
+
+
+def test_token_label_in_words_and_hidden_when_unknown():
+    from openbro.cli.repl import _token_label
+
+    assert _token_label(0, 0) == ""  # Claude / Codex apps don't report them
+    assert _token_label(9300, 250) == "9.3K tokens sent · 250 received"
+    assert _token_label(0, 16350) == "16.4K tokens"
+
+
+def test_fallback_reason_explains_failure():
+    from openbro.cli.repl import _fallback_reason
+
+    assert "too large" in _fallback_reason("Error code: 413 - Request too large")
+    assert "rate limit" in _fallback_reason("429 Too Many Requests")
+    assert _fallback_reason("something odd") == ""
