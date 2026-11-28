@@ -1,6 +1,6 @@
 """Sign-in detection + auto-login flow for external CLI agents.
 
-When the user says 'Claude se bolo X kar' (via voice or text), OpenBro:
+When the user says 'ask Claude to do X' (via voice or text), OpenBro:
   1. checks if the agent's CLI is signed in
   2. if not, runs the agent's login flow (or surfaces the URL for manual)
   3. then dispatches the actual task

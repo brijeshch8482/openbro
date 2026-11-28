@@ -288,11 +288,11 @@ def test_model_group_has_update_and_info():
     assert "info" in cmds
 
 
-def test_openbro_1b_in_catalog():
-    """The catalog includes openbro:1b so `openbro model download openbro:1b` works."""
-    from openbro.utils.local_llm_setup import MODELS
+def test_unpublished_openbro_model_not_in_catalog():
+    """OpenBro ships no model of its own, so the catalogue must not offer
+    the unpublished openbro:1b, and the recommended default is a real model."""
+    from openbro.utils.local_llm_setup import DEFAULT_MODEL, MODELS
 
-    assert "openbro:1b" in MODELS
-    info = MODELS["openbro:1b"]
-    assert info["repo"] == "brijeshch8482/openbro-1b-instruct"
-    assert info["file"] == "openbro.gguf"
+    assert "openbro:1b" not in MODELS
+    assert all(info["file"] != "openbro.gguf" for info in MODELS.values())
+    assert DEFAULT_MODEL in MODELS

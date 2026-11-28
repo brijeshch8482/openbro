@@ -1,4 +1,10 @@
-# OpenBro Custom Model Training
+# OpenBro Custom Model Training (experimental)
+
+> **Status: experimental, not shipped.** OpenBro is an agent: it runs
+> offline GGUF models (Llama, Mistral, Gemma, …) or online APIs, and
+> does not ship a model of its own. This pipeline is kept for
+> experiments; `openbro train` and `openbro model update` are hidden
+> from `--help`, and no `openbro.gguf` is published.
 
 This document describes the custom-model training pipeline that produces
 `openbro.gguf` — OpenBro's specialized fine-tuned LLM, optimized for

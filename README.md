@@ -4,9 +4,9 @@
 
 **An open-source personal AI agent that runs on your own computer.**
 
-Talk to it in English, Hindi or Hinglish — by terminal, voice or Telegram —
+Give it a task in plain language — from the terminal, by voice or over Telegram —
 and it does the work: opens apps, manages files, searches your documents,
-browses, runs commands, and remembers what matters.
+operates websites, runs commands, and remembers what matters.
 
 [![CI](https://github.com/brijeshch8482/openbro/actions/workflows/ci.yml/badge.svg)](https://github.com/brijeshch8482/openbro/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10%E2%80%933.13-blue)](https://www.python.org/)
@@ -14,7 +14,7 @@ browses, runs commands, and remembers what matters.
 [![Version](https://img.shields.io/badge/version-1.1.0-orange)](CHANGELOG.md)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-[Quick start](#quick-start) · [Using OpenBro](#using-openbro) · [Your documents](#your-documents) · [How it works](#how-it-works) · [Safety](#safety-and-control) · [Docs](docs/)
+[At a glance](#at-a-glance) · [Quick start](#quick-start) · [Using OpenBro](#using-openbro) · [Your documents](#your-documents) · [How it works](#how-it-works) · [Safety](#safety-and-control) · [Docs](docs/)
 
 </div>
 
@@ -26,18 +26,30 @@ browses, runs commands, and remembers what matters.
 - **An agent, not a chat window.** It plans and acts through tools — files, apps, shell, Python, web, documents, screenshots, system controls — and keeps going until the task is done.
 - **Any model.** Free cloud tiers (Groq, Google Gemini), paid APIs (OpenAI, Anthropic, DeepSeek), subscription CLIs you already use, or a fully offline model running in-process.
 - **You stay in charge.** Risky actions ask first. Add your own allow/ask/deny rules and hook scripts. Every tool call is written to an audit log.
-- **Speaks your language.** Replies in the language you write in — English, हिंदी or Hinglish — by text or voice.
+- **Multilingual.** Replies in the language the user writes in (English, Hindi and mixed Hindi-English are supported), by text or voice.
 
 ```text
-You > D drive ke fees folder me jo receipts hain unka total bata
-Bro: Rs 48,200 across 3 receipts — march.pdf (45,000), lab.pdf (2,400), library.pdf (800).
+You     > What is the total of the receipts in the fees folder on my D drive?
+OpenBro > Rs 48,200 across 3 receipts — march.pdf (45,000), lab.pdf (2,400), library.pdf (800).
 
-You > chrome khol aur youtube pe "lofi beats" search kar
-Bro: Done — YouTube results for "lofi beats" are open in Chrome.
+You     > Open Chrome and search YouTube for "lofi beats".
+OpenBro > Done — YouTube results for "lofi beats" are open in Chrome.
 
-You > yaad rakh, mujhe short replies pasand hain
-Bro: Noted. I'll keep answers short.
+You     > Remember that I prefer short replies.
+OpenBro > Noted. I'll keep answers short.
 ```
+
+---
+
+## At a glance
+
+| | |
+|---|---|
+| **What** | A local-first autonomous AI agent with a tool-calling harness, memory, document search (RAG), browser automation, voice and a public web demo |
+| **Language** | Python 3.10–3.13 · ~33k lines of code · ~10k lines of tests (840+ tests, CI on every pull request) |
+| **Models** | Offline GGUF models via llama.cpp, Groq, Google Gemini, OpenAI, Anthropic, DeepSeek, and subscription CLIs — with automatic fallback |
+| **Key libraries** | Rich and prompt_toolkit (terminal UI), SQLite with full-text search and fastembed (hybrid retrieval), Playwright (browser control), FastAPI (web demo), faster-whisper (speech), MCP |
+| **Engineering** | Agent loop for native and text-only tool calling, context compaction, lossless transcripts, sub-agents, permission rules and hooks, audit log, Docker and Render deployment |
 
 ---
 
@@ -144,7 +156,7 @@ Just type what you want. OpenBro picks the tools, asks before anything risky, an
 ```bash
 openbro                         # start chatting
 openbro --resume                # continue the last session (exactly where you left off)
-openbro ask "kitne PDF desktop pe hain?"   # one question, no chat
+openbro ask "How many PDFs are on my desktop?"   # one question, no chat
 openbro --voice                 # voice mode
 openbro --telegram              # run as your Telegram bot
 openbro --offline               # force the local model
@@ -161,15 +173,15 @@ openbro doctor | update | uninstall
 Point OpenBro at your folders and ask questions about what's inside them.
 
 ```text
-You > docs add D:/Documents
+You     > docs add D:/Documents
 ✓ D:/Documents: 214 new, 0 updated, 0 unchanged (3 skipped)
 
-You > is saal ki fee receipts me total kitna diya?
-Bro: Rs 48,200 (fees/march.pdf p.1, fees/lab.pdf p.1, fees/library.pdf p.2)
+You     > How much did I pay in fees this year?
+OpenBro > Rs 48,200 (fees/march.pdf p.1, fees/lab.pdf p.1, fees/library.pdf p.2)
 ```
 
 - **Formats:** PDF (scans via OCR), Word, Excel, CSV, Markdown, text, HTML, JSON/YAML, code, and images with OCR.
-- **Search:** keyword search (exact names, numbers like `INV-2041`, Hinglish words) **plus** meaning-based search ("payment acknowledgement" matches "fee receipt"), merged into one ranked list. Without the `rag` extra it runs on keywords alone.
+- **Search:** keyword search (exact names, numbers like `INV-2041`, transliterated words) **plus** meaning-based search ("payment acknowledgement" matches "fee receipt"), merged into one ranked list. Without the `rag` extra it runs on keywords alone.
 - **Stays current:** only new or changed files are re-indexed; deleted files drop out. Folders are re-scanned in the background when OpenBro starts.
 - **Your files are never moved or changed.** Folders are indexed in place. `docs upload <file>` copies a file into OpenBro's own library instead.
 - **Answers cite their source** — file, page and heading.
@@ -194,8 +206,8 @@ The index is one SQLite file at `<storage>/docs/index.db`. Design: [docs/RAG.md]
 OpenBro can operate websites for you in a real browser window — search inside a site, fill a form, follow links, read what's behind the navigation.
 
 ```text
-You > flipkart pe 20000 ke andar best rated earbuds dhoondh, top 3 bata
-Bro: Top rated under Rs 20,000: … (opened the results, sorted by rating, read the first page)
+You     > Find the best-rated earbuds under Rs 20,000 on Flipkart and give me the top 3.
+OpenBro > Top rated under Rs 20,000: … (opened the results, sorted by rating, read the first page)
 ```
 
 - It sees each page as a numbered list of links, buttons and fields, acts by number, and gets the updated page back after every step.
@@ -240,7 +252,7 @@ Each visitor has a separate, unsaved conversation. Limits keep a free API key al
 
 ```markdown
 # OPENBRO.md
-- Reply in Hinglish, 1–3 lines.
+- Keep replies to 1–3 lines.
 - My code lives on D:/code. Never touch C:/Windows.
 ```
 
@@ -341,6 +353,8 @@ hooks:
 
 ## Models
 
+OpenBro is the agent, not a model: it runs on an offline model on your computer or on an online API you choose, and you can switch at any time with `/model`.
+
 | Provider | Cost | Setup |
 |---|---|---|
 | **Local (offline)** | free | the wizard downloads a model; runs in-process |
@@ -359,7 +373,7 @@ Set a fallback so a failed call retries on another model: `openbro config set ll
 
 ## Voice, phone and more
 
-**Voice** — `openbro --voice` or `voice on`. Offline speech recognition, natural Indian English and Hindi voices, continuous listening (or a wake word: `voice.mode wake_word`). Permission questions are asked out loud: answer *haan* or *nahi*.
+**Voice** — `openbro --voice` or `voice on`. Offline speech recognition, natural Indian English and Hindi voices, continuous listening (or a wake word: `voice.mode wake_word`). Permission questions are asked out loud and answered with a spoken yes or no (English or Hindi).
 
 **Telegram** — chat from your phone: set `channels.telegram.token` and `allowed_users`, then `openbro --telegram`. Each user gets separate memory; dangerous tools are blocked there.
 
@@ -367,7 +381,6 @@ Set a fallback so a failed call retries on another model: `openbro config set ll
 
 **Coding CLIs** — "ask the coding CLI to add a test for X": `cli_agent` drives a coding CLI installed on your machine, streams its progress, and enforces a per-call and daily cost cap (`safety.cli_agent`).
 
-**Your own model** — `openbro train` (maintainers) builds a small fine-tuned `openbro.gguf`; `openbro model update` pulls the latest. See [docs/TRAINING.md](docs/TRAINING.md).
 
 ---
 
@@ -446,7 +459,7 @@ openbro/
   llm/           model providers and fallback
   cli/           chat, wizard, doctor / update / uninstall
   voice/ channels/ skills/ mcp/ orchestration/ training/
-docs/            HARNESS.md · RAG.md · MEMORY.md · ARCHITECTURE.md · TRAINING.md
+docs/            HARNESS.md · RAG.md · MEMORY.md · ARCHITECTURE.md · DEPLOY.md
 scripts/         installers and uninstallers
 tests/
 ```

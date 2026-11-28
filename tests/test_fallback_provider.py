@@ -385,9 +385,7 @@ def test_router_local_fallback_falls_back_to_default_when_unset(monkeypatch):
         },
     }
 
-    # Make sure the live openbro.gguf isn't on disk for this test run
-    # — otherwise the auto-prefer branch added in commit dfa5a58 picks
-    # it up first and the assertion below changes meaning.
+    # Keep the test independent of whatever GGUF files are on disk.
     class _NoGGUF:
         def __truediv__(self, _name):
             class _Q:

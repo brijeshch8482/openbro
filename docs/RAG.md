@@ -103,7 +103,7 @@ Entry points — **v1 is terminal-first**:
 | Way | Command / action | Kind | Phase |
 |---|---|---|---|
 | Terminal | `/docs add D:/Documents/fees` (drag a file onto the terminal to paste its path) | in place | v1 |
-| Chat / voice | "D drive ka fees folder yaad rakh le" → model calls `docs` `action=add` | in place | v1 |
+| Chat / voice | "Remember the fees folder on the D drive" → model calls `docs` `action=add` | in place | v1 |
 | Library folder | `/docs open` opens `docs/library/` in Explorer; anything copied there is indexed | upload | v1 |
 | Telegram | send a PDF or photo to the bot → stored as an upload, then indexed | upload | v2 (server) |
 

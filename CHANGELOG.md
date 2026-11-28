@@ -4,6 +4,8 @@ All notable changes to OpenBro are tracked here.
 
 ## [Unreleased]
 
+- **OpenBro is an agent, not a model.** It runs offline GGUF models or online APIs and ships no model of its own. The unpublished `openbro:1b` catalogue entry and the `openbro.gguf` auto-preference are removed; Llama 3.2 3B stays the recommended offline model. The experimental training pipeline (`openbro train`, `openbro model update`) is kept but hidden from `--help`; `docs/TRAINING.md` and `docs/SPECIALISTS.md` are marked experimental.
+- **Professional English throughout.** The default agent prompt, setup-wizard personalities, visible messages, code comments, README and docs are now in professional English. The agent still replies in the user's language, and Hindi/Hinglish input is still understood. Saved configs with the old Hinglish default prompt are upgraded automatically; custom prompts are kept.
 - **Codex works as the model only.** OpenBro ran `codex exec` as a full agent with its own shell, image generator, web search and file tools. When Codex was the backup, it made images into its hidden `~/.codex/generated_images` folder: OpenBro never saw a tool step, never asked permission, and couldn't say where the file was. Codex now runs read-only, with its built-in tools and web search switched off (feature names this Codex version doesn't know are dropped automatically). It is told to act through OpenBro's `<tool_call>` tags.
 - **A call to a tool that doesn't exist is answered.** When a text-protocol model calls a tool OpenBro doesn't have, the model is told so once and answers again, instead of the raw tag reaching the user.
 - **Token counts in words.** `0↓ 0↑` is replaced by "9.3K tokens sent · 250 received", and it is hidden when the model doesn't report counts (the Claude and Codex apps). Codex's count is read again: newer CLIs print it on stderr.
@@ -39,7 +41,7 @@ All notable changes to OpenBro are tracked here.
 - README rewritten; design docs in `docs/HARNESS.md`, `docs/RAG.md`, `docs/MEMORY.md`.
 - Server-ready storage: transcripts, memories and the document index sit behind a local backend; `storage.backend: remote` is reserved for the upcoming OpenBro server.
 
-## [Unreleased] — Custom model training pipeline
+## [Unreleased] — Custom model training pipeline (experimental, not shipped)
 
 **Headline: `openbro train` builds your own `openbro.gguf` from public web data.**
 
@@ -76,7 +78,7 @@ A complete maintainer pipeline + end-user distribution layer for shipping a cust
 **Boss-mode permissions**
 
 - `core/permissions.py`: `PermissionGate` with 3 modes (`normal` / `boss` / `auto`) and 3 channels (`cli` / `voice` / `silent`).
-- Voice channel: TTS asks "haan ya nahi?", parses yes/no across Hindi + English + Hinglish (negation always wins).
+- Voice channel: TTS asks for a yes/no answer and parses it across Hindi + English + Hinglish (negation always wins).
 - Per-tool "always allow / deny always" session memo. REPL: `boss` / `boss off`. Voice mode auto-enables Boss mode.
 
 **Language auto-match**

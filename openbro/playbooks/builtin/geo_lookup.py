@@ -60,7 +60,7 @@ class GeoLookupPlaybook(Playbook):
 
         # Templated response — single source of truth, no hallucination.
         lines = [
-            f"Tu **{city}, {region}, {country}** me hai. 📍",
+            f"You are in **{city}, {region}, {country}**. 📍",
             "",
             f"- **IP**: `{ip}`",
         ]
@@ -71,7 +71,7 @@ class GeoLookupPlaybook(Playbook):
         if org:
             lines.append(f"- **ISP**: {org}")
         lines.append("")
-        lines.append("_(IP-based, VPN ya proxy on ho to off ho sakta hai.)_")
+        lines.append("_(IP-based; may be inaccurate if a VPN or proxy is on.)_")
         return "\n".join(lines)
 
     @staticmethod

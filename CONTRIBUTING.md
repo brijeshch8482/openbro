@@ -1,6 +1,6 @@
 # Contributing to OpenBro
 
-Bhai, thanks for wanting to contribute! OpenBro is open source and built for the community.
+Thank you for your interest in contributing! OpenBro is open source and built for the community.
 
 ## Quick Start for Contributors
 

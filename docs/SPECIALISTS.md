@@ -1,4 +1,8 @@
-# OpenBro Specialist Tree
+# OpenBro Specialist Tree (experimental)
+
+> **Status: experimental, not shipped.** OpenBro runs offline GGUF
+> models or online APIs; this specialist design is a research
+> prototype and is not part of the released agent.
 
 > Tree-of-experts: one shared base model in VRAM + many small LoRA
 > adapters, one per knowledge category. A tiny router maps each prompt

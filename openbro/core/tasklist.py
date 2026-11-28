@@ -1,7 +1,7 @@
 """TaskList — ordered, status-tracked sub-tasks for multi-step work.
 
-When the user asks something that needs more than one step ("D drive me fee
-documents dhoondh aur sab open kar"), the agent breaks it into a TaskList,
+When the user asks something that needs more than one step ("find the fee
+documents on the D drive and open them all"), the agent breaks it into a TaskList,
 runs each step, and surfaces progress live. It gives the user a visible
 roadmap and lets the agent self-check that every step actually happened.
 """

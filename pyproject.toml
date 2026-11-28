@@ -33,8 +33,8 @@ dependencies = [
     "click>=8.0",
     "pydantic>=2.0",
     # Data analysis stack — needed for the python tool to comprehend
-    # tabular data. Captured 2026-05-31: user asked 'battery backup
-    # kitne ghante' over Excel time series; agent tried `import
+    # tabular data. Captured 2026-05-31: user asked 'how many hours
+    # of battery backup' over Excel time series; agent tried `import
     # pandas` and crashed ModuleNotFoundError, then the fallback
     # model denied the column existed. With pandas + openpyxl in
     # the runtime, the agent can actually compute deltas.
@@ -57,9 +57,9 @@ openai = ["openai>=1.50"]
 telegram = ["python-telegram-bot>=21.0"]
 training = [
     # Heavy ML stack for `openbro train`. NOT installed by default —
-    # only maintainers who run the custom-model fine-tune pipeline
-    # need these. End users who only `openbro model update` need just
-    # `huggingface_hub` which is already in [local].
+    # only maintainers experimenting with the (hidden) fine-tune
+    # pipeline need these. OpenBro itself ships no model; it runs
+    # offline GGUF models or online APIs.
     #
     # CUDA wheels: PyTorch publishes per-CUDA-version wheels at
     # https://download.pytorch.org/whl/cu121 (or cu118). Install via:

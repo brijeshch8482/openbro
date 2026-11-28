@@ -10,7 +10,7 @@ from openbro.utils.paths import resolve_user_path, resolve_with_candidates
 
 # Where to look when user gives a filename without a directory ("open aadhar"
 # or "open T&P fees"). Walked in order; first hit wins. Keeps the agent from
-# bailing out and asking the user "kya extension hai?" when the answer is on
+# bailing out and asking the user "what is the extension?" when the answer is on
 # the filesystem already.
 _COMMON_SEARCH_ROOTS = [
     Path.home() / "Desktop",
@@ -262,8 +262,8 @@ class FileTool(BaseTool):
         elif action == "open":
             # If the literal path doesn't exist, fuzzy-search before giving
             # up. User says "open T&P fees" — file_ops should find
-            # "T&P fees.pdf" and open it, not bail out asking "kya extension
-            # hai?". Real captured failure: user said the agent kept
+            # "T&P fees.pdf" and open it, not bail out asking "what is the
+            # extension?". Real captured failure: user said the agent kept
             # demanding ".pdf" when the unique match was right there.
             if not path.exists():
                 matches = _fuzzy_find(path)

@@ -63,8 +63,8 @@ class ElevateTool(BaseTool):
                         "description": (
                             "Short explanation of WHY "
                             "admin is needed (shown to user in UAC "
-                            "request). E.g. 'C:/Windows/Temp clean karne "
-                            "ke liye admin chahiye'."
+                            "request). E.g. 'Admin rights are needed "
+                            "to clean C:/Windows/Temp'."
                         ),
                     },
                     "timeout_seconds": {
