@@ -1,7 +1,7 @@
 """Voice mode entry point - mic in, TTS out, agent in middle.
 
 Voice mode enables Boss mode permissions by default, so every tool the
-agent wants to call gets a voice prompt ("Bhai, X tool chalau? Haan ya nahi?").
+agent wants to call gets a voice prompt ("Shall I run the X tool? Yes or no?").
 """
 
 from rich.console import Console

@@ -274,8 +274,8 @@ class _ToolCallRenderer:
                 # Args: dim, indented; syntax-highlight code, plain
                 # the rest. Long args get truncated for display only —
                 # the LLM still sent the full args. Captured 2026-06-20
-                # user ask: "code (bash) likhe max 3-4 line hi show ho
-                # aur hide rhe". For multi-line code args (python,
+                # user request: show at most 3-4 lines of code and keep
+                # the rest collapsed. For multi-line code args (python,
                 # powershell, shell scripts) we now cap at the same
                 # 4-line preview the assistant-response folder uses and
                 # spill the full body to a sidecar file so the user can
@@ -480,8 +480,8 @@ def _slash_command(text: str) -> str | None:
 _CODE_FENCE_RE = __import__("re").compile(
     r"```([a-zA-Z0-9_+\-]*)\n(.*?)```", __import__("re").DOTALL
 )
-# Captured 2026-06-20 user ask: "ye jo code (bash) likhe max 3-4 line
-# hi show ho aur hide rhe...shortcut de full view ke liye". Long code
+# Captured 2026-06-20 user request: show at most 3-4 lines of code and
+# offer a shortcut to the full view. Long code
 # fences in assistant replies overwhelm the chat; the renderer now
 # truncates anything over this threshold and spills the full body to
 # a sidecar file so the user can `code <path>` to see it.
@@ -1014,8 +1014,7 @@ def _handle_command(cmd: str, agent: Agent) -> bool:
     if cmd_lower in ("boss", "boss on"):
         agent.permissions.mode = "boss"
         console.print(
-            "[bold yellow]Boss mode ON.[/bold yellow] "
-            "Har tool call ke liye permission maangi jayegi."
+            "[bold yellow]Boss mode ON.[/bold yellow] Every tool call will ask for permission."
         )
         return True
 
@@ -2175,7 +2174,7 @@ def _start_voice(agent: Agent):
     # on_heard fires for EVERY transcript. In continuous mode every utterance
     # is treated as a command (has_wake=True), so we just echo what was heard.
     # In wake_word mode we explain why a non-matching transcript was ignored —
-    # the #1 voice complaint is "voice kaam nahi kar rha" which is usually a
+    # the #1 voice complaint is "voice is not working", which is usually a
     # wake-word miss, not a real bug.
     is_continuous = _voice_listener.mode == "continuous"
 
@@ -2320,7 +2319,7 @@ def _voice_test():
     console.print(
         "[dim]If that looks right, voice mode will work. "
         "Say 'hey openbro <command>' "
-        "(e.g. 'hey openbro notepad open kar') to use it.[/dim]"
+        "(e.g. 'hey openbro open notepad') to use it.[/dim]"
     )
 
 

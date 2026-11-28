@@ -155,10 +155,10 @@ class PermissionGate:
 
     def _ask_cli(self, req: PermissionRequest) -> bool:
         # Captured 2026-06-20 (TWO failures from the same user):
-        #   1. "isme yes no poocha hi nhi???" — text prompt missed.
-        #   2. "kai baar yes press kiya but nhi hua aur enter press
-        #       krte hi deny ho gya" + "dialog jaisa chat box ke uper
-        #       aaye yrr..arrow se select ho jaye?? up dn se".
+        #   1. "it never asked yes or no?" — text prompt missed.
+        #   2. "pressed yes several times but nothing happened, and
+        #       pressing Enter denied it" + "show a dialog above the
+        #       chat box, selectable with the up/down arrow keys".
         # Root cause for #2: Rich's Live spinner that drives the
         # `running elevate · 18.5s` status was sharing the terminal
         # with our blocking console.input — keystrokes got eaten by

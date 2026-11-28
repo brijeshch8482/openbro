@@ -63,8 +63,8 @@ DEFAULT_STOP_PHRASES = [
 # user is quiet, Whisper confidently emits one of these every few seconds.
 # Filtering them at the listener level prevents the agent from being
 # triggered by phantom commands. Exact-match check after stripping
-# punctuation/whitespace and lowercasing, so legitimate "thank you bhai
-# kar do" type commands still pass through.
+# punctuation/whitespace and lowercasing, so legitimate "thank you, now do X"
+# type commands still pass through.
 WHISPER_HALLUCINATIONS = {
     "thank you",
     "thanks",

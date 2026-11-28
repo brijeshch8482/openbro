@@ -1,6 +1,6 @@
 """ProcessCheckPlaybook — 'is X running?' answered without LLM round-trips.
 
-Captured failure: 'mere system me Claude run kr rha hai?' triggered 4 LLM
+Captured failure: 'is Claude running on my system?' triggered 4 LLM
 calls + 3 tool calls, ended with 'No claude process found' even though
 Claude was running as 8 PIDs inside node.exe. This playbook routes
 directly to the (already-fixed) process_tool find and templates the

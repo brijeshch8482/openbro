@@ -1,8 +1,8 @@
 """Unified CLI agent tool — delegate tasks to claude / codex / aider / gemini.
 
 The agent picks `cli_agent` whenever the user asks to delegate work to an
-external AI CLI ("Claude se bolo X kar", "Codex se ye refactor karwa de",
-"Aider se git commit ke saath ye change kar"). Each adapter handles its
+external AI CLI ("ask Claude to do X", "have Codex refactor this",
+"make this change with Aider and commit it"). Each adapter handles its
 own command syntax + output parsing.
 
 Cost guard: per-call cap + daily budget tracked per agent in
@@ -29,7 +29,7 @@ class CliAgentTool(BaseTool):
     description = (
         "Delegate a coding/automation task to an external AI CLI agent "
         "(Claude Code, Codex, Aider, Gemini). Use this when the user says "
-        "'Claude se bolo X kar', 'Codex se ye karwa', 'Aider se commit kar de', "
+        "'ask Claude to do X', 'have Codex do this', 'commit this with Aider', "
         "or for any task that needs another AI's help to read/edit files. "
         "Returns the CLI's summary plus list of files touched."
     )

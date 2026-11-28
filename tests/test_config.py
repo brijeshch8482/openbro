@@ -81,3 +81,27 @@ def test_voice_mode_migration_resets_unknown_value():
     legacy = {"voice": {"mode": "potato"}}
     migrated = _migrate_config(_merge_defaults(default_config(), legacy))
     assert migrated["voice"]["mode"] == "continuous"
+
+
+def test_config_migration_upgrades_old_hinglish_default_prompt():
+    """Configs that saved the earlier Hinglish stock prompt move to the
+    professional English default."""
+    legacy = {
+        "agent": {
+            "system_prompt": (
+                "Tu OpenBro hai — terminal-first autonomous AI agent.\n"
+                "## HARD RULES\n9. **NEVER 'I CAN'T VERIFY' FILLER.**"
+            )
+        }
+    }
+    migrated = _migrate_config(_merge_defaults(default_config(), legacy))
+    prompt = migrated["agent"]["system_prompt"]
+    assert prompt == default_config()["agent"]["system_prompt"]
+    assert "## PERSONALITY — PROFESSIONAL" in prompt
+    assert "Tu OpenBro" not in prompt
+
+
+def test_custom_prompt_is_kept():
+    custom = {"agent": {"system_prompt": "You are my coding helper."}}
+    migrated = _migrate_config(_merge_defaults(default_config(), custom))
+    assert migrated["agent"]["system_prompt"] == "You are my coding helper."

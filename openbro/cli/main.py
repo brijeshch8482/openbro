@@ -123,7 +123,7 @@ def main(
 def ask(query):
     """Ask one question, get one answer, exit. Non-interactive.
 
-    Example: openbro ask "kitne word files mere desktop par"
+    Example: openbro ask "how many Word files are on my desktop?"
     """
     user_input = " ".join(query)
     from openbro.core.agent import Agent

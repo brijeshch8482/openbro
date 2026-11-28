@@ -385,39 +385,36 @@ def _step_safety(config: dict):
 
 def _step_personality(config: dict):
     console.print("\n[bold yellow]Step 4:[/bold yellow] Personality\n")
-    console.print("  [cyan]1.[/cyan] Hinglish OpenBro (default - Hindi+English mix)")
-    console.print("  [cyan]2.[/cyan] English Professional")
-    console.print("  [cyan]3.[/cyan] Hindi")
+    console.print(
+        "  [cyan]1.[/cyan] Professional (default - full agent rules, replies in your language)"
+    )
+    console.print("  [cyan]2.[/cyan] Concise assistant (short, formal replies)")
+    console.print("  [cyan]3.[/cyan] Friendly assistant (warm, conversational tone)")
     console.print()
 
     personality = Prompt.ask("Select personality", choices=["1", "2", "3"], default="1")
 
+    if personality == "1":
+        # The stock prompt carries the full agent rules; keep it.
+        config["agent"]["system_prompt"] = default_config()["agent"]["system_prompt"]
+        return
+
     prompts = {
-        "1": (
-            "Tu OpenBro hai - ek fast, practical personal AI agent. "
-            "User ka kaam terminal-first tareeke se complete kar: browsing, "
-            "desktop/app control, mail, files, storage, coding, memory, aur "
-            "system tasks ke liye available tools use kar. Tone personal aur "
-            "bro wali feeling rakho: kabhi-kabhi 'yes bro', 'yes boss', "
-            "'ji sir' jaise short acknowledgements use kar sakta hai. "
-            "Fir bhi professional, concise, aur precise reh. Risky ya "
-            "destructive actions ke liye permission/sandbox rules follow kar."
-        ),
         "2": (
             "You are OpenBro, a fast, practical personal AI agent. Operate "
-            "terminal-first, use available tools for browsing, desktop/app "
-            "control, mail, files, storage, coding, memory, and system tasks, "
-            "and follow permission/sandbox rules for risky actions. Keep a "
-            "personal assistant feel with occasional short acknowledgements "
-            "like 'yes boss' or 'sir', while staying professional."
+            "terminal-first and use the available tools for browsing, desktop/app "
+            "control, mail, files, storage, coding, memory and system tasks. "
+            "Follow the permission and sandbox rules for risky or destructive "
+            "actions. Reply in the language the user writes in, in short, formal, "
+            "precise sentences."
         ),
         "3": (
-            "Tu OpenBro hai - ek tez, practical personal AI agent. "
-            "Terminal-first tareeke se kaam complete kar, zaroorat par tools "
-            "use kar, aur risky/destructive actions ke liye permission/sandbox "
-            "rules follow kar. Personal assistant wali feeling rakho: kabhi "
-            "'ji sir' ya 'yes boss' bol sakta hai. Hindi me short aur clear "
-            "jawab de."
+            "You are OpenBro, a fast, practical personal AI agent. Operate "
+            "terminal-first and use the available tools for browsing, desktop/app "
+            "control, mail, files, storage, coding, memory and system tasks. "
+            "Follow the permission and sandbox rules for risky or destructive "
+            "actions. Reply in the language the user writes in, with a warm, "
+            "conversational tone while staying concise and accurate."
         ),
     }
     config["agent"]["system_prompt"] = prompts[personality]
@@ -615,8 +612,8 @@ MCP_CATALOG = [
 def _step_mcp(config: dict):
     """Silently auto-install every MCP server in the catalogue.
 
-    Per user direction: 'Node.js jaise silently install kar deta, MCP bhi
-    waisa hi ho.' No questions, no picking. Online servers (fetch, github)
+    Per user direction: install MCP servers silently, the same way
+    Node.js is installed. No questions, no picking. Online servers (fetch, github)
     are auto-installed too — they sit idle when the user is offline and
     activate when there's connectivity. GitHub needs a token to be useful;
     we leave it blank and skip it at runtime if unset (no crash).

@@ -4,6 +4,7 @@ All notable changes to OpenBro are tracked here.
 
 ## [Unreleased]
 
+- **Professional English throughout.** The default agent prompt, setup-wizard personalities, visible messages, code comments, README and docs are now in professional English. The agent still replies in the user's language, and Hindi/Hinglish input is still understood. Saved configs with the old Hinglish default prompt are upgraded automatically; custom prompts are kept.
 - **No more tool loops — every provider sends structured tool history.** Gemini, OpenAI, DeepSeek and the local engine dropped the model's own tool calls from the history it was sent, so the model never saw that it had already acted and kept calling the same tool (9 identical image runs in one test); OpenAI and DeepSeek also rejected any 2-step tool task. A shared converter (`openbro/llm/wire.py`) now pairs every call and result by id (ids are made up for calls stored without one); Gemini gets real `functionCall` / `functionResponse` parts with thought signatures kept; local models see their calls as text. DeepSeek raises errors instead of returning them as the reply, so fallback works.
 - **Behaviour:** when a request leaves open what only the user can decide ("make an image" — of what?), the agent asks one short question with suggestions; once the work succeeded it stops and replies with what it made, where, and how to change it. New files go to the folder the user names (missing folders are created) or the current working folder — no longer the Desktop by default (saved prompts migrated).
 - **The agent names the right model:** each turn carries a RUNNING MODEL line read from the live provider, so "which model are you?" is answered correctly right after a `/model` switch. The old default prompt hard-coded "Groq pe Llama 4"; saved prompts have that one sentence replaced (other edits kept). Groq's name reports the model that actually answered after a failover, retired Groq models are skipped for the session, and saved configs naming a retired Groq model move to `gpt-oss-120b`.
@@ -72,7 +73,7 @@ A complete maintainer pipeline + end-user distribution layer for shipping a cust
 **Boss-mode permissions**
 
 - `core/permissions.py`: `PermissionGate` with 3 modes (`normal` / `boss` / `auto`) and 3 channels (`cli` / `voice` / `silent`).
-- Voice channel: TTS asks "haan ya nahi?", parses yes/no across Hindi + English + Hinglish (negation always wins).
+- Voice channel: TTS asks for a yes/no answer and parses it across Hindi + English + Hinglish (negation always wins).
 - Per-tool "always allow / deny always" session memo. REPL: `boss` / `boss off`. Voice mode auto-enables Boss mode.
 
 **Language auto-match**

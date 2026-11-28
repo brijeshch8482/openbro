@@ -25,9 +25,9 @@ STATUS_BLOCKS: list[tuple[str, str]] = [
     ("h1", "Current Implementation Status — May 2026"),
     (
         "p",
-        "Yeh section vision document ke top pe May 2026 me add kiya gaya — taaki reader "
-        "current as-built state pehle dekhe, phir long-term vision. Original vision unchanged "
-        "neeche se start hota hai.",
+        "This section was added to the top of the vision document in May 2026 so that "
+        "readers see the current as-built state first, then the long-term vision. The "
+        "original vision follows below, unchanged.",
     ),
     (
         "p",
@@ -284,7 +284,7 @@ STATUS_BLOCKS: list[tuple[str, str]] = [
         "p",
         "The original vision below proposed a phased v0.1 → v1.0 ramp over 10 weeks. "
         "Reality: built all advanced features at once on main per user direction "
-        "('phased rollout nahi, sab ek saath bana — ham advance test krenge'). Current "
+        "('no phased rollout — build everything together and test it in advance'). Current "
         "tag 1.0.0b1 maps roughly to:",
     ),
     (

@@ -14,7 +14,7 @@ What exists today (see `openbro/memory/`, `openbro/core/agent.py`,
 | Piece | Problem |
 |---|---|
 | `Agent._trim_history` | Cuts by **message count** (50). Can split an `assistant(tool_calls)` from its `tool` results → orphan `tool` message → 400 on strict APIs. Old context is dropped with no summary. |
-| `facts` table (key/value) | Only 20 newest facts injected, regardless of relevance. Flat key/value can't hold "why" or "how to apply". Written only when the user says "yaad rakh". |
+| `facts` table (key/value) | Only 20 newest facts injected, regardless of relevance. Flat key/value can't hold "why" or "how to apply". Written only when the user says "remember this". |
 | `MemoryManager._working` deque | Unused — the agent keeps its own `self.history`. |
 | `conversations` table | Stores only user/assistant text. Tool calls are lost, so `--resume` restores a lossy history. Search is `LIKE '%q%'`. |
 | `brain/memory.py` (SemanticMemory) + `brain/reflection.py` | Only called from `core/reasoning.py`, which nothing imports. Dead in the chat path. Separate DB file. |
@@ -219,7 +219,7 @@ memory:
 | **P2** | `notes.py` + FTS5, memory tool v2, ranked index injection, "when to save" principle, `facts` migration | 20-fact cap, flat facts |
 | **P3** | `instructions.py` (`OPENBRO.md`), `/memory edit` | no human-written instructions |
 | **P4** | Transcripts with tool calls, FTS over chats, summary-based resume, single connection | lossy resume, slow search |
-| **P5** | Auto-extract on session end, embeddings ranker, delete dead code | memory only on explicit "yaad rakh" |
+| **P5** | Auto-extract on session end, embeddings ranker, delete dead code | memory only on an explicit "remember this" |
 
 Each phase ships with tests (`tests/test_compaction.py`, `test_notes.py`,
 `test_instructions.py`, extend `test_memory.py`) and passes

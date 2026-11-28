@@ -39,7 +39,7 @@ class SystemTool(BaseTool):
 
         Defaults to enumerating EVERY drive on Windows (was: only '/', which
         resolves to the current working drive — so a user sitting in D:\\
-        and asking 'C drive me kitna space hai' got D's numbers misreported
+        and asking 'how much space is on the C drive' got D's numbers misreported
         as C). On Linux/macOS we still report root '/' unless a path is
         explicitly passed.
         """

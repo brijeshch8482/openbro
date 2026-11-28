@@ -175,7 +175,7 @@ class Agent:
             # initial Python prep + intermittent GIL contention can
             # make the REPL keyboard slow during boot. Real captured
             # incident 2026-05-31: even with a 5s delay the user saw
-            # 'typing nahi ho rha' because the load competed with
+            # 'typing is not working' because the load competed with
             # prompt-toolkit's event loop.
             #
             # Default: OFF. Lazy-load on first fallback (no boot
@@ -232,7 +232,7 @@ class Agent:
 
         self.base_system_prompt = config.get("agent", {}).get(
             "system_prompt",
-            "Tu OpenBro hai - ek helpful AI bro. Friendly reh, user ki help kar.",
+            "You are OpenBro, a helpful, professional personal AI agent.",
         )
         self.tool_names = ", ".join(self.tool_registry.active_tools())
         # Whether the current system prompt carries the text tool-call
@@ -419,9 +419,9 @@ class Agent:
 
         Reframed 2026-05-31 from a narrow 'intent type check' to a
         comprehensive set of reasoning principles. Captured user
-        vision: 'no hardcode...sab thinking hoga llm se...jab tak
-        solve nhi hota..agent baat krega..llm se kaise solve krna
-        plan bnega..everthing..plan usi time hoga'.
+        vision: no hard-coding — all reasoning comes from the LLM; the
+        agent keeps working with the LLM until the problem is solved,
+        and the plan is made at that moment.
 
         The agent layer stays minimal; intelligence is the LLM's job
         guided by these principles. No regex orchestration, no
@@ -513,25 +513,25 @@ class Agent:
             " not just until the first plausible answer arrives. On"
             " local model (offline) the iteration cap is large — use"
             " it. The user explicitly asked for unbounded effort on"
-            " local: 'jab tak cheeje solve na ho'.\n"
+            " local: keep going until the problem is solved.\n"
             "\n"
             "### 7. Permission denied → escalate via `elevate`, don't fail silently\n"
             "When a tool (especially `shell`) returns 'Access denied',"
             " 'requires elevation', 'permission denied', or 'cannot"
             " access' for system paths (C:/Windows/Temp, HKLM,"
             " Recycle Bin, system services):\n"
-            "  a. TELL the user briefly what you need (one Hinglish"
-            " line). Example: 'C:\\Windows\\Temp clean karne ke liye"
-            " admin chahiye, UAC prompt aayega.'\n"
+            "  a. TELL the user briefly what you need (one line, in"
+            " the user's language). Example: 'Cleaning C:\\Windows\\Temp"
+            " needs admin rights — a UAC prompt will appear.'\n"
             "  b. CALL `elevate` with the same command (or its"
             " PowerShell equivalent) and a clear `reason` arg. UAC"
             " prompt will appear; user clicks Yes.\n"
             "  c. If `elevate` itself reports UAC denied / timeout,"
-            " THEN tell the user: 'tu admin se OpenBro launch kar'.\n"
+            " THEN tell the user: 'Please restart OpenBro as administrator.'\n"
             "Never silently swallow permission errors and report"
             " partial success — the user expects you to ask for"
             " elevation, not give up. Captured 2026-06-20: user said"
-            " 'agar permission ki jaroorat hai to maangta kyo nhi'.\n"
+            " 'if you need permission, why don't you ask for it?'.\n"
             "\n"
             "### 8. Reply tone — short and professional, not a tutorial\n"
             "After the tools have done the work, the final assistant"
@@ -546,14 +546,14 @@ class Agent:
             "  • No meta-narration: skip 'I am switching to native"
             " PowerShell', 'Let me try a different approach',"
             " 'attempting cleanup now'. Just dispatch the next tool."
-            " Captured 2026-06-20: user said 'isko thoda professional"
-            " reply krne bolo'.\n"
+            " Captured 2026-06-20: user asked for more professional"
+            " replies.\n"
             "  • Never paste the tool's raw command line back at the"
             ' user (`shell.command(command="powershell -Command …")`)'
             " — that's debug output, not a conversation. Tools run;"
             " you summarise the outcome.\n"
-            "  • Failure stays honest: 'Recycle Bin clean nahi hua,"
-            " UAC se permission nahi mili.' One line, no apology"
+            "  • Failure stays honest: 'Recycle Bin was not cleared —"
+            " UAC permission was denied.' One line, no apology"
             " loop, no 'Would you like me to try again?' unless the"
             " next attempt is materially different.\n"
             "\n"

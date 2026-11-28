@@ -105,13 +105,13 @@ voice support inside the terminal flow. There is no separate desktop/browser UI.
 |  OpenBro                              [voice] [settings] |
 +----------------------------------------------------------+
 |                                                          |
-|   You      : Mere desktop pe images organize kar         |
+|   You      : Organize the images on my desktop           |
 |              ────────────────────────────                |
 |   Brain    : • search memory: similar task 3 weeks back  |
 |              • skill match: organize_files               |
 |              • running...                                 |
 |              + 47 images sorted into Images/             |
-|   OpenBro  : Bhai, 47 images move kar di Desktop/Images/ |
+|   OpenBro  : Done — moved 47 images to Desktop/Images/   |
 |                                                          |
 |  ────────────────────────────────────────────────────    |
 |  [🎤]  [Type or speak...                          ] [→] |
@@ -134,15 +134,15 @@ OpenBro is **trusted by default**. The user is the boss; the agent should be cap
 Sandboxing is **opt-in per command**, not always-on:
 
 ```
-You > "Yeh script run kar"               # Trusted - runs directly
-You > "Sandbox me yeh script run kar"    # User asks for sandbox
+You > "Run this script"                 # Trusted - runs directly
+You > "Run this script in a sandbox"    # User asks for sandbox
    → spawned in restricted subprocess
    → no admin, restricted env, network gated
 ```
 
 Or via flag:
 ```
-You > /safe Yeh untrusted code run kar
+You > /safe Run this untrusted code
 ```
 
 Or via Boss mode (already exists):

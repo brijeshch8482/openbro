@@ -90,8 +90,8 @@ class ClaudeProvider(LLMProvider):
         # system prompt (~30 KB) takes ~20 s end-to-end on the
         # subscription tier. subprocess.run() blocked the main
         # thread and the spinner froze; the user thought OpenBro
-        # was stuck and said so twice ("ye stuck ho jata hai…",
-        # "jabaab hi nhi de rha"). Real fix: keep the call but
+        # was stuck and said so twice ("it gets stuck…",
+        # "it isn't answering at all"). Real fix: keep the call but
         # spawn a heartbeat thread that emits a "thinking" event
         # every couple of seconds with elapsed time. The activity
         # bus drives the REPL spinner, so as long as it sees

@@ -74,11 +74,11 @@ def _parse_ddg_html(html: str) -> list[tuple[str, str, str]]:
 
 # ─── Bing search ──────────────────────────────────────────────────────
 #
-# Captured 2026-05-31 user ask: 'agar user ne koi task diya hai...aur
-# use 4-5 website par nhi mila...to self wo khud se decide krna ki
-# task poora krna hai...llm se baat krke..aur phir new other websites
-# par khoje'. The ExpansiveResearchPlaybook orchestrates the rounds;
-# the engine functions below give it more places to look.
+# Captured 2026-05-31 user request: if the answer is not found on the
+# first 4-5 websites, the agent should decide on its own (with the LLM)
+# to finish the task and keep searching other websites. The
+# ExpansiveResearchPlaybook orchestrates the rounds; the engine functions
+# below give it more places to look.
 
 _BING_RESULT_RE = re.compile(
     # Each Bing result lives in <li class="b_algo"> containing:
