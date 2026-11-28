@@ -57,9 +57,9 @@ openai = ["openai>=1.50"]
 telegram = ["python-telegram-bot>=21.0"]
 training = [
     # Heavy ML stack for `openbro train`. NOT installed by default —
-    # only maintainers who run the custom-model fine-tune pipeline
-    # need these. End users who only `openbro model update` need just
-    # `huggingface_hub` which is already in [local].
+    # only maintainers experimenting with the (hidden) fine-tune
+    # pipeline need these. OpenBro itself ships no model; it runs
+    # offline GGUF models or online APIs.
     #
     # CUDA wheels: PyTorch publishes per-CUDA-version wheels at
     # https://download.pytorch.org/whl/cu121 (or cu118). Install via:

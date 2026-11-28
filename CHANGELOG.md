@@ -4,6 +4,7 @@ All notable changes to OpenBro are tracked here.
 
 ## [Unreleased]
 
+- **OpenBro is an agent, not a model.** It runs offline GGUF models or online APIs and ships no model of its own. The unpublished `openbro:1b` catalogue entry and the `openbro.gguf` auto-preference are removed; Llama 3.2 3B stays the recommended offline model. The experimental training pipeline (`openbro train`, `openbro model update`) is kept but hidden from `--help`; `docs/TRAINING.md` and `docs/SPECIALISTS.md` are marked experimental.
 - **Professional English throughout.** The default agent prompt, setup-wizard personalities, visible messages, code comments, README and docs are now in professional English. The agent still replies in the user's language, and Hindi/Hinglish input is still understood. Saved configs with the old Hinglish default prompt are upgraded automatically; custom prompts are kept.
 - **No more tool loops — every provider sends structured tool history.** Gemini, OpenAI, DeepSeek and the local engine dropped the model's own tool calls from the history it was sent, so the model never saw that it had already acted and kept calling the same tool (9 identical image runs in one test); OpenAI and DeepSeek also rejected any 2-step tool task. A shared converter (`openbro/llm/wire.py`) now pairs every call and result by id (ids are made up for calls stored without one); Gemini gets real `functionCall` / `functionResponse` parts with thought signatures kept; local models see their calls as text. DeepSeek raises errors instead of returning them as the reply, so fallback works.
 - **Behaviour:** when a request leaves open what only the user can decide ("make an image" — of what?), the agent asks one short question with suggestions; once the work succeeded it stops and replies with what it made, where, and how to change it. New files go to the folder the user names (missing folders are created) or the current working folder — no longer the Desktop by default (saved prompts migrated).
@@ -36,7 +37,7 @@ All notable changes to OpenBro are tracked here.
 - README rewritten; design docs in `docs/HARNESS.md`, `docs/RAG.md`, `docs/MEMORY.md`.
 - Server-ready storage: transcripts, memories and the document index sit behind a local backend; `storage.backend: remote` is reserved for the upcoming OpenBro server.
 
-## [Unreleased] — Custom model training pipeline
+## [Unreleased] — Custom model training pipeline (experimental, not shipped)
 
 **Headline: `openbro train` builds your own `openbro.gguf` from public web data.**
 

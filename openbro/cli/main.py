@@ -227,7 +227,7 @@ def model_remove(name: str):
     click.echo(f"Removed: {target.name}")
 
 
-@model.command("update")
+@model.command("update", hidden=True)
 @click.option(
     "--repo",
     default="brijeshch8482/openbro-1b-instruct",
@@ -242,9 +242,10 @@ def model_remove(name: str):
 )
 @click.option("--force", is_flag=True, help="Re-download even if local copy already current.")
 def model_update(repo: str, file: str, force: bool):
-    """Pull the latest openbro.gguf from HuggingFace.
+    """Pull the latest openbro.gguf from HuggingFace (experimental, hidden).
 
-    End users run this when they want to refresh OpenBro's custom
+    OpenBro does not ship its own model; this is kept for the experimental
+    training pipeline. End users run this when they want to refresh OpenBro's custom
     model. The maintainer's weekly training cycle publishes a new
     openbro.gguf to the HuggingFace repo; this command downloads it
     and replaces the local copy (backing up the previous version).
@@ -426,7 +427,7 @@ def config_set(key_path: str, value: str):
     click.echo(f"Set {key_path} = {coerced}")
 
 
-# ─── `openbro train` — custom-model training pipeline ────────────────
+# ─── `openbro train` — experimental training pipeline (hidden) ───────
 
 
 def _register_train_command():
@@ -436,6 +437,9 @@ def _register_train_command():
     try:
         from openbro.training.cli import train as train_cmd
 
+        # Experimental maintainer pipeline; OpenBro ships no model of its
+        # own, so the command is kept but hidden from --help.
+        train_cmd.hidden = True
         main.add_command(train_cmd)
     except Exception:
         # Training extras (torch, peft, etc.) optional — if missing,

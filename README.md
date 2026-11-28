@@ -353,6 +353,8 @@ hooks:
 
 ## Models
 
+OpenBro is the agent, not a model: it runs on an offline model on your computer or on an online API you choose, and you can switch at any time with `/model`.
+
 | Provider | Cost | Setup |
 |---|---|---|
 | **Local (offline)** | free | the wizard downloads a model; runs in-process |
@@ -379,7 +381,6 @@ Set a fallback so a failed call retries on another model: `openbro config set ll
 
 **Coding CLIs** — "ask the coding CLI to add a test for X": `cli_agent` drives a coding CLI installed on your machine, streams its progress, and enforces a per-call and daily cost cap (`safety.cli_agent`).
 
-**Your own model** — `openbro train` (maintainers) builds a small fine-tuned `openbro.gguf`; `openbro model update` pulls the latest. See [docs/TRAINING.md](docs/TRAINING.md).
 
 ---
 
@@ -458,7 +459,7 @@ openbro/
   llm/           model providers and fallback
   cli/           chat, wizard, doctor / update / uninstall
   voice/ channels/ skills/ mcp/ orchestration/ training/
-docs/            HARNESS.md · RAG.md · MEMORY.md · ARCHITECTURE.md · TRAINING.md
+docs/            HARNESS.md · RAG.md · MEMORY.md · ARCHITECTURE.md · DEPLOY.md
 scripts/         installers and uninstallers
 tests/
 ```
